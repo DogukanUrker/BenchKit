@@ -27,7 +27,7 @@ def unload_model(host: str, model: str) -> None:
     )
 
 
-def generate(host: str, model: str, prompt: str, timeout: float = 300.0) -> dict:
+def generate(host: str, model: str, prompt: str) -> dict:
     r = httpx.post(
         f"{host}/api/generate",
         json={
@@ -36,22 +36,43 @@ def generate(host: str, model: str, prompt: str, timeout: float = 300.0) -> dict
             "stream": False,
             "options": {
                 "temperature": 0.0,
-                "num_predict": 1024,
                 "stop": ["\ndef ", "\nclass ", "\nif __name__"],
             },
         },
-        timeout=timeout,
+        timeout=None,
     )
     r.raise_for_status()
     data = r.json()
 
+    response = data.get("response", "")
+    thinking = data.get("thinking", "")
+    done_reason = data.get("done_reason", "")
+
+    # Fallback for reasoning models that leave response empty (e.g. stuck in a
+    # think loop and truncated). Strip <think> tags from the thinking field and
+    # use whatever remains — downstream _extract_code will do the rest.
+    if not response.strip() and thinking:
+        text = thinking
+        if "<think>" in text:
+            start = text.index("<think>")
+            if "</think>" in text:
+                end = text.index("</think>") + len("</think>")
+                text = text[:start] + text[end:]
+            else:
+                text = text[:start]
+        response = text.strip()
+
     eval_count = data.get("eval_count", 0)
     eval_duration_ns = data.get("eval_duration", 0)
+    total_duration_ns = data.get("total_duration", 0)
     tok_s = eval_count / (eval_duration_ns / 1e9) if eval_duration_ns > 0 else 0.0
+    response_time_s = total_duration_ns / 1e9
 
     return {
-        "response": data.get("response", ""),
+        "response": response,
         "tok_s": tok_s,
         "eval_count": eval_count,
         "eval_duration_ns": eval_duration_ns,
+        "response_time_s": response_time_s,
+        "done_reason": done_reason,
     }

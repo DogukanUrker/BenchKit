@@ -14,6 +14,13 @@ from benchkit.runner import run
 console = Console()
 
 
+def _fmt_time(s: float) -> str:
+    s = int(round(s))
+    if s >= 60:
+        return f"{s // 60}m {s % 60}s"
+    return f"{s}s"
+
+
 def _pick(
     prompt: str, options: list[str], descriptions: list[str] | None = None
 ) -> list[int]:
@@ -94,6 +101,8 @@ def main() -> None:
     table.add_column("Score", justify="right", style="green")
     table.add_column("Passed", justify="right")
     table.add_column("tok/s", justify="right", style="yellow")
+    table.add_column("Avg Resp", justify="right", style="yellow")
+    table.add_column("Total Time", justify="right")
 
     for r in results:
         table.add_row(
@@ -102,6 +111,8 @@ def main() -> None:
             f"{r['score']}%",
             f"{r['passed']}/{r['total']}",
             str(r["tok_s"]),
+            f"{r['avg_response_time']}s",
+            _fmt_time(r["total_time"]),
         )
 
     console.print(table)

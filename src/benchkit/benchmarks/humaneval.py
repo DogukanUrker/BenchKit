@@ -19,6 +19,16 @@ def _extract_code(response: str) -> str:
     """Strip markdown fences if the model wrapped its output."""
     text = response.rstrip()
 
+    # Strip <think>...</think> blocks (reasoning models like DeepSeek-R1)
+    if "<think>" in text:
+        start = text.index("<think>")
+        if "</think>" in text:
+            end = text.index("</think>") + len("</think>")
+            text = text[:start] + text[end:]
+        else:
+            text = text[:start]
+        text = text.rstrip()
+
     if "```python" in text:
         text = text.split("```python", 1)[1].split("```", 1)[0]
     elif "```" in text:
