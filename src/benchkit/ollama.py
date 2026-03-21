@@ -18,6 +18,15 @@ def list_models(host: str) -> list[dict]:
     return sorted(models, key=lambda m: m.get("size", 0))
 
 
+def unload_model(host: str, model: str) -> None:
+    """Evict model from Ollama VRAM by setting keep_alive to 0."""
+    httpx.post(
+        f"{host}/api/generate",
+        json={"model": model, "keep_alive": 0},
+        timeout=30,
+    )
+
+
 def generate(host: str, model: str, prompt: str, timeout: float = 300.0) -> dict:
     r = httpx.post(
         f"{host}/api/generate",

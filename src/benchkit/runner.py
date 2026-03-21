@@ -3,7 +3,7 @@
 from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
 
-from benchkit.ollama import generate
+from benchkit.ollama import generate, unload_model
 
 
 def run(
@@ -74,5 +74,8 @@ def run(
             console.print(
                 f"  ✅ {passed}/{len(tasks)} ({score:.1f}%) | {tok_s:.1f} tok/s"
             )
+
+        if len(models) > 1:
+            unload_model(host, model)
 
     return results
