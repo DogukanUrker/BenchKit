@@ -1,4 +1,4 @@
-# 🔧 BenchKit
+# BenchKit
 
 Benchmark your local LLMs with real evaluation suites. Not vibes — actual scores.
 
