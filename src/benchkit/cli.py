@@ -3,15 +3,17 @@
 import sys
 
 from dotenv import load_dotenv
+from rich import box
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from benchkit.benchmarks import REGISTRY
 from benchkit.ollama import get_host, list_models
 from benchkit.report import save
 from benchkit.runner import run
 
-console = Console()
+console = Console(highlight=False)
 
 
 def _fmt_time(s: float) -> str:
@@ -21,18 +23,48 @@ def _fmt_time(s: float) -> str:
     return f"{s}s"
 
 
+def _section(title: str, subtitle: str | None = None) -> None:
+    console.print()
+    console.print(title)
+    if subtitle:
+        console.print(f"[dim]{subtitle}[/dim]")
+
+
+def _options_table(options: list[str], descriptions: list[str] | None = None) -> Table:
+    table = Table.grid(padding=(0, 2))
+    table.add_column(justify="right", style="dim", no_wrap=True)
+    table.add_column(style="white")
+
+    if descriptions:
+        table.add_column(style="dim")
+
+    table.add_row("0.", "All", *([] if not descriptions else [""]))
+    for i, opt in enumerate(options, 1):
+        if descriptions:
+            table.add_row(f"{i}.", opt, descriptions[i - 1])
+        else:
+            table.add_row(f"{i}.", opt)
+
+    return table
+
+
+def _score_text(score: float) -> Text:
+    if score >= 80:
+        style = "bold green"
+    elif score < 50:
+        style = "bold red"
+    else:
+        style = "bold"
+    return Text(f"{score:.1f}%", style=style)
+
+
 def _pick(
     prompt: str, options: list[str], descriptions: list[str] | None = None
 ) -> list[int]:
     """Prompt user to pick one or more options. Returns selected indices."""
-    console.print("  [bold cyan]0.[/bold cyan] All", highlight=False)
-    for i, opt in enumerate(options, 1):
-        desc = f"  ({descriptions[i - 1]})" if descriptions else ""
-        console.print(
-            f"  [bold cyan]{i}.[/bold cyan] [white]{opt}[/white]{desc}", highlight=False
-        )
-
-    raw = console.input(f"\n{prompt} (comma-separated): ").strip()
+    console.print(_options_table(options, descriptions))
+    console.print("[dim]Comma-separated. Use 0 to select all.[/dim]")
+    raw = console.input(f"{prompt}: ").strip()
     indices = []
     for part in raw.split(","):
         part = part.strip()
@@ -52,16 +84,9 @@ def _pick_benchmarks(
     Returns list of (zero-based index, slice_spec) tuples where slice_spec
     is None (all tasks) or a string like "10", "-10", "5-15".
     """
-    console.print("  [bold cyan]0.[/bold cyan] All", highlight=False)
-    for i, opt in enumerate(options, 1):
-        desc = f"  ({descriptions[i - 1]})" if descriptions else ""
-        console.print(
-            f"  [bold cyan]{i}.[/bold cyan] [white]{opt}[/white]{desc}", highlight=False
-        )
-
-    raw = console.input(
-        "\nSelect benchmarks (comma-separated, e.g. 1,2:10,3:-5): "
-    ).strip()
+    console.print(_options_table(options, descriptions))
+    console.print("[dim]Examples: 1,2:10,3:-5,4:5-15[/dim]")
+    raw = console.input("Select benchmarks: ").strip()
 
     picked: list[tuple[int, str | None]] = []
     for part in raw.split(","):
@@ -90,38 +115,44 @@ def main() -> None:
     load_dotenv()
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
 
-    console.print("\n[bold blue]BenchKit[/bold blue] - Benchmark your local LLMs\n")
+    console.print()
+    console.print("[bold]BenchKit[/bold]")
+    console.print("[dim]Benchmark your local LLMs[/dim]")
 
     # Connect to Ollama
     host = get_host()
-    console.print(f"Connecting to [cyan]{host}[/cyan]")
+    _section("Session")
+    console.print(f"[dim]Host  {host}[/dim]")
+    if verbose:
+        console.print("[dim]Verbose output enabled[/dim]")
 
     try:
         models = list_models(host)
     except Exception as e:
-        console.print(f"[red]✗ Cannot reach Ollama at {host}[/red]")
-        console.print(f"  {e}")
-        console.print("\n  Set OLLAMA_HOST or start Ollama first.")
+        console.print("[red]Connection failed[/red]")
+        console.print(f"[dim]{e}[/dim]")
+        console.print("[dim]Set OLLAMA_HOST or start Ollama first.[/dim]")
         sys.exit(1)
 
     if not models:
-        console.print("[red]No models found. Pull some models first.[/red]")
+        console.print("[red]No models found[/red]")
+        console.print("[dim]Pull a model in Ollama first.[/dim]")
         sys.exit(1)
 
     # Model selection
-    console.print(f"\n[green]✓[/green] Found {len(models)} model(s)\n")
+    console.print(f"[dim]{len(models)} model(s) available[/dim]")
+    _section("Models")
     model_names = [m["name"] for m in models]
-    model_sizes = [
-        f"[cyan]{m.get('size', 0) / (1024**3):.1f}[/cyan] GB" for m in models
-    ]
+    model_sizes = [f"{m.get('size', 0) / (1024**3):.1f} GB" for m in models]
     picked = _pick("Select models", model_names, model_sizes)
     if not picked:
-        console.print("[red]No models selected.[/red]")
+        console.print("[red]No models selected[/red]")
         sys.exit(1)
     selected_models = [model_names[i] for i in picked]
+    console.print(f"[dim]Selected {len(selected_models)} model(s)[/dim]")
 
     # Benchmark selection
-    console.print()
+    _section("Benchmarks")
     bench_names = list(REGISTRY.keys())
     bench_descs = []
     for name in bench_names:
@@ -129,31 +160,39 @@ def main() -> None:
         bench_descs.append(f"{len(b.load_tasks())} tasks")
     picked = _pick_benchmarks(bench_names, bench_descs)
     if not picked:
-        console.print("[red]No benchmarks selected.[/red]")
+        console.print("[red]No benchmarks selected[/red]")
         sys.exit(1)
     selected_benchmarks = [
         (REGISTRY[bench_names[i]](), slice_spec) for i, slice_spec in picked
     ]
+    console.print(f"[dim]Selected {len(selected_benchmarks)} benchmark run(s)[/dim]")
 
     # Run
+    _section("Run")
     results = run(host, selected_models, selected_benchmarks, console, verbose)
 
     # Summary table
-    console.print()
-    table = Table(title="Results")
-    table.add_column("Model", style="cyan")
+    _section("Results")
+    table = Table(
+        box=box.MINIMAL,
+        border_style="dim",
+        header_style="bold",
+        pad_edge=False,
+        padding=(0, 1),
+    )
+    table.add_column("Model", style="white")
     table.add_column("Benchmark")
-    table.add_column("Score", justify="right", style="green")
+    table.add_column("Score", justify="right")
     table.add_column("Passed", justify="right")
-    table.add_column("tok/s", justify="right", style="yellow")
-    table.add_column("Avg Resp", justify="right", style="yellow")
-    table.add_column("Total Time", justify="right")
+    table.add_column("tok/s", justify="right", style="dim")
+    table.add_column("Avg Time", justify="right", style="dim")
+    table.add_column("Total", justify="right", style="dim")
 
     for r in results:
         table.add_row(
             r["model"],
             r["benchmark"],
-            f"{r['score']}%",
+            _score_text(r["score"]),
             f"{r['passed']}/{r['total']}",
             str(r["tok_s"]),
             f"{r['avg_response_time']}s",
@@ -164,7 +203,7 @@ def main() -> None:
 
     # Save
     out = save(results)
-    console.print(f"\n📁 Results saved to [cyan]{out}[/cyan]")
+    console.print(f"[dim]Saved:[/dim] [white]{out}[/white]")
 
 
 if __name__ == "__main__":

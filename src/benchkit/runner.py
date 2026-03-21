@@ -3,7 +3,12 @@
 import time
 
 from rich.console import Console
-from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TimeElapsedColumn,
+)
 
 from benchkit.ollama import generate, unload_model
 
@@ -13,6 +18,20 @@ def _fmt_time(s: float) -> str:
     if s >= 60:
         return f"{s // 60}m {s % 60}s"
     return f"{s}s"
+
+
+def _score_style(score: float) -> str:
+    if score >= 80:
+        return "green"
+    if score < 50:
+        return "red"
+    return "white"
+
+
+def _task_label(total: int, overall: int, slice_spec: str | None) -> str:
+    if slice_spec is None:
+        return f"{total} tasks"
+    return f"{total}/{overall} tasks · slice {slice_spec}"
 
 
 def _apply_slice(tasks: list, spec: str | None) -> list:
@@ -51,21 +70,19 @@ def run(
                 tasks = _apply_slice(all_tasks, slice_spec)
             except ValueError:
                 console.print(
-                    f"[yellow]⚠ Invalid slice '{slice_spec}', running all tasks.[/yellow]"
+                    f"[yellow]Invalid slice[/yellow] [white]{slice_spec}[/white] "
+                    f"[dim]Running all tasks instead.[/dim]"
                 )
                 tasks = all_tasks
                 slice_spec = None
 
-            if slice_spec is not None:
-                console.print(
-                    f"\n⏳ Running [bold]{bench.name}[/bold] on [cyan]{model}[/cyan] "
-                    f"({len(tasks)}/{len(all_tasks)} tasks)"
-                )
-            else:
-                console.print(
-                    f"\n⏳ Running [bold]{bench.name}[/bold] on [cyan]{model}[/cyan] "
-                    f"({len(tasks)} tasks)"
-                )
+            console.print()
+            console.print(
+                f"[bold]{bench.name}[/bold] [dim]on[/dim] [white]{model}[/white]"
+            )
+            console.print(
+                f"[dim]{_task_label(len(tasks), len(all_tasks), slice_spec)}[/dim]"
+            )
 
             passed = 0
             total_tokens = 0
@@ -76,12 +93,19 @@ def run(
             wall_start = time.time()
 
             with Progress(
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
+                BarColumn(
+                    bar_width=None,
+                    style="bright_black",
+                    complete_style="white",
+                    finished_style="white",
+                    pulse_style="bright_black",
+                ),
                 MofNCompleteColumn(),
+                TimeElapsedColumn(),
                 console=console,
+                expand=True,
             ) as progress:
-                bar = progress.add_task("Evaluating", total=len(tasks))
+                bar = progress.add_task("", total=len(tasks))
 
                 for task in tasks:
                     prompt = bench.build_prompt(task)
@@ -94,11 +118,15 @@ def run(
                     if verbose:
                         entry = task.metadata.get("entry_point")
                         label = f"{task.id} ({entry})" if entry else task.id
-                        status = "[green]PASS[/green]" if ok else "[red]FAIL[/red]"
-                        console.rule(f"[bold]{label}[/bold] ── {status}")
-                        console.print("PROMPT:", highlight=False)
+                        status = (
+                            "[bold green]PASS[/bold green]"
+                            if ok
+                            else "[bold red]FAIL[/bold red]"
+                        )
+                        console.print(f"[bold]{label}[/bold] [dim]·[/dim] {status}")
+                        console.print("[dim]Prompt[/dim]", highlight=False)
                         console.print(prompt, markup=False, highlight=False)
-                        console.print("\nRESPONSE:", highlight=False)
+                        console.print("[dim]Response[/dim]", highlight=False)
                         console.print(gen["response"], markup=False, highlight=False)
                         console.print()
 
@@ -124,6 +152,7 @@ def run(
             n = len(tasks)
             score = passed / n * 100 if n > 0 else 0.0
             avg_response_time = round(total_response_time / n, 1) if n > 0 else 0.0
+            score_style = _score_style(score)
 
             results.append(
                 {
@@ -141,8 +170,11 @@ def run(
             )
 
             console.print(
-                f"  ✅ {passed}/{n} ({score:.1f}%) | "
-                f"{tok_s:.1f} tok/s | {_fmt_time(total_time)}"
+                f"[dim]Finished[/dim] "
+                f"[bold]{bench.name}[/bold] [dim]on[/dim] "
+                f"[white]{model}[/white]  "
+                f"[bold {score_style}]{score:.1f}%[/bold {score_style}] "
+                f"[dim]{passed}/{n} · {tok_s:.1f} tok/s · {_fmt_time(total_time)}[/dim]"
             )
 
         if len(models) > 1:
