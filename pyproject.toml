@@ -1,0 +1,26 @@
+[project]
+name = "benchkit"
+version = "0.1.0"
+description = "Benchmark your local LLMs with real eval suites"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "httpx>=0.28.1",
+    "rich>=14.3.3",
+    "python-dotenv>=1.2.2",
+]
+
+[project.scripts]
+benchkit = "benchkit.cli:main"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["benchkit*"]
+
+[tool.setuptools.package-data]
+benchkit = ["datasets/*.jsonl"]
