@@ -76,4 +76,4 @@ Then add it to `REGISTRY` in `benchmarks/__init__.py`. Done.
 
 ## License
 
-MIT
+Apache License 2.0
