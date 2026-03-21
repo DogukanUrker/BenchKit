@@ -112,6 +112,8 @@ def run(
                             "passed": ok,
                             "tok_s": gen["tok_s"],
                             "response_time_s": gen["response_time_s"],
+                            "prompt": prompt,
+                            "response": gen["response"],
                         }
                     )
 

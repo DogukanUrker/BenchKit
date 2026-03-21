@@ -49,4 +49,20 @@ def save(results: list[dict]) -> Path:
                 f"| {_fmt_time(r['total_time'])} |\n"
             )
 
+        # Per-task detail section
+        f.write("\n---\n\n")
+        for r in results:
+            f.write(f"## {r['model']} / {r['benchmark']}\n\n")
+            for td in r["tasks"]:
+                task_id = td["task_id"]
+                entry = td.get("entry_point")
+                label = f"{task_id} ({entry})" if entry else task_id
+                status = "✅ PASS" if td["passed"] else "❌ FAIL"
+                f.write(f"### {label} — {status}\n\n")
+                f.write("**Prompt:**\n\n")
+                f.write(f"~~~\n{td['prompt'].rstrip()}\n~~~\n\n")
+                f.write("**Response:**\n\n")
+                f.write(f"~~~\n{td['response'].rstrip()}\n~~~\n\n")
+                f.write("---\n\n")
+
     return out
