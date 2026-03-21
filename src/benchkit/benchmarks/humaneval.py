@@ -1,4 +1,4 @@
-"""HumanEval benchmark — 164 code generation tasks, scored by pass@1."""
+"""HumanEval benchmark - 164 code generation tasks, scored by pass@1."""
 
 import json
 from pathlib import Path
@@ -43,14 +43,16 @@ class HumanEval:
         with open(DATASET) as f:
             for line in f:
                 d = json.loads(line)
-                tasks.append(Task(
-                    id=d["task_id"],
-                    prompt=d["prompt"],
-                    metadata={
-                        "test": d["test"],
-                        "entry_point": d["entry_point"],
-                    },
-                ))
+                tasks.append(
+                    Task(
+                        id=d["task_id"],
+                        prompt=d["prompt"],
+                        metadata={
+                            "test": d["test"],
+                            "entry_point": d["entry_point"],
+                        },
+                    )
+                )
         return tasks
 
     def build_prompt(self, task: Task) -> str:
@@ -61,10 +63,11 @@ class HumanEval:
         entry = task.metadata["entry_point"]
 
         if f"def {entry}" in code:
-            # Model gave full function — prepend any imports from the prompt
+            # Model gave full function - prepend any imports from the prompt
             imports = [
-                l for l in task.prompt.split("\n")
-                if l.startswith(("import ", "from "))
+                line
+                for line in task.prompt.split("\n")
+                if line.startswith(("import ", "from "))
             ]
             fn_code = "\n".join(imports) + "\n\n" + code if imports else code
         else:

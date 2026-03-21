@@ -6,8 +6,15 @@ import tempfile
 from pathlib import Path
 
 BLOCKED_MODULES = {
-    "subprocess", "shutil", "socket", "http", "urllib",
-    "requests", "signal", "ctypes", "multiprocessing",
+    "subprocess",
+    "shutil",
+    "socket",
+    "http",
+    "urllib",
+    "requests",
+    "signal",
+    "ctypes",
+    "multiprocessing",
 }
 
 SANDBOX_HEADER = """
@@ -28,9 +35,7 @@ def execute(code: str, timeout: int = 10) -> bool:
     """Run code in a subprocess. Returns True if exit code is 0."""
     full = SANDBOX_HEADER + "\n" + code
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(full)
         path = Path(f.name)
 

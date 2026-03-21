@@ -1,4 +1,4 @@
-"""BenchKit CLI — interactive benchmark runner."""
+"""BenchKit CLI - interactive benchmark runner."""
 
 import sys
 
@@ -14,16 +14,23 @@ from benchkit.runner import run
 console = Console()
 
 
-def _pick(prompt: str, options: list[str], descriptions: list[str] | None = None) -> list[int]:
+def _pick(
+    prompt: str, options: list[str], descriptions: list[str] | None = None
+) -> list[int]:
     """Prompt user to pick one or more options. Returns selected indices."""
+    console.print("  [bold cyan]0.[/bold cyan] All", highlight=False)
     for i, opt in enumerate(options, 1):
         desc = f"  ({descriptions[i - 1]})" if descriptions else ""
-        console.print(f"  [bold]{i}.[/bold] {opt}{desc}")
+        console.print(
+            f"  [bold cyan]{i}.[/bold cyan] [white]{opt}[/white]{desc}", highlight=False
+        )
 
     raw = console.input(f"\n{prompt} (comma-separated): ").strip()
     indices = []
     for part in raw.split(","):
         part = part.strip()
+        if part == "0":
+            return list(range(len(options)))
         if part.isdigit() and 1 <= int(part) <= len(options):
             indices.append(int(part) - 1)
 
@@ -33,11 +40,11 @@ def _pick(prompt: str, options: list[str], descriptions: list[str] | None = None
 def main() -> None:
     load_dotenv()
 
-    console.print("\n[bold blue]🔧 BenchKit[/bold blue] — Benchmark your local LLMs\n")
+    console.print("\n[bold blue]BenchKit[/bold blue] - Benchmark your local LLMs\n")
 
     # Connect to Ollama
     host = get_host()
-    console.print(f"Connecting to [cyan]{host}[/cyan]...")
+    console.print(f"Connecting to [cyan]{host}[/cyan]")
 
     try:
         models = list_models(host)
@@ -54,7 +61,9 @@ def main() -> None:
     # Model selection
     console.print(f"\n[green]✓[/green] Found {len(models)} model(s)\n")
     model_names = [m["name"] for m in models]
-    model_sizes = [f"{m.get('size', 0) / (1024**3):.1f} GB" for m in models]
+    model_sizes = [
+        f"[cyan]{m.get('size', 0) / (1024**3):.1f}[/cyan] GB" for m in models
+    ]
     picked = _pick("Select models", model_names, model_sizes)
     if not picked:
         console.print("[red]No models selected.[/red]")

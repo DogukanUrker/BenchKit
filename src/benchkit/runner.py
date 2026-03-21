@@ -46,28 +46,30 @@ def run(
                     total_tokens += gen["eval_count"]
                     total_eval_ns += gen["eval_duration_ns"]
 
-                    task_details.append({
-                        "task_id": task.id,
-                        "passed": ok,
-                        "tok_s": gen["tok_s"],
-                    })
+                    task_details.append(
+                        {
+                            "task_id": task.id,
+                            "passed": ok,
+                            "tok_s": gen["tok_s"],
+                        }
+                    )
 
                     progress.advance(bar)
 
-            tok_s = (
-                total_tokens / (total_eval_ns / 1e9) if total_eval_ns > 0 else 0.0
-            )
+            tok_s = total_tokens / (total_eval_ns / 1e9) if total_eval_ns > 0 else 0.0
             score = passed / len(tasks) * 100
 
-            results.append({
-                "model": model,
-                "benchmark": bench.name,
-                "score": round(score, 1),
-                "passed": passed,
-                "total": len(tasks),
-                "tok_s": round(tok_s, 1),
-                "tasks": task_details,
-            })
+            results.append(
+                {
+                    "model": model,
+                    "benchmark": bench.name,
+                    "score": round(score, 1),
+                    "passed": passed,
+                    "total": len(tasks),
+                    "tok_s": round(tok_s, 1),
+                    "tasks": task_details,
+                }
+            )
 
             console.print(
                 f"  ✅ {passed}/{len(tasks)} ({score:.1f}%) | {tok_s:.1f} tok/s"
