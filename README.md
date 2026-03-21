@@ -1,6 +1,6 @@
 # BenchKit
 
-Benchmark your local LLMs with real evaluation suites. Not vibes — actual scores.
+Benchmark your local LLMs with real evaluation suites. Not vibes - actual scores.
 
 ## Install
 
