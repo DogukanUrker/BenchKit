@@ -74,6 +74,29 @@ class MyBenchmark:
 
 Then add it to `REGISTRY` in `benchmarks/__init__.py`. Done.
 
+## Example Run
+
+| Model           | Benchmark | Score | Passed | Total | tok/s |
+| --------------- | --------- | ----- | ------ | ----- | ----- |
+| gemma3:270m     | humaneval | 11.6% | 19     | 164   | 404.0 |
+| gemma3:1b       | humaneval | 29.9% | 49     | 164   | 217.0 |
+| qwen3.5:0.8b    | humaneval | 0.0%  | 0      | 164   | 176.3 |
+| llama3.2:1b     | humaneval | 26.2% | 43     | 164   | 223.3 |
+| qwen3:1.7b      | humaneval | 0.0%  | 0      | 164   | 188.3 |
+| llama3.2:3b     | humaneval | 42.7% | 70     | 164   | 135.1 |
+| phi4-mini:3.8b  | humaneval | 49.4% | 81     | 164   | 113.9 |
+| qwen3.5:2b      | humaneval | 0.0%  | 0      | 164   | 109.6 |
+| ministral-3:3b  | humaneval | 50.0% | 82     | 164   | 124.2 |
+| gemma3:4b       | humaneval | 28.0% | 46     | 164   | 98.2  |
+| qwen3.5:4b      | humaneval | 0.0%  | 0      | 164   | 68.3  |
+| qwen2.5:7b      | humaneval | 20.7% | 34     | 164   | 73.4  |
+| qwen3:8b        | humaneval | 5.5%  | 9      | 164   | 59.7  |
+| ministral-3:8b  | humaneval | 68.9% | 113    | 164   | 60.6  |
+| qwen3.5:9b      | humaneval | 1.8%  | 3      | 164   | 47.3  |
+| gemma3:12b      | humaneval | 81.1% | 133    | 164   | 39.6  |
+| ministral-3:14b | humaneval | 78.7% | 129    | 164   | 38.7  |
+| gpt-oss:20b     | humaneval | 53.0% | 87     | 164   | 27.7  |
+
 ## License
 
 Apache License 2.0
