@@ -14,6 +14,12 @@ uv sync
 uv run benchkit
 ```
 
+To see raw prompts and model responses for every task (useful for debugging failures):
+
+```bash
+uv run benchkit --verbose
+```
+
 That's it. BenchKit will:
 
 1. Connect to your Ollama instance
@@ -42,9 +48,15 @@ OLLAMA_HOST=http://my-server:11434 uv run benchkit
 
 ## Benchmarks
 
-| Benchmark | Tasks | What it tests            |
-| --------- | ----- | ------------------------ |
-| HumanEval | 164   | Code generation (pass@1) |
+| Benchmark  | Tasks | What it tests                    |
+| ---------- | ----- | -------------------------------- |
+| QuickBench | 20    | Fast code-generation smoke test  |
+| HumanEval  | 164   | Code generation (pass@1)         |
+| MBPP       | 500   | Python programming tasks         |
+| GSM8K      | 1319  | Math reasoning with answer parse |
+| ARC        | 1172  | Science multiple choice QA       |
+| TruthfulQA | 817   | Truthfulness multiple choice QA  |
+| HellaSwag  | 1000  | Commonsense sentence completion  |
 
 More coming soon.
 

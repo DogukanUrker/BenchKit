@@ -34,10 +34,7 @@ def generate(host: str, model: str, prompt: str) -> dict:
             "model": model,
             "prompt": prompt,
             "stream": False,
-            "options": {
-                "temperature": 0.0,
-                "stop": ["\ndef ", "\nclass ", "\nif __name__"],
-            },
+            "options": {"temperature": 0.0},
         },
         timeout=None,
     )
@@ -45,22 +42,7 @@ def generate(host: str, model: str, prompt: str) -> dict:
     data = r.json()
 
     response = data.get("response", "")
-    thinking = data.get("thinking", "")
     done_reason = data.get("done_reason", "")
-
-    # Fallback for reasoning models that leave response empty (e.g. stuck in a
-    # think loop and truncated). Strip <think> tags from the thinking field and
-    # use whatever remains — downstream _extract_code will do the rest.
-    if not response.strip() and thinking:
-        text = thinking
-        if "<think>" in text:
-            start = text.index("<think>")
-            if "</think>" in text:
-                end = text.index("</think>") + len("</think>")
-                text = text[:start] + text[end:]
-            else:
-                text = text[:start]
-        response = text.strip()
 
     eval_count = data.get("eval_count", 0)
     eval_duration_ns = data.get("eval_duration", 0)

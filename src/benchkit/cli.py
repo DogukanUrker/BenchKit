@@ -44,8 +44,51 @@ def _pick(
     return indices
 
 
+def _pick_benchmarks(
+    options: list[str], descriptions: list[str] | None = None
+) -> list[tuple[int, str | None]]:
+    """Prompt user to pick benchmarks with optional slice specs.
+
+    Returns list of (zero-based index, slice_spec) tuples where slice_spec
+    is None (all tasks) or a string like "10", "-10", "5-15".
+    """
+    console.print("  [bold cyan]0.[/bold cyan] All", highlight=False)
+    for i, opt in enumerate(options, 1):
+        desc = f"  ({descriptions[i - 1]})" if descriptions else ""
+        console.print(
+            f"  [bold cyan]{i}.[/bold cyan] [white]{opt}[/white]{desc}", highlight=False
+        )
+
+    raw = console.input(
+        "\nSelect benchmarks (comma-separated, e.g. 1,2:10,3:-5): "
+    ).strip()
+
+    picked: list[tuple[int, str | None]] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+
+        if ":" in part:
+            num_str, slice_spec = part.split(":", 1)
+            num_str = num_str.strip()
+            slice_spec = slice_spec.strip() or None
+        else:
+            num_str = part
+            slice_spec = None
+
+        if num_str == "0":
+            return [(i, None) for i in range(len(options))]
+
+        if num_str.isdigit() and 1 <= int(num_str) <= len(options):
+            picked.append((int(num_str) - 1, slice_spec))
+
+    return picked
+
+
 def main() -> None:
     load_dotenv()
+    verbose = "--verbose" in sys.argv or "-v" in sys.argv
 
     console.print("\n[bold blue]BenchKit[/bold blue] - Benchmark your local LLMs\n")
 
@@ -84,14 +127,16 @@ def main() -> None:
     for name in bench_names:
         b = REGISTRY[name]()
         bench_descs.append(f"{len(b.load_tasks())} tasks")
-    picked = _pick("Select benchmarks", bench_names, bench_descs)
+    picked = _pick_benchmarks(bench_names, bench_descs)
     if not picked:
         console.print("[red]No benchmarks selected.[/red]")
         sys.exit(1)
-    selected_benchmarks = [REGISTRY[bench_names[i]]() for i in picked]
+    selected_benchmarks = [
+        (REGISTRY[bench_names[i]](), slice_spec) for i, slice_spec in picked
+    ]
 
     # Run
-    results = run(host, selected_models, selected_benchmarks, console)
+    results = run(host, selected_models, selected_benchmarks, console, verbose)
 
     # Summary table
     console.print()

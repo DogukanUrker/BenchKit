@@ -182,3 +182,4 @@ cython_debug/
 *.lock
 tests/validate_gemini.py
 /results
+/tests

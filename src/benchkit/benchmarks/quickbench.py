@@ -1,4 +1,4 @@
-"""HumanEval benchmark - 164 code generation tasks, scored by pass@1."""
+"""QuickBench benchmark - 20 fast code generation smoke-test tasks."""
 
 import json
 from pathlib import Path
@@ -7,7 +7,7 @@ from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.utils import strip_think_tags
 from benchkit.executor import execute
 
-DATASET = Path(__file__).parent.parent / "datasets" / "humaneval.jsonl"
+DATASET = Path(__file__).parent.parent / "datasets" / "quickbench.jsonl"
 
 SYSTEM = (
     "Complete the following Python function. "
@@ -35,8 +35,8 @@ def _extract_code(response: str) -> str:
     return text
 
 
-class HumanEval:
-    name = "humaneval"
+class QuickBench:
+    name = "quickbench"
 
     def load_tasks(self) -> list[Task]:
         tasks = []
@@ -63,7 +63,6 @@ class HumanEval:
         entry = task.metadata["entry_point"]
 
         if f"def {entry}" in code:
-            # Model gave full function - prepend any imports from the prompt
             imports = [
                 line
                 for line in task.prompt.split("\n")
