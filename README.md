@@ -46,7 +46,7 @@ Or point to a remote Ollama instance:
 OLLAMA_HOST=http://my-server:11434 uv run benchkit
 ```
 
-## Benchmarks
+## Leaderboard
 
 | Benchmark  | Tasks | What it tests                    |
 | ---------- | ----- | -------------------------------- |
