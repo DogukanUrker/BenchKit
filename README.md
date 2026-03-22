@@ -46,7 +46,7 @@ Or point to a remote Ollama instance:
 OLLAMA_HOST=http://my-server:11434 uv run benchkit
 ```
 
-## Leaderboard
+## Benchmarks
 
 | Benchmark  | Tasks | What it tests                    |
 | ---------- | ----- | -------------------------------- |
@@ -86,7 +86,7 @@ class MyBenchmark:
 
 Then add it to `REGISTRY` in `benchmarks/__init__.py`. Done.
 
-## Example Run
+## Leaderboard
 
 | Model           | Benchmark | Score | Passed | Total | tok/s |
 | --------------- | --------- | ----- | ------ | ----- | ----- |
