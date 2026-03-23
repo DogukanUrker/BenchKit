@@ -109,6 +109,9 @@ Then add it to `REGISTRY` in `benchmarks/__init__.py`. Done.
 | ministral-3:14b | humaneval | 78.7% | 129    | 164   | 38.7  |
 | gpt-oss:20b     | humaneval | 53.0% | 87     | 164   | 27.7  |
 
+> [!NOTE]
+> Qwen3/3.5 models frequently fail to exit thinking mode on complex tasks, producing correct reasoning internally but no parseable output. Scores reflect real-world usability, not theoretical capability.
+
 ## License
 
 Apache License 2.0
