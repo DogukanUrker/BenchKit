@@ -109,7 +109,20 @@ def run(
 
                 for task in tasks:
                     prompt = bench.build_prompt(task)
-                    gen = generate(host, model, prompt)
+                    try:
+                        gen = generate(host, model, prompt)
+                    except Exception as e:
+                        console.print(
+                            f"\n  [yellow]⚠ {task.id}: {type(e).__name__}: {e}[/yellow]"
+                        )
+                        gen = {
+                            "response": "",
+                            "tok_s": 0.0,
+                            "eval_count": 0,
+                            "eval_duration_ns": 0,
+                            "response_time_s": 0.0,
+                            "done_reason": "error",
+                        }
 
                     ok = bench.evaluate(task, gen["response"])
                     if ok:
