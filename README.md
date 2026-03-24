@@ -81,32 +81,33 @@ If a model solves a problem inside `<think>` tags but fails to produce parseable
 
 |   # | Model                | Params |     Score |  Passed | tok/s |     Time |  Offload |
 | --: | -------------------- | -----: | --------: | ------: | ----: | -------: | -------: |
-|   1 | gemma3:27b           |    27B | **85.4%** | 140/164 |   6.2 |  95m 43s | ~60% GPU |
-|   2 | gemma3:12b           |    12B | **81.7%** | 134/164 |  39.7 |  15m 46s | 100% GPU |
-|   3 | ministral-3:14b      |    14B | **79.9%** | 131/164 |  38.7 |    6m 1s | 100% GPU |
-|   4 | mistral-small3.2:24b |    24B | **78.7%** | 129/164 |   8.9 |  24m 34s | ~70% GPU |
-|   5 | devstral-small-2:24b |    24B | **76.8%** | 126/164 |   8.8 |  23m 20s | ~70% GPU |
-|   6 | phi4:14b             |    14B | **75.0%** | 123/164 |  36.4 |   5m 38s | 100% GPU |
-|   7 | ministral-3:8b       |     8B | **67.7%** | 111/164 |  60.6 |    4m 5s | 100% GPU |
-|   8 | gemma3:4b            |     4B | **59.8%** |  98/164 |  97.4 |   6m 52s | 100% GPU |
-|   9 | lfm2.5-thinking:1.2b |   1.2B | **58.5%** |  96/164 | 302.1 |  23m 48s | 100% GPU |
-|  10 | llama3.1:8b          |     8B | **57.9%** |  95/164 |  66.3 |    3m 9s | 100% GPU |
-|  11 | ministral-3:3b       |     3B | **54.3%** |  89/164 | 124.1 |   2m 27s | 100% GPU |
-|  12 | phi4-mini:3.8b       |   3.8B | **51.2%** |  84/164 | 114.0 |   2m 37s | 100% GPU |
-|  13 | mistral-nemo:12b     |    12B | **47.6%** |  78/164 |  47.5 |   3m 38s | 100% GPU |
-|  14 | deepseek-r1:1.5b     |   1.5B | **42.7%** |  70/164 | 180.7 | 213m 38s | 100% GPU |
-|  15 | llama3.2:3b          |     3B | **42.7%** |  70/164 | 135.3 |   1m 52s | 100% GPU |
-|  16 | mistral:7b           |     7B | **31.7%** |  52/164 |  70.6 |   3m 47s | 100% GPU |
-|  17 | gemma3:1b            |     1B | **29.9%** |  49/164 | 217.5 |    2m 0s | 100% GPU |
-|  18 | smollm2:1.7b         |   1.7B | **26.8%** |  44/164 | 157.0 |   1m 32s | 100% GPU |
-|  19 | llama3.2:1b          |     1B | **26.2%** |  43/164 | 223.6 |   1m 22s | 100% GPU |
-|  20 | gemma3:270m          |   270M | **11.6%** |  19/164 | 403.5 |   2m 30s | 100% GPU |
+|   1 | gpt-oss:20b          |    20B | **95.1%** | 156/164 |  27.5 |  59m 29s | ~84% GPU |
+|   2 | gemma3:27b           |    27B | **85.4%** | 140/164 |   6.2 |  95m 43s | ~60% GPU |
+|   3 | gemma3:12b           |    12B | **81.7%** | 134/164 |  39.7 |  15m 46s | 100% GPU |
+|   4 | ministral-3:14b      |    14B | **79.9%** | 131/164 |  38.7 |    6m 1s | 100% GPU |
+|   5 | mistral-small3.2:24b |    24B | **78.7%** | 129/164 |   8.9 |  24m 34s | ~70% GPU |
+|   6 | devstral-small-2:24b |    24B | **76.8%** | 126/164 |   8.8 |  23m 20s | ~70% GPU |
+|   7 | phi4:14b             |    14B | **75.0%** | 123/164 |  36.4 |   5m 38s | 100% GPU |
+|   8 | ministral-3:8b       |     8B | **67.7%** | 111/164 |  60.6 |    4m 5s | 100% GPU |
+|   9 | gemma3:4b            |     4B | **59.8%** |  98/164 |  97.4 |   6m 52s | 100% GPU |
+|  10 | lfm2.5-thinking:1.2b |   1.2B | **58.5%** |  96/164 | 302.1 |  23m 48s | 100% GPU |
+|  11 | llama3.1:8b          |     8B | **57.9%** |  95/164 |  66.3 |    3m 9s | 100% GPU |
+|  12 | ministral-3:3b       |     3B | **54.3%** |  89/164 | 124.1 |   2m 27s | 100% GPU |
+|  13 | phi4-mini:3.8b       |   3.8B | **51.2%** |  84/164 | 114.0 |   2m 37s | 100% GPU |
+|  14 | mistral-nemo:12b     |    12B | **47.6%** |  78/164 |  47.5 |   3m 38s | 100% GPU |
+|  15 | deepseek-r1:1.5b     |   1.5B | **42.7%** |  70/164 | 180.7 | 213m 38s | 100% GPU |
+|  16 | llama3.2:3b          |     3B | **42.7%** |  70/164 | 135.3 |   1m 52s | 100% GPU |
+|  17 | mistral:7b           |     7B | **31.7%** |  52/164 |  70.6 |   3m 47s | 100% GPU |
+|  18 | gemma3:1b            |     1B | **29.9%** |  49/164 | 217.5 |    2m 0s | 100% GPU |
+|  19 | smollm2:1.7b         |   1.7B | **26.8%** |  44/164 | 157.0 |   1m 32s | 100% GPU |
+|  20 | llama3.2:1b          |     1B | **26.2%** |  43/164 | 223.6 |   1m 22s | 100% GPU |
+|  21 | gemma3:270m          |   270M | **11.6%** |  19/164 | 403.5 |   2m 30s | 100% GPU |
 
-Thinking models pending: deepseek-r1 (7b, 14b), glm4:9b, gpt-oss:20b, qwen3 (8b, 14b), qwen3.5 (0.8b, 2b, 4b, 9b)
+Thinking models pending: deepseek-r1 (7b, 14b), glm4:9b, qwen3 (8b, 14b), qwen3.5 (0.8b, 2b, 4b, 9b)
 
 ### On thinking models
 
-Models with reasoning capabilities (Qwen3, DeepSeek-R1, gpt-oss) wrap chain-of-thought in `<think>` tags before producing a final answer.
+Models with reasoning capabilities (Qwen3, DeepSeek-R1) wrap chain-of-thought in `<think>` tags before producing a final answer. gpt-oss:20b also uses thinking tags but handles them correctly, scoring 95.1%.
 
 **Tag closure failure** - Qwen models frequently never close the `</think>` tag on complex tasks. The model reasons correctly but produces no usable output. Every Qwen model tested in earlier runs scored near 0%.
 
