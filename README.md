@@ -88,26 +88,26 @@ Then add it to `REGISTRY` in `benchmarks/__init__.py`. Done.
 
 ## Leaderboard
 
-| Model           | Benchmark | Score | Passed | Total | tok/s |
-| --------------- | --------- | ----- | ------ | ----- | ----- |
-| gemma3:270m     | humaneval | 11.6% | 19     | 164   | 404.0 |
-| gemma3:1b       | humaneval | 29.9% | 49     | 164   | 217.0 |
-| qwen3.5:0.8b    | humaneval | 0.0%  | 0      | 164   | 176.3 |
-| llama3.2:1b     | humaneval | 26.2% | 43     | 164   | 223.3 |
-| qwen3:1.7b      | humaneval | 0.0%  | 0      | 164   | 188.3 |
-| llama3.2:3b     | humaneval | 42.7% | 70     | 164   | 135.1 |
-| phi4-mini:3.8b  | humaneval | 49.4% | 81     | 164   | 113.9 |
-| qwen3.5:2b      | humaneval | 0.0%  | 0      | 164   | 109.6 |
-| ministral-3:3b  | humaneval | 50.0% | 82     | 164   | 124.2 |
-| gemma3:4b       | humaneval | 28.0% | 46     | 164   | 98.2  |
-| qwen3.5:4b      | humaneval | 0.0%  | 0      | 164   | 68.3  |
-| qwen2.5:7b      | humaneval | 20.7% | 34     | 164   | 73.4  |
-| qwen3:8b        | humaneval | 5.5%  | 9      | 164   | 59.7  |
-| ministral-3:8b  | humaneval | 68.9% | 113    | 164   | 60.6  |
-| qwen3.5:9b      | humaneval | 1.8%  | 3      | 164   | 47.3  |
-| gemma3:12b      | humaneval | 81.1% | 133    | 164   | 39.6  |
-| ministral-3:14b | humaneval | 78.7% | 129    | 164   | 38.7  |
-| gpt-oss:20b     | humaneval | 53.0% | 87     | 164   | 27.7  |
+| Model                | Benchmark | Score | Passed | Total | tok/s | Avg Resp | Total Time |
+| -------------------- | --------- | ----- | ------ | ----- | ----- | -------- | ---------- |
+| gemma3:270m          | humaneval | 11.6% | 19     | 164   | 403.5 | 0.7s     | 2m 30s     |
+| gemma3:1b            | humaneval | 29.9% | 49     | 164   | 217.5 | 0.7s     | 2m 0s      |
+| llama3.2:1b          | humaneval | 26.2% | 43     | 164   | 223.6 | 0.4s     | 1m 22s     |
+| smollm2:1.7b         | humaneval | 26.8% | 44     | 164   | 157.0 | 0.5s     | 1m 32s     |
+| llama3.2:3b          | humaneval | 42.7% | 70     | 164   | 135.3 | 0.7s     | 1m 52s     |
+| phi4-mini:3.8b       | humaneval | 51.2% | 84     | 164   | 114.0 | 0.9s     | 2m 37s     |
+| ministral-3:3b       | humaneval | 54.3% | 89     | 164   | 124.1 | 0.8s     | 2m 27s     |
+| gemma3:4b            | humaneval | 59.8% | 98     | 164   | 97.4  | 2.5s     | 6m 52s     |
+| mistral:7b           | humaneval | 31.7% | 52     | 164   | 70.6  | 1.3s     | 3m 47s     |
+| llama3.1:8b          | humaneval | 57.9% | 95     | 164   | 66.3  | 1.1s     | 3m 9s      |
+| ministral-3:8b       | humaneval | 67.7% | 111    | 164   | 60.6  | 1.5s     | 4m 5s      |
+| mistral-nemo:12b     | humaneval | 47.6% | 78     | 164   | 47.5  | 1.3s     | 3m 38s     |
+| gemma3:12b           | humaneval | 81.7% | 134    | 164   | 39.7  | 5.7s     | 15m 46s    |
+| phi4:14b             | humaneval | 75.0% | 123    | 164   | 36.4  | 2.0s     | 5m 38s     |
+| ministral-3:14b      | humaneval | 79.9% | 131    | 164   | 38.7  | 2.2s     | 6m 1s      |
+| devstral-small-2:24b | humaneval | 76.8% | 126    | 164   | 8.8   | 8.5s     | 23m 20s    |
+| mistral-small3.2:24b | humaneval | 78.7% | 129    | 164   | 8.9   | 8.9s     | 24m 34s    |
+| gemma3:27b           | humaneval | 85.4% | 140    | 164   | 6.2   | 35.0s    | 95m 43s    |
 
 > [!NOTE]
 > Qwen3/3.5 models frequently fail to exit thinking mode on complex tasks, producing correct reasoning internally but no parseable output. Scores reflect real-world usability, not theoretical capability.
