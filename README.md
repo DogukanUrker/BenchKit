@@ -89,30 +89,31 @@ If a model solves a problem inside `<think>` tags but fails to produce parseable
 |   6 | mistral-small3.2:24b |    24B | **78.7%** | 129/164 |   8.9 |  24m 34s | ~70% GPU |
 |   7 | devstral-small-2:24b |    24B | **76.8%** | 126/164 |   8.8 |  23m 20s | ~70% GPU |
 |   8 | phi4:14b             |    14B | **75.0%** | 123/164 |  36.4 |   5m 38s | 100% GPU |
-|   9 | ministral-3:8b       |     8B | **67.7%** | 111/164 |  60.6 |    4m 5s | 100% GPU |
-|  10 | glm4:9b              |     9B | **64.0%** | 105/164 |  61.2 |   4m 25s | 100% GPU |
-|  11 | deepseek-r1:7b       |     7B | **61.6%** | 101/164 |  63.9 | 202m 33s | 100% GPU |
-|  12 | gemma3:4b            |     4B | **59.8%** |  98/164 |  97.4 |   6m 52s | 100% GPU |
-|  13 | lfm2.5-thinking:1.2b |   1.2B | **58.5%** |  96/164 | 302.1 |  23m 48s | 100% GPU |
-|  14 | llama3.1:8b          |     8B | **57.9%** |  95/164 |  66.3 |    3m 9s | 100% GPU |
-|  15 | ministral-3:3b       |     3B | **54.3%** |  89/164 | 124.1 |   2m 27s | 100% GPU |
-|  16 | phi4-mini:3.8b       |   3.8B | **51.2%** |  84/164 | 114.0 |   2m 37s | 100% GPU |
-|  17 | mistral-nemo:12b     |    12B | **47.6%** |  78/164 |  47.5 |   3m 38s | 100% GPU |
-|  18 | deepseek-r1:1.5b     |   1.5B | **42.7%** |  70/164 | 180.7 | 213m 38s | 100% GPU |
-|  19 | llama3.2:3b          |     3B | **42.7%** |  70/164 | 135.3 |   1m 52s | 100% GPU |
-|  20 | mistral:7b           |     7B | **31.7%** |  52/164 |  70.6 |   3m 47s | 100% GPU |
-|  21 | gemma3:1b            |     1B | **29.9%** |  49/164 | 217.5 |    2m 0s | 100% GPU |
-|  22 | smollm2:1.7b         |   1.7B | **26.8%** |  44/164 | 157.0 |   1m 32s | 100% GPU |
-|  23 | llama3.2:1b          |     1B | **26.2%** |  43/164 | 223.6 |   1m 22s | 100% GPU |
-|  24 | gemma3:270m          |   270M | **11.6%** |  19/164 | 403.5 |   2m 30s | 100% GPU |
+|   9 | qwen3:8b             |     8B | **73.8%** | 121/164 |  55.8 |  166m 9s | 100% GPU |
+|  10 | ministral-3:8b       |     8B | **67.7%** | 111/164 |  60.6 |    4m 5s | 100% GPU |
+|  11 | glm4:9b              |     9B | **64.0%** | 105/164 |  61.2 |   4m 25s | 100% GPU |
+|  12 | deepseek-r1:7b       |     7B | **61.6%** | 101/164 |  63.9 | 202m 33s | 100% GPU |
+|  13 | gemma3:4b            |     4B | **59.8%** |  98/164 |  97.4 |   6m 52s | 100% GPU |
+|  14 | lfm2.5-thinking:1.2b |   1.2B | **58.5%** |  96/164 | 302.1 |  23m 48s | 100% GPU |
+|  15 | llama3.1:8b          |     8B | **57.9%** |  95/164 |  66.3 |    3m 9s | 100% GPU |
+|  16 | ministral-3:3b       |     3B | **54.3%** |  89/164 | 124.1 |   2m 27s | 100% GPU |
+|  17 | phi4-mini:3.8b       |   3.8B | **51.2%** |  84/164 | 114.0 |   2m 37s | 100% GPU |
+|  18 | mistral-nemo:12b     |    12B | **47.6%** |  78/164 |  47.5 |   3m 38s | 100% GPU |
+|  19 | deepseek-r1:1.5b     |   1.5B | **42.7%** |  70/164 | 180.7 | 213m 38s | 100% GPU |
+|  20 | llama3.2:3b          |     3B | **42.7%** |  70/164 | 135.3 |   1m 52s | 100% GPU |
+|  21 | mistral:7b           |     7B | **31.7%** |  52/164 |  70.6 |   3m 47s | 100% GPU |
+|  22 | gemma3:1b            |     1B | **29.9%** |  49/164 | 217.5 |    2m 0s | 100% GPU |
+|  23 | smollm2:1.7b         |   1.7B | **26.8%** |  44/164 | 157.0 |   1m 32s | 100% GPU |
+|  24 | llama3.2:1b          |     1B | **26.2%** |  43/164 | 223.6 |   1m 22s | 100% GPU |
+|  25 | gemma3:270m          |   270M | **11.6%** |  19/164 | 403.5 |   2m 30s | 100% GPU |
 
-Thinking models pending: qwen3 (8b, 14b), qwen3.5 (0.8b, 2b, 4b, 9b)
+Thinking models pending: qwen3:14b, qwen3.5 (0.8b, 2b, 4b, 9b)
 
 ### On thinking models
 
 Models with reasoning capabilities (Qwen3, DeepSeek-R1) wrap chain-of-thought in `<think>` tags before producing a final answer. gpt-oss:20b also uses thinking tags but handles them correctly, scoring 95.1%.
 
-**Tag closure failure** - Qwen models frequently never close the `</think>` tag on complex tasks. The model reasons correctly but produces no usable output. Every Qwen model tested in earlier runs scored near 0%.
+**Tag closure failure** - Qwen models frequently fail to close the `</think>` tag on complex tasks, producing correct reasoning but no usable output. Earlier runs scored near 0%. With improved think-tag stripping, qwen3:8b now scores 73.8% - but still takes 166 minutes vs 4 minutes for similarly-scoring non-thinking models.
 
 **Token overhead** - DeepSeek-R1 closes its tags but generates thousands of thinking tokens per task. deepseek-r1:1.5b and llama3.2:3b both score 42.7% on HumanEval - one takes 213 minutes, the other takes 1 minute 52 seconds.
 
