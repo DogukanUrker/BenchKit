@@ -106,16 +106,17 @@ If a model solves a problem inside `<think>` tags but fails to produce parseable
 |  23 | gemma3:1b            |     1B | **29.9%** |  49/164 | 217.5 |    2m 0s | 100% GPU |
 |  24 | smollm2:1.7b         |   1.7B | **26.8%** |  44/164 | 157.0 |   1m 32s | 100% GPU |
 |  25 | llama3.2:1b          |     1B | **26.2%** |  43/164 | 223.6 |   1m 22s | 100% GPU |
-|  26 | gemma3:270m          |   270M | **11.6%** |  19/164 | 403.5 |   2m 30s | 100% GPU |
-|  27 | qwen3.5:9b           |     9B |  **7.9%** |  13/164 |  45.9 | 371m 48s | 100% GPU |
-
-Thinking models pending: qwen3.5 (0.8b, 2b, 4b)
+|  26 | qwen3.5:2b           |     2B | **13.4%** |  22/164 | 107.4 |  236m 6s | 100% GPU |
+|  27 | gemma3:270m          |   270M | **11.6%** |  19/164 | 403.5 |   2m 30s | 100% GPU |
+|  28 | qwen3.5:9b           |     9B |  **7.9%** |  13/164 |  45.9 | 371m 48s | 100% GPU |
+|  29 | qwen3.5:0.8b         |   0.8B |  **6.7%** |  11/164 | 171.7 | 252m 36s | 100% GPU |
+|  30 | qwen3.5:4b           |     4B |  **1.2%** |   2/164 |  65.9 | 272m 50s | 100% GPU |
 
 ### On thinking models
 
 Models with reasoning capabilities (Qwen3, DeepSeek-R1) wrap chain-of-thought in `<think>` tags before producing a final answer. gpt-oss:20b also uses thinking tags but handles them correctly, scoring 95.1%.
 
-**Tag closure failure** - Qwen3.5 models consistently fail to close the `</think>` tag, producing correct reasoning but no usable output. qwen3.5:9b scored 7.9% and took 6+ hours. Qwen3 (non-.5) handles tags better - qwen3:8b scored 73.8% - but still takes 40x longer than non-thinking models at similar accuracy.
+**Tag closure failure** - Qwen3.5 models consistently fail to close the `</think>` tag, producing correct reasoning but no usable output. Scores: 0.8b (6.7%), 2b (13.4%), 4b (1.2%), 9b (7.9%) - all taking 4-6 hours each. Larger models think harder and fail more. Qwen3 (non-.5) handles tags better - qwen3:8b scored 73.8% - but still takes 40x longer than non-thinking models at similar accuracy.
 
 **Token overhead** - DeepSeek-R1 closes its tags but generates thousands of thinking tokens per task. deepseek-r1:1.5b and llama3.2:3b both score 42.7% on HumanEval - one takes 213 minutes, the other takes 1 minute 52 seconds.
 
