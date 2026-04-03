@@ -36,7 +36,7 @@ def generate(host: str, model: str, prompt: str) -> dict:
             "stream": False,
             "options": {"temperature": 0.0},
         },
-        timeout=120,
+        timeout=600,
     )
     r.raise_for_status()
     data = r.json()
