@@ -183,3 +183,4 @@ cython_debug/
 tests/validate_gemini.py
 /results
 /tests
+.DS_Store
