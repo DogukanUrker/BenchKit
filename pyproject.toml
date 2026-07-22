@@ -23,4 +23,4 @@ where = ["src"]
 include = ["benchkit*"]
 
 [tool.setuptools.package-data]
-benchkit = ["datasets/*.jsonl"]
+benchkit = ["datasets/*.jsonl", "templates/*.html"]

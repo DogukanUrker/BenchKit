@@ -1,6 +1,7 @@
 # BenchKit
 
-Benchmark your local LLMs with real evaluation suites. Not vibes - actual scores.
+Benchmark local LLMs with real evaluation suites. Supports OpenAI-compatible
+servers such as llama-swap as well as Ollama. Not vibes - actual scores.
 
 ## Install
 
@@ -22,11 +23,11 @@ uv run benchkit --verbose
 
 That's it. BenchKit will:
 
-1. Connect to your Ollama instance
+1. Connect to an OpenAI-compatible server or Ollama
 2. Let you pick which models to test
 3. Let you pick which benchmarks to run
 4. Run everything and show results
-5. Save JSON, CSV, and Markdown reports to `results/`
+5. Save JSON, CSV, Markdown, and interactive HTML reports to `results/`
 
 ### Configuration
 
@@ -36,15 +37,28 @@ Copy `.env.example` to `.env` and edit:
 cp .env.example .env
 ```
 
+For llama-swap on the homeserver:
+
 ```env
+BENCHKIT_PROVIDER=openai
+BENCHKIT_HOST=http://hub:11434/v1
+BENCHKIT_HARDWARE=RTX 3060 12GB
+```
+
+The `/v1` suffix is optional. BenchKit uses `GET /v1/models` for discovery and
+`POST /v1/chat/completions` for benchmark requests. API keys are supported with
+`BENCHKIT_API_KEY`. Set `BENCHKIT_PROVIDER=auto` to try OpenAI compatibility
+first and fall back to Ollama's native API.
+
+Existing Ollama configuration remains supported:
+
+```env
+BENCHKIT_PROVIDER=ollama
 OLLAMA_HOST=http://localhost:11434
 ```
 
-Or point to a remote Ollama instance:
-
-```bash
-OLLAMA_HOST=http://my-server:11434 uv run benchkit
-```
+The per-request timeout defaults to 300 seconds and can be changed with
+`BENCHKIT_TIMEOUT`.
 
 ## Benchmarks
 
@@ -68,8 +82,14 @@ Each run creates a timestamped folder in `results/`:
 results/2026-03-21_14-30-00/
 ├── results.json   # Full results with per-task details
 ├── results.csv    # Summary table
-└── results.md     # Markdown table (paste into GitHub)
+├── results.md     # Markdown table (paste into GitHub)
+└── results.html   # Interactive, self-contained visual report
 ```
+
+Open `results.html` directly in a browser. It includes the overall leaderboard,
+filterable benchmark results, every task's prompt and response, and a dedicated
+`16:9 social card` view sized for a clean screenshot. No server or external web
+assets are required.
 
 ## Leaderboard
 

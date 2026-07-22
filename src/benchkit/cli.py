@@ -9,7 +9,7 @@ from rich.table import Table
 from rich.text import Text
 
 from benchkit.benchmarks import REGISTRY
-from benchkit.ollama import get_host, list_models
+from benchkit.client import InferenceClient
 from benchkit.report import save
 from benchkit.runner import run
 
@@ -119,32 +119,49 @@ def main() -> None:
     console.print("[bold]BenchKit[/bold]")
     console.print("[dim]Benchmark your local LLMs[/dim]")
 
-    # Connect to Ollama
-    host = get_host()
+    # Connect to an OpenAI-compatible server or Ollama.
+    try:
+        client = InferenceClient.from_env()
+    except ValueError as e:
+        console.print(f"[red]Configuration error:[/red] {e}")
+        sys.exit(1)
+
     _section("Session")
-    console.print(f"[dim]Host  {host}[/dim]")
+    console.print(f"[dim]Host  {client.host}[/dim]")
     if verbose:
         console.print("[dim]Verbose output enabled[/dim]")
 
     try:
-        models = list_models(host)
+        models = client.list_models()
     except Exception as e:
         console.print("[red]Connection failed[/red]")
         console.print(f"[dim]{e}[/dim]")
-        console.print("[dim]Set OLLAMA_HOST or start Ollama first.[/dim]")
+        console.print(
+            "[dim]Set BENCHKIT_HOST (and BENCHKIT_PROVIDER if needed), "
+            "then check that the server is running.[/dim]"
+        )
         sys.exit(1)
 
     if not models:
         console.print("[red]No models found[/red]")
-        console.print("[dim]Pull a model in Ollama first.[/dim]")
+        console.print("[dim]Configure at least one model on the inference server.[/dim]")
         sys.exit(1)
 
     # Model selection
-    console.print(f"[dim]{len(models)} model(s) available[/dim]")
+    console.print(
+        f"[dim]{len(models)} model(s) available via {client.label}[/dim]"
+    )
     _section("Models")
     model_names = [m["name"] for m in models]
-    model_sizes = [f"{m.get('size', 0) / (1024**3):.1f} GB" for m in models]
-    picked = _pick("Select models", model_names, model_sizes)
+    model_details = []
+    for model in models:
+        size = model.get("size")
+        if isinstance(size, (int, float)) and size > 0:
+            model_details.append(f"{size / (1024**3):.1f} GB")
+        else:
+            detail = model.get("status") or model.get("owned_by") or client.label
+            model_details.append(str(detail))
+    picked = _pick("Select models", model_names, model_details)
     if not picked:
         console.print("[red]No models selected[/red]")
         sys.exit(1)
@@ -169,7 +186,7 @@ def main() -> None:
 
     # Run
     _section("Run")
-    results = run(host, selected_models, selected_benchmarks, console, verbose)
+    results = run(client, selected_models, selected_benchmarks, console, verbose)
 
     # Summary table
     _section("Results")
@@ -202,7 +219,7 @@ def main() -> None:
     console.print(table)
 
     # Save
-    out = save(results)
+    out = save(results, provider=client.label, host=client.host)
     console.print(f"[dim]Saved:[/dim] [white]{out}[/white]")
 
 

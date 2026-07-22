@@ -10,7 +10,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from benchkit.ollama import generate, unload_model
+from benchkit.client import InferenceClient
 
 
 def _fmt_time(s: float) -> str:
@@ -55,7 +55,7 @@ def _apply_slice(tasks: list, spec: str | None) -> list:
 
 
 def run(
-    host: str,
+    client: InferenceClient,
     models: list[str],
     benchmarks: list[tuple],
     console: Console,
@@ -110,7 +110,7 @@ def run(
                 for task in tasks:
                     prompt = bench.build_prompt(task)
                     try:
-                        gen = generate(host, model, prompt)
+                        gen = client.generate(model, prompt)
                     except Exception as e:
                         console.print(
                             f"\n  [yellow]⚠ {task.id}: {type(e).__name__}: {e}[/yellow]"
@@ -191,6 +191,6 @@ def run(
             )
 
         if len(models) > 1:
-            unload_model(host, model)
+            client.unload_model(model)
 
     return results
