@@ -34,7 +34,7 @@ class ConnectScreen(Screen[None]):
         Binding("ctrl+r", "connect", "Connect"),
         Binding("f5", "connect", "Connect", show=False),
         Binding("f3", "demo", "Demo mode"),
-        Binding("escape", "app.quit", "Quit"),
+        Binding("escape", "app.quit", "Quit", show=False),
     ]
 
     def compose(self) -> ComposeResult:

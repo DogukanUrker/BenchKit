@@ -1,43 +1,58 @@
+<div align="center">
+
+<img src="assets/benchkit-connect.png" alt="BenchKit" width="880">
+
 # BenchKit
 
-Benchmark local LLMs with real evaluation suites, from a full terminal UI.
-Supports OpenAI-compatible servers such as llama-swap as well as Ollama.
-Not vibes - actual scores.
+**Benchmark local LLMs with real evaluation suites — from a full terminal UI.**
 
-## Install
+Not vibes. Actual scores.
+
+<img src="https://img.shields.io/badge/Python-3.11%2B-2563EB?style=flat-square&logo=python&logoColor=white&labelColor=0b0b0b" alt="Python 3.11+">
+<img src="https://img.shields.io/badge/TUI-Textual-60A5FA?style=flat-square&labelColor=0b0b0b" alt="Built with Textual">
+<img src="https://img.shields.io/badge/Suites-13-34D399?style=flat-square&labelColor=0b0b0b" alt="13 benchmark suites">
+<img src="https://img.shields.io/badge/License-Apache%202.0-6B7280?style=flat-square&labelColor=0b0b0b" alt="Apache 2.0">
+
+</div>
+
+---
+
+## Quick start
 
 ```bash
 uv sync
-```
-
-## Usage
-
-```bash
 uv run benchkit
 ```
 
-That opens the full-screen terminal app:
+No inference server around? Explore the whole interface offline:
 
-1. **Connect** - host, provider, API key and timeout are editable in place, with
-   the connection retried on demand. No server around? Press `F3` for demo mode.
-2. **Setup** - two multi-select panes for models and benchmarks, live filters,
-   a task limit per benchmark, and a running "3 models × 2 benchmarks = 6 runs"
-   plan summary.
-3. **Run** - per-job and overall progress, live accuracy / tok-s / latency /
-   elapsed / ETA cards, the run queue with per-job scores, and a streaming task
-   table. Pause (`p`), skip a job (`k`) or stop (`x`) at any point; press
-   `Enter` on a task to read the exact prompt and response.
-4. **Results** - sortable summary, drill-down into every task with a
-   pass/fail/search filter, and the path to the saved reports.
+```bash
+uv run benchkit --demo
+```
 
-JSON, CSV, Markdown and the interactive HTML report are written to
-`results/<timestamp>/` as soon as a run finishes - including runs you stopped
-early.
+BenchKit talks to any OpenAI-compatible server — llama.cpp, llama-swap, vLLM,
+LM Studio — as well as a native Ollama host.
 
-### Keys
+## The app
+
+<div align="center">
+  <img src="assets/benchkit-run.png" alt="BenchKit running a benchmark" width="940">
+</div>
+
+| Screen | What happens there |
+| ------ | ------------------ |
+| **Connect** | Host, provider, API key and timeout are editable in place. Auto-connects from your `.env`, shows the real error when it fails, retries on `Ctrl+R`. |
+| **Setup** | Multi-select panes for models and benchmarks with live filters, task counts, and a task limit set globally or per benchmark. A summary line keeps score: `3 models × 2 benchmarks = 6 runs · 1,240 tasks`. |
+| **Run** | Per-job and overall progress, live accuracy / tok-s / latency / elapsed / ETA, the run queue with per-job scores, and a task table that streams in. Pause, skip a job or stop at any point. |
+| **Results** | Sortable summary, drill-down into every task with a pass/fail/search filter, and the path to the saved reports. |
+
+Press `Enter` on any task — during the run or afterwards — to read the exact
+prompt and the model's raw response.
+
+## Keys
 
 | Key | Action |
-| --- | --- |
+| --- | ------ |
 | `?` / `F1` | Keyboard reference |
 | `Space` | Toggle the highlighted model or benchmark |
 | `a` / `n` / `i` | Select all / clear / invert the focused list |
@@ -51,26 +66,9 @@ early.
 | `Ctrl+P` | Command palette |
 | `Ctrl+Q` | Quit |
 
-Task limits accept `20` (first 20), `-20` (last 20) and `40-80` (a range), set
-globally or per benchmark.
+Task limits accept `20` (first 20), `-20` (last 20) and `40-80` (a range).
 
-### Theme
-
-BenchKit is themed with [Dogi](https://github.com/DogukanUrker/DogiZed) - flat
-black or white, colour only where it means something. Dark is the default,
-`F2` switches to light, and the command palette (`Ctrl+P`) can swap in any
-Textual theme.
-
-### Demo mode
-
-```bash
-uv run benchkit --demo
-```
-
-Runs against four fake local models with different skill levels and speeds, so
-the interface can be explored without an inference server.
-
-### Headless
+## Headless
 
 For CI and scripts, skip the TUI entirely:
 
@@ -80,18 +78,16 @@ uv run benchkit --headless --models all --benchmarks quickbench --verbose
 uv run benchkit --list
 ```
 
-`--verbose` prints every prompt and response; reports are saved exactly as they
-are from the TUI.
+`--verbose` prints every prompt and response. Reports are saved exactly as they
+are from the TUI, and a run that fails part-way still keeps what finished.
 
-### Configuration
+## Configuration
 
 Copy `.env.example` to `.env` and edit:
 
 ```bash
 cp .env.example .env
 ```
-
-For llama-swap on the homeserver:
 
 ```env
 BENCHKIT_PROVIDER=openai
@@ -116,21 +112,21 @@ The per-request timeout defaults to 300 seconds and can be changed with
 
 ## Benchmarks
 
-| Benchmark  | Tasks | What it tests                              |
-| ---------- | ----- | ------------------------------------------ |
-| QuickBench | 20    | Fast code-generation smoke test            |
-| HumanEval  | 164   | Code generation (pass@1)                   |
-| MBPP       | 500   | Python programming tasks                   |
-| GSM8K      | 1319  | Math reasoning with answer parse           |
-| ARC        | 1172  | Science multiple choice QA                 |
-| GPQA       | 198   | Graduate-level science reasoning           |
-| MMLU       | 14042 | Broad academic and professional knowledge  |
-| OpenBookQA | 500   | Elementary science reasoning               |
-| WinoGrande | 1267  | Commonsense pronoun resolution             |
-| PIQA       | 1838  | Physical commonsense reasoning             |
-| BoolQ      | 3270  | Yes/no reading comprehension               |
-| TruthfulQA | 817   | Truthfulness multiple choice QA            |
-| HellaSwag  | 1000  | Commonsense sentence completion            |
+| Benchmark | Key | Tasks | What it tests |
+| --------- | --- | ----: | ------------- |
+| QuickBench | `quickbench` | 20 | Fast code-generation smoke test |
+| HumanEval | `humaneval` | 164 | Code generation (pass@1) |
+| MBPP | `mbpp` | 500 | Python programming tasks |
+| GSM8K | `gsm8k` | 1,319 | Math reasoning with answer parse |
+| ARC | `arc` | 1,172 | Science multiple choice QA |
+| GPQA | `gpqa` | 198 | Graduate-level science reasoning |
+| MMLU | `mmlu` | 14,042 | Broad academic and professional knowledge |
+| OpenBookQA | `openbookqa` | 500 | Elementary science reasoning |
+| WinoGrande | `winogrande` | 1,267 | Commonsense pronoun resolution |
+| PIQA | `piqa` | 1,838 | Physical commonsense reasoning |
+| BoolQ | `boolq` | 3,270 | Yes/no reading comprehension |
+| TruthfulQA | `truthfulqa` | 817 | Truthfulness multiple choice QA |
+| HellaSwag | `hellaswag` | 1,000 | Commonsense sentence completion |
 
 More coming soon.
 
@@ -146,21 +142,21 @@ results/2026-03-21_14-30-00/
 └── results.html   # Interactive, self-contained visual report
 ```
 
-Open `results.html` directly in a browser. It carries the same Dogi theme as
-the TUI, follows your system's light/dark preference and has a toggle in the
-header. It is an inline gallery of
-screenshot-ready charts: overall and per-benchmark accuracy, a complete suite
+Open `results.html` directly in a browser. It carries the same Dogi theme as the
+TUI, opens light, and has a toggle in the header. Inside is a gallery of
+screenshot-ready charts — overall and per-benchmark accuracy, a full suite
 overview, accuracy versus speed, raw generation speed, pass/fail composition,
-total runtime, and a score matrix. Each card sizes itself to its content;
-inspect any chart element and capture it directly with a browser or Node
-screenshot. Every task's prompt and response remains available below the
-gallery. No server or external web assets are required.
+total runtime and a score matrix — followed by every task's prompt and response.
+No server or external web assets are required.
 
 ## Leaderboard
 
-All results from a single RTX 3060 12GB system. Models run via Ollama with default quantization (Q4_K_M) and a 5-minute timeout per task.
+All results from a single RTX 3060 12GB system. Models run via Ollama with
+default quantization (Q4_K_M) and a 5-minute timeout per task.
 
-If a model solves a problem inside `<think>` tags but fails to produce parseable output, it scores 0. This reflects real-world pipeline behavior - downstream tools receive model output as-is.
+If a model solves a problem inside `<think>` tags but fails to produce parseable
+output, it scores 0. This reflects real-world pipeline behavior — downstream
+tools receive model output as-is.
 
 ### HumanEval (164 tasks)
 
@@ -198,17 +194,35 @@ If a model solves a problem inside `<think>` tags but fails to produce parseable
 |  30 | qwen3.5:0.8b         |   0.8B |  **6.7%** |  11/164 | 171.7 | 252m 36s | 100% GPU |
 |  31 | qwen3.5:4b           |     4B |  **1.2%** |   2/164 |  65.9 | 272m 50s | 100% GPU |
 
-### On thinking models
+<details>
+<summary><b>On thinking models</b></summary>
 
-Models with reasoning capabilities (Qwen3, DeepSeek-R1) wrap chain-of-thought in `<think>` tags before producing a final answer. gpt-oss:20b also uses thinking tags but handles them correctly, scoring 95.1%.
+<br>
 
-**Tag closure failure** - Qwen3.5 models consistently fail to close the `</think>` tag, producing correct reasoning but no usable output. Scores: 0.8b (6.7%), 2b (13.4%), 4b (1.2%), 9b (7.9%) - all taking 4-6 hours each. Larger models think harder and fail more. Qwen3 (non-.5) handles tags better - qwen3:8b scored 73.8% - but still takes 40x longer than non-thinking models at similar accuracy.
+Models with reasoning capabilities (Qwen3, DeepSeek-R1) wrap chain-of-thought in
+`<think>` tags before producing a final answer. gpt-oss:20b also uses thinking
+tags but handles them correctly, scoring 95.1%.
 
-**Token overhead** - DeepSeek-R1 closes its tags but generates thousands of thinking tokens per task. deepseek-r1:1.5b and llama3.2:3b both score 42.7% on HumanEval - one takes 213 minutes, the other takes 1 minute 52 seconds.
+**Tag closure failure** — Qwen3.5 models consistently fail to close the
+`</think>` tag, producing correct reasoning but no usable output. Scores: 0.8b
+(6.7%), 2b (13.4%), 4b (1.2%), 9b (7.9%) — all taking 4-6 hours each. Larger
+models think harder and fail more. Qwen3 (non-.5) handles tags better —
+qwen3:8b scored 73.8% — but still takes 40x longer than non-thinking models at
+similar accuracy.
 
-Both behaviors break automated pipelines where downstream tools expect clean, fast responses.
+**Token overhead** — DeepSeek-R1 closes its tags but generates thousands of
+thinking tokens per task. deepseek-r1:1.5b and llama3.2:3b both score 42.7% on
+HumanEval — one takes 213 minutes, the other takes 1 minute 52 seconds.
 
-### Hardware
+Both behaviors break automated pipelines where downstream tools expect clean,
+fast responses.
+
+</details>
+
+<details>
+<summary><b>Hardware</b></summary>
+
+<br>
 
 | Component | Spec                      |
 | --------- | ------------------------- |
@@ -218,6 +232,8 @@ Both behaviors break automated pipelines where downstream tools expect clean, fa
 | Swap      | 16GB (SATA SSD)           |
 | OS        | Debian 13                 |
 | Runtime   | Ollama                    |
+
+</details>
 
 ## Adding a benchmark
 
@@ -237,3 +253,8 @@ Then add it to `REGISTRY` in `benchmarks/__init__.py`. Done.
 ## License
 
 Apache License 2.0
+
+<div align="center">
+<br>
+<sub>Themed with <a href="https://github.com/DogukanUrker/DogiZed">Dogi</a> · built on <a href="https://github.com/Textualize/textual">Textual</a></sub>
+</div>
