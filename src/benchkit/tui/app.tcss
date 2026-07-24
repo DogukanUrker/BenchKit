@@ -90,20 +90,27 @@ DataTable > .datatable--cursor {
     padding: 1 2;
 }
 
+/* Every child is pinned to the card width so `align: center middle` has a
+   group narrower than the screen to centre. A full-width child (Static
+   defaults to one) would silently pin the group to the left edge. */
 #banner {
-    width: auto;
+    width: 72;
+    max-width: 100%;
     color: $primary;
     text-style: bold;
     margin: 0 0 1 0;
 }
 
 #tagline {
+    width: 72;
+    max-width: 100%;
     color: $text-muted;
     margin: 0 0 1 0;
 }
 
 #connect-card {
     width: 72;
+    max-width: 100%;
     height: auto;
     background: $surface;
     border: round $bk-border;
