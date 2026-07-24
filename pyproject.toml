@@ -9,6 +9,7 @@ dependencies = [
     "httpx>=0.28.1",
     "rich>=14.3.3",
     "python-dotenv>=1.2.2",
+    "textual>=8.2.8",
 ]
 
 [project.scripts]
@@ -28,4 +29,5 @@ benchkit = [
     "datasets/*.md",
     "datasets/*.txt",
     "templates/*.html",
+    "tui/*.tcss",
 ]

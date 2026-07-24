@@ -1,7 +1,8 @@
 # BenchKit
 
-Benchmark local LLMs with real evaluation suites. Supports OpenAI-compatible
-servers such as llama-swap as well as Ollama. Not vibes - actual scores.
+Benchmark local LLMs with real evaluation suites, from a full terminal UI.
+Supports OpenAI-compatible servers such as llama-swap as well as Ollama.
+Not vibes - actual scores.
 
 ## Install
 
@@ -15,19 +16,65 @@ uv sync
 uv run benchkit
 ```
 
-To see raw prompts and model responses for every task (useful for debugging failures):
+That opens the full-screen terminal app:
+
+1. **Connect** - host, provider, API key and timeout are editable in place, with
+   the connection retried on demand. No server around? Press `F3` for demo mode.
+2. **Setup** - two multi-select panes for models and benchmarks, live filters,
+   a task limit per benchmark, and a running "3 models × 2 benchmarks = 6 runs"
+   plan summary.
+3. **Run** - per-job and overall progress, live accuracy / tok-s / latency /
+   elapsed / ETA cards, the run queue with per-job scores, and a streaming task
+   table. Pause (`p`), skip a job (`k`) or stop (`x`) at any point; press
+   `Enter` on a task to read the exact prompt and response.
+4. **Results** - sortable summary, drill-down into every task with a
+   pass/fail/search filter, and the path to the saved reports.
+
+JSON, CSV, Markdown and the interactive HTML report are written to
+`results/<timestamp>/` as soon as a run finishes - including runs you stopped
+early.
+
+### Keys
+
+| Key | Action |
+| --- | --- |
+| `?` / `F1` | Keyboard reference |
+| `Space` | Toggle the highlighted model or benchmark |
+| `a` / `n` / `i` | Select all / clear / invert the focused list |
+| `l` | Task limit for the highlighted benchmark |
+| `/` | Jump to the filter box |
+| `s` / `F5` | Start the run |
+| `p` / `k` / `x` | Pause / skip job / stop during a run |
+| `f` | Failures only |
+| `Enter` | Inspect the highlighted row |
+| `F2` | Light / dark theme |
+| `Ctrl+P` | Command palette |
+| `Ctrl+Q` | Quit |
+
+Task limits accept `20` (first 20), `-20` (last 20) and `40-80` (a range), set
+globally or per benchmark.
+
+### Demo mode
 
 ```bash
-uv run benchkit --verbose
+uv run benchkit --demo
 ```
 
-That's it. BenchKit will:
+Runs against four fake local models with different skill levels and speeds, so
+the interface can be explored without an inference server.
 
-1. Connect to an OpenAI-compatible server or Ollama
-2. Let you pick which models to test
-3. Let you pick which benchmarks to run
-4. Run everything and show results
-5. Save JSON, CSV, Markdown, and interactive HTML reports to `results/`
+### Headless
+
+For CI and scripts, skip the TUI entirely:
+
+```bash
+uv run benchkit --headless --models qwen3:8b,gemma3:12b --benchmarks humaneval:20,gsm8k
+uv run benchkit --headless --models all --benchmarks quickbench --verbose
+uv run benchkit --list
+```
+
+`--verbose` prints every prompt and response; reports are saved exactly as they
+are from the TUI.
 
 ### Configuration
 
