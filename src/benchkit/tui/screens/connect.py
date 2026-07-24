@@ -72,14 +72,14 @@ class ConnectScreen(Screen[None]):
                         yield Input(placeholder="300", id="timeout", compact=True)
                 with Horizontal(id="connect-actions"):
                     yield Button("Connect", id="connect", variant="primary")
-                    yield Button("Demo mode", id="demo")
                     yield Button("Quit", id="quit", variant="error")
                 yield Static(HINT, id="connect-status")
         yield Footer()
 
     def on_resize(self, event) -> None:
-        # The wordmark is the first thing to go on short terminals.
-        self.set_class(event.size.height < 30, "compact")
+        # The wordmark is 62 cells wide, so it goes first on a small terminal.
+        size = event.size
+        self.set_class(size.height < 30 or size.width < 66, "compact")
 
     def on_mount(self) -> None:
         defaults = _env_defaults()
@@ -119,8 +119,6 @@ class ConnectScreen(Screen[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "connect":
             self.action_connect()
-        elif event.button.id == "demo":
-            self.action_demo()
         elif event.button.id == "quit":
             self.app.exit()
 
