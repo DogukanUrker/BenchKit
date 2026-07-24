@@ -146,7 +146,9 @@ results/2026-03-21_14-30-00/
 └── results.html   # Interactive, self-contained visual report
 ```
 
-Open `results.html` directly in a browser. It is an inline gallery of
+Open `results.html` directly in a browser. It carries the same Dogi theme as
+the TUI, follows your system's light/dark preference and has a toggle in the
+header. It is an inline gallery of
 screenshot-ready charts: overall and per-benchmark accuracy, a complete suite
 overview, accuracy versus speed, raw generation speed, pass/fail composition,
 total runtime, and a score matrix. Each card sizes itself to its content;
