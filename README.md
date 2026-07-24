@@ -62,16 +62,21 @@ The per-request timeout defaults to 300 seconds and can be changed with
 
 ## Benchmarks
 
-| Benchmark  | Tasks | What it tests                    |
-| ---------- | ----- | -------------------------------- |
-| QuickBench | 20    | Fast code-generation smoke test  |
-| HumanEval  | 164   | Code generation (pass@1)         |
-| MBPP       | 500   | Python programming tasks         |
-| GSM8K      | 1319  | Math reasoning with answer parse |
-| ARC        | 1172  | Science multiple choice QA       |
-| GPQA       | 198   | Graduate-level science reasoning |
-| TruthfulQA | 817   | Truthfulness multiple choice QA  |
-| HellaSwag  | 1000  | Commonsense sentence completion  |
+| Benchmark  | Tasks | What it tests                              |
+| ---------- | ----- | ------------------------------------------ |
+| QuickBench | 20    | Fast code-generation smoke test            |
+| HumanEval  | 164   | Code generation (pass@1)                   |
+| MBPP       | 500   | Python programming tasks                   |
+| GSM8K      | 1319  | Math reasoning with answer parse           |
+| ARC        | 1172  | Science multiple choice QA                 |
+| GPQA       | 198   | Graduate-level science reasoning           |
+| MMLU       | 14042 | Broad academic and professional knowledge  |
+| OpenBookQA | 500   | Elementary science reasoning               |
+| WinoGrande | 1267  | Commonsense pronoun resolution             |
+| PIQA       | 1838  | Physical commonsense reasoning             |
+| BoolQ      | 3270  | Yes/no reading comprehension               |
+| TruthfulQA | 817   | Truthfulness multiple choice QA            |
+| HellaSwag  | 1000  | Commonsense sentence completion            |
 
 More coming soon.
 
