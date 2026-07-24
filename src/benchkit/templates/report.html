@@ -325,10 +325,11 @@
           ? Math.max(...visible.map(item => item.value))
           : number(scale)
       );
+      const bestValue = Math.max(0, ...visible.map(item => number(item.value)));
       return `<article class="chart-shell">
         <div class="chart-header"><h3 class="chart-title">${escapeHtml(title)}</h3><span class="chart-subtitle">· ${escapeHtml(subtitle)}</span></div>
         <div class="bar-plot">${visible.map((item, index) => {
-          const winner = index === visible.length - 1;
+          const winner = number(item.value) === bestValue;
           const height = Math.max(0, Math.min(100, item.value / max * 100));
           const shown = suffix === "%" ? formatScore(item.value) : `${number(item.value).toFixed(1)}`;
           return `<div class="bar-item ${winner ? "winner" : ""}">
