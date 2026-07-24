@@ -1,6 +1,7 @@
 """Available benchmarks."""
 
 from benchkit.benchmarks.arc import ARC
+from benchkit.benchmarks.gpqa import GPQA
 from benchkit.benchmarks.gsm8k import GSM8K
 from benchkit.benchmarks.hellaswag import HellaSwag
 from benchkit.benchmarks.humaneval import HumanEval
@@ -14,6 +15,7 @@ REGISTRY: dict[str, type] = {
     "mbpp": MBPP,
     "gsm8k": GSM8K,
     "arc": ARC,
+    "gpqa": GPQA,
     "truthfulqa": TruthfulQA,
     "hellaswag": HellaSwag,
 }

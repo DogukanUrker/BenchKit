@@ -69,6 +69,7 @@ The per-request timeout defaults to 300 seconds and can be changed with
 | MBPP       | 500   | Python programming tasks         |
 | GSM8K      | 1319  | Math reasoning with answer parse |
 | ARC        | 1172  | Science multiple choice QA       |
+| GPQA       | 198   | Graduate-level science reasoning |
 | TruthfulQA | 817   | Truthfulness multiple choice QA  |
 | HellaSwag  | 1000  | Commonsense sentence completion  |
 
@@ -86,10 +87,13 @@ results/2026-03-21_14-30-00/
 └── results.html   # Interactive, self-contained visual report
 ```
 
-Open `results.html` directly in a browser. It includes the overall leaderboard,
-filterable benchmark results, every task's prompt and response, and a dedicated
-`16:9 social card` view sized for a clean screenshot. No server or external web
-assets are required.
+Open `results.html` directly in a browser. It is an inline gallery of
+screenshot-ready charts: overall and per-benchmark accuracy, a complete suite
+overview, accuracy versus speed, raw generation speed, pass/fail composition,
+total runtime, and a score matrix. Each card sizes itself to its content;
+inspect any chart element and capture it directly with a browser or Node
+screenshot. Every task's prompt and response remains available below the
+gallery. No server or external web assets are required.
 
 ## Leaderboard
 
