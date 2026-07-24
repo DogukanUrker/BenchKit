@@ -25,12 +25,16 @@ def _extract_code(response: str) -> str:
     elif "```" in text:
         text = text.split("```", 1)[1].split("```", 1)[0]
 
-    # Only add indent if code isn't already indented and isn't a full function
-    first = text.lstrip("\n").split("\n")[0] if text.strip() else ""
-    if first and not first.startswith((" ", "\t", "def ", "class ")):
-        lines = text.split("\n")
-        lines = ["    " + line if line.strip() else line for line in lines]
-        text = "\n".join(lines)
+    text = text.strip("\n")
+    lines = text.split("\n")
+
+    if any(ln.startswith(("def ", "class ", "import ", "from ", "@")) for ln in lines):
+        return text
+
+    # Otherwise it's a bare body -> indent only if not already indented.
+    first = next((ln for ln in lines if ln.strip()), "")
+    if first and not first.startswith((" ", "\t")):
+        return "\n".join(("    " + ln) if ln.strip() else ln for ln in lines)
 
     return text
 
