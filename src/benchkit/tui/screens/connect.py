@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from textual import work
+from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -76,7 +76,7 @@ class ConnectScreen(Screen[None]):
                 yield Static(HINT, id="connect-status")
         yield Footer()
 
-    def on_resize(self, event) -> None:
+    def on_resize(self, event: events.Resize) -> None:
         # The wordmark is 62 cells wide, so it goes first on a small terminal.
         size = event.size
         self.set_class(size.height < 30 or size.width < 66, "compact")

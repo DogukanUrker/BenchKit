@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from rich.text import Text
-from textual import work
+from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -147,7 +147,7 @@ class RunScreen(Screen[None]):
     def dark(self) -> bool:
         return self.app.current_theme.dark
 
-    def on_resize(self, event) -> None:
+    def on_resize(self, event: events.Resize) -> None:
         apply_compact(self, event.size.height)
 
     def on_unmount(self) -> None:
@@ -165,7 +165,11 @@ class RunScreen(Screen[None]):
         )
         try:
             results = engine.run()
-        except Exception:
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.notify, f"Run failed: {exc}", severity="error", timeout=10
+            )
+            self.app.call_from_thread(self._finished, [], None)
             return
 
         output: Path | None = None
@@ -248,6 +252,16 @@ class RunScreen(Screen[None]):
 
     def _job_completed(self, event: JobCompleted) -> None:
         result = event.result
+        if not result["total"]:
+            self._update_queue_row(
+                event.index,
+                progress=bar(0.0, 10),
+                score=Text("—", style="dim"),
+                status="skipped",
+                style="dim",
+            )
+            return
+
         score = result["score"]
         self._update_queue_row(
             event.index,
@@ -408,7 +422,9 @@ class RunScreen(Screen[None]):
     def action_skip(self) -> None:
         if self.finished:
             return
+        # skip_job() also lifts a pause, so the header has to follow.
         self.controls.skip_job()
+        self._set_state("RUNNING", "running")
         self.notify("Skipping to the next run…", timeout=2)
 
     def action_stop(self) -> None:

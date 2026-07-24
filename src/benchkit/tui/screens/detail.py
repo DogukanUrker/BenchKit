@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from rich.text import Text
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -94,7 +95,7 @@ class JobDetailScreen(Screen[None]):
         self._restyle_score()
         self._fill()
 
-    def on_resize(self, event) -> None:
+    def on_resize(self, event: events.Resize) -> None:
         apply_compact(self, event.size.height)
 
     # Rendering --------------------------------------------------------

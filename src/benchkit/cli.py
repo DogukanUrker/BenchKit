@@ -135,7 +135,12 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
             console.print(f"[dim]Available: {', '.join(REGISTRY)}[/dim]")
             sys.exit(1)
         try:
-            parse_slice(slice_spec, task_count(key))
+            total = task_count(key)
+        except Exception as exc:
+            console.print(f"[red]Could not load {key}:[/red] {exc}")
+            sys.exit(1)
+        try:
+            parse_slice(slice_spec, total)
         except SliceError as exc:
             console.print(f"[red]{exc}[/red]")
             sys.exit(1)
@@ -167,10 +172,10 @@ def _headless(args: argparse.Namespace) -> None:
     if args.demo:
         client.prime(sorted({job.benchmark for job in jobs}))
 
-    results = run(client, jobs, console, args.verbose)
+    results, failure = run(client, jobs, console, args.verbose)
     if not results:
         console.print("[yellow]No results.[/yellow]")
-        return
+        sys.exit(1 if failure else 0)
 
     table = Table(
         box=box.MINIMAL,
@@ -203,6 +208,8 @@ def _headless(args: argparse.Namespace) -> None:
 
     out = save(results, provider=getattr(client, "label", ""), host=client.host)
     console.print(f"[dim]Saved:[/dim] [white]{out}[/white]")
+    if failure:
+        sys.exit(1)
 
 
 def main(argv: list[str] | None = None) -> None:

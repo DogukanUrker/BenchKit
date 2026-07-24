@@ -325,9 +325,19 @@ class SetupScreen(Screen[None]):
             return None
 
         for key in benches:
+            total = self.counts.get(key, 0)
+            if total < 0:
+                self.notify(
+                    f"{key}: dataset could not be loaded.",
+                    severity="error",
+                    timeout=6,
+                )
+                return None
             spec = self._limit_for(key)
             try:
-                parse_slice(spec, self.counts.get(key, 0) or 1)
+                # A count of 0 means the tally is still running, which
+                # parse_slice reads as "syntax only".
+                parse_slice(spec, max(total, 0))
             except SliceError:
                 self.notify(
                     f"{key}: {spec!r} is not a valid slice. Use N, -N or A-B.",

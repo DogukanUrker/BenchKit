@@ -22,6 +22,7 @@ from benchkit.engine import (
     JobSpec,
     JobStarted,
     RunControls,
+    RunFailed,
     TaskCompleted,
     slice_label,
 )
@@ -47,8 +48,11 @@ def run(
     jobs: list[JobSpec],
     console: Console,
     verbose: bool = False,
-) -> list[dict]:
-    """Run every job, printing progress to `console`."""
+) -> tuple[list[dict], str | None]:
+    """Run every job, printing progress to `console`.
+
+    Returns the results plus the failure message when the run ended early.
+    """
     progress = Progress(
         TextColumn("[dim]{task.description}"),
         BarColumn(
@@ -91,8 +95,16 @@ def run(
                 console.print("[dim]Response[/dim]")
                 console.print(record.response, markup=False, highlight=False)
                 console.print()
+        elif isinstance(event, RunFailed):
+            console.print(f"[red]Run failed:[/red] {event.message}")
         elif isinstance(event, JobCompleted):
             result = event.result
+            if not result["total"]:
+                console.print(
+                    f"[yellow]Skipped[/yellow] [bold]{result['benchmark']}[/bold] "
+                    f"[dim]on[/dim] [white]{result['model']}[/white]"
+                )
+                return
             style = _score_style(result["score"])
             console.print(
                 f"[dim]Finished[/dim] [bold]{result['benchmark']}[/bold] "
@@ -104,4 +116,5 @@ def run(
 
     engine = Engine(client=client, jobs=jobs, sink=sink, controls=RunControls())
     with progress:
-        return engine.run()
+        results = engine.run()
+    return results, engine.failure

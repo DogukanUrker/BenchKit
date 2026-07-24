@@ -39,13 +39,14 @@ def _canonical_solutions(key: str) -> dict[str, str]:
 
     solutions: dict[str, str] = {}
     try:
-        with open(path) as handle:
+        with open(path, encoding="utf-8") as handle:
             for line in handle:
                 row = json.loads(line)
                 solution = row.get("canonical_solution") or row.get("code")
                 if solution:
                     solutions[row["task_id"]] = solution
-    except (OSError, json.JSONDecodeError, KeyError):
+    # ValueError covers both JSONDecodeError and UnicodeDecodeError.
+    except (OSError, ValueError, KeyError):
         return {}
     return solutions
 

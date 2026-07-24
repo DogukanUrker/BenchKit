@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from textual.app import ComposeResult
 from textual.content import Content
 from textual.reactive import reactive
+from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Static
 
@@ -85,14 +88,14 @@ class Banner(Static):
 ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝   ╚═╝
 """.strip("\n")
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(self.ART, **kwargs)
 
 
 class SectionTitle(Static):
     """A pane heading with an optional right-aligned counter."""
 
-    def __init__(self, title: str, detail: str = "", **kwargs) -> None:
+    def __init__(self, title: str, detail: str = "", **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._title = title
         self._detail = detail
@@ -112,6 +115,6 @@ class SectionTitle(Static):
         self.update(self._render())
 
 
-def apply_compact(screen, height: int) -> None:
+def apply_compact(screen: Screen, height: int) -> None:
     """Tighten the stat cards and progress block on short terminals."""
     screen.set_class(height < 32, "compact")

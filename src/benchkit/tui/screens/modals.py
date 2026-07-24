@@ -114,11 +114,18 @@ class TaskDetailScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         passed = self.task_data.get("passed")
+        error = self.task_data.get("error")
+        if error:
+            status, style = "ERROR", "b yellow"
+        elif passed:
+            status, style = "PASS", "b green"
+        else:
+            status, style = "FAIL", "b red"
         header = Content.from_markup(
             "[b]$task[/b]  [$style]$status[/$style]   [dim]$context[/dim]",
             task=self.task_data.get("task_id", ""),
-            status="PASS" if passed else "FAIL",
-            style="b green" if passed else "b red",
+            status=status,
+            style=style,
             context=self.context,
         )
 

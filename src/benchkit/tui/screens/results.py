@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from rich.text import Text
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -92,7 +93,7 @@ class ResultsScreen(Screen[None]):
             )
         table.focus()
 
-    def on_resize(self, event) -> None:
+    def on_resize(self, event: events.Resize) -> None:
         apply_compact(self, event.size.height)
 
     def _theme_changed(self, _theme: str) -> None:

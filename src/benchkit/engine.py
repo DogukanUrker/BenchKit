@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from benchkit.benchmarks import REGISTRY
 from benchkit.benchmarks.base import Task
@@ -46,6 +46,10 @@ def parse_slice(spec: str | None, total: int) -> tuple[int, int]:
             head, tail = text.split("-", 1)
             start, end = int(head), int(tail)
             if start < 0 or end <= start:
+                raise ValueError(text)
+            # `total <= 0` means the task count is not known yet, so only the
+            # syntax can be checked.
+            if 0 < total <= start:
                 raise ValueError(text)
             return min(start, total), min(end, total)
 
@@ -252,6 +256,23 @@ def plan_total_tasks(jobs: list[JobSpec]) -> int:
     return sum(job.planned_total() for job in jobs)
 
 
+def _empty_result(job: JobSpec) -> dict:
+    """Result shape for a job that finished without scoring a task."""
+    return {
+        "model": job.model,
+        "benchmark": job.benchmark,
+        "score": 0.0,
+        "passed": 0,
+        "total": 0,
+        "tok_s": 0.0,
+        "avg_response_time": 0.0,
+        "total_time": 0.0,
+        "slice": job.slice_spec,
+        "errors": 0,
+        "tasks": [],
+    }
+
+
 @dataclass
 class Engine:
     """Runs a list of jobs, streaming events to a sink."""
@@ -260,29 +281,39 @@ class Engine:
     jobs: list[JobSpec]
     sink: Sink | None = None
     controls: RunControls = field(default_factory=RunControls)
+    failure: str | None = field(default=None, init=False)
 
     def emit(self, event: EngineEvent) -> None:
         if self.sink is not None:
             self.sink(event)
 
     def run(self) -> list[dict]:
+        """Run every job and return the results, including a partial run.
+
+        An unexpected failure ends the run through ``RunFailed`` rather than an
+        exception, so the caller still gets the jobs that already finished and
+        can write a report for them.
+        """
         results: list[dict] = []
         started = time.time()
         overall_total = plan_total_tasks(self.jobs)
         self.emit(RunStarted(list(self.jobs), overall_total))
 
-        try:
-            for index, job in enumerate(self.jobs):
-                if self.controls.stopped:
-                    break
+        for index, job in enumerate(self.jobs):
+            if self.controls.stopped:
+                break
+            try:
                 result, skipped = self._run_job(index, job, overall_total)
-                if result is not None:
-                    results.append(result)
-                    self.emit(JobCompleted(index, job, result, skipped))
-                self._maybe_unload(index, job)
-        except Exception as exc:  # surfaced to the UI instead of a traceback
-            self.emit(RunFailed(f"{type(exc).__name__}: {exc}"))
-            raise
+            except Exception as exc:
+                self.failure = f"{type(exc).__name__}: {exc}"
+                self.emit(RunFailed(self.failure))
+                break
+            # Every job reports a terminal event, even an empty one, so the UI
+            # never leaves a queue row running.
+            self.emit(JobCompleted(index, job, result or _empty_result(job), skipped))
+            if result is not None:
+                results.append(result)
+            self._maybe_unload(index, job)
 
         self.emit(
             RunCompleted(
@@ -326,9 +357,13 @@ class Engine:
         records: list[TaskRecord] = []
         skipped = False
         wall_start = time.time()
+        paused_time = 0.0
 
         for position, task in enumerate(tasks):
-            self.controls.wait_while_paused()
+            if self.controls.paused:
+                pause_started = time.time()
+                self.controls.wait_while_paused()
+                paused_time += time.time() - pause_started
             if self.controls.stopped:
                 break
             if self.controls.take_skip():
@@ -348,7 +383,9 @@ class Engine:
                 ok = bool(bench.evaluate(task, gen["response"]))
             except Exception as exc:
                 ok = False
-                error = error or f"evaluation failed: {type(exc).__name__}: {exc}"
+                if not error:
+                    error = f"evaluation failed: {type(exc).__name__}: {exc}"
+                    errors += 1
 
             if ok:
                 passed += 1
@@ -374,7 +411,7 @@ class Engine:
         if not records:
             return None, skipped
 
-        total_time = round(time.time() - wall_start, 1)
+        total_time = round(time.time() - wall_start - paused_time, 1)
         completed = len(records)
         tok_s = total_tokens / (total_eval_ns / 1e9) if total_eval_ns > 0 else 0.0
         score = passed / completed * 100 if completed else 0.0

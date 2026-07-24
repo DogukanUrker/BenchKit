@@ -7,11 +7,11 @@
   <title>BenchKit Results</title>
   <script>
     // Applied before paint so the report never flashes the wrong theme.
+    // Dogi Light is the default; an explicit choice is remembered.
     (() => {
       let stored = null;
       try { stored = localStorage.getItem("benchkit-theme"); } catch (error) { stored = null; }
-      const dark = stored ? stored === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-      document.documentElement.dataset.theme = dark ? "dark" : "light";
+      document.documentElement.dataset.theme = stored === "dark" ? "dark" : "light";
     })();
   </script>
   <style>
