@@ -6,7 +6,6 @@ from pathlib import Path
 
 from textual.app import App
 from textual.binding import Binding
-from textual.theme import Theme
 
 from benchkit.engine import JobSpec
 from benchkit.tui.screens.connect import ConnectScreen
@@ -14,45 +13,11 @@ from benchkit.tui.screens.help import HelpScreen
 from benchkit.tui.screens.results import ResultsScreen
 from benchkit.tui.screens.run import RunScreen
 from benchkit.tui.screens.setup import SetupScreen
-
-BENCHKIT_DARK = Theme(
-    name="benchkit",
-    primary="#7aa2f7",
-    secondary="#bb9af7",
-    accent="#2ac3de",
-    success="#9ece6a",
-    warning="#e0af68",
-    error="#f7768e",
-    foreground="#c0caf5",
-    background="#11141c",
-    surface="#171b24",
-    panel="#1f2430",
-    dark=True,
-    variables={
-        "block-cursor-text-style": "bold",
-        "footer-key-foreground": "#2ac3de",
-        "input-selection-background": "#7aa2f7 35%",
-        "border": "#2b3244",
-    },
-)
-
-BENCHKIT_LIGHT = Theme(
-    name="benchkit-light",
-    primary="#3d5afe",
-    secondary="#7c4dff",
-    accent="#00838f",
-    success="#2e7d32",
-    warning="#a06000",
-    error="#c62828",
-    foreground="#1a1f2b",
-    background="#f4f5f8",
-    surface="#ffffff",
-    panel="#e8eaf0",
-    dark=False,
-    variables={
-        "block-cursor-text-style": "bold",
-        "footer-key-foreground": "#00838f",
-    },
+from benchkit.tui.theme import (
+    ALTERNATE_THEME,
+    DEFAULT_THEME,
+    THEMES,
+    VARIABLE_DEFAULTS,
 )
 
 
@@ -73,16 +38,19 @@ class BenchKitApp(App[None]):
 
     def __init__(self, *, demo: bool = False, host: str | None = None) -> None:
         super().__init__()
+        for theme in THEMES:
+            self.register_theme(theme)
+        self.theme = DEFAULT_THEME
         self.demo = demo
         self.host_override = host
         self.client = None
         self.models: list[dict] = []
         self.last_output: Path | None = None
 
+    def get_theme_variable_defaults(self) -> dict[str, str]:
+        return dict(VARIABLE_DEFAULTS)
+
     def on_mount(self) -> None:
-        self.register_theme(BENCHKIT_DARK)
-        self.register_theme(BENCHKIT_LIGHT)
-        self.theme = "benchkit"
         self.push_screen(ConnectScreen())
 
     # Navigation -------------------------------------------------------
@@ -111,7 +79,7 @@ class BenchKitApp(App[None]):
             self.push_screen(HelpScreen())
 
     def action_toggle_theme(self) -> None:
-        self.theme = "benchkit-light" if self.theme == "benchkit" else "benchkit"
+        self.theme = ALTERNATE_THEME if self.theme == DEFAULT_THEME else DEFAULT_THEME
         self.notify(f"Theme: {self.theme}", timeout=2)
 
 

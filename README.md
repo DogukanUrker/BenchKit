@@ -47,12 +47,19 @@ early.
 | `p` / `k` / `x` | Pause / skip job / stop during a run |
 | `f` | Failures only |
 | `Enter` | Inspect the highlighted row |
-| `F2` | Light / dark theme |
+| `F2` | Dogi light / dark |
 | `Ctrl+P` | Command palette |
 | `Ctrl+Q` | Quit |
 
 Task limits accept `20` (first 20), `-20` (last 20) and `40-80` (a range), set
 globally or per benchmark.
+
+### Theme
+
+BenchKit is themed with [Dogi](https://github.com/DogukanUrker/DogiZed) - flat
+black or white, colour only where it means something. Dark is the default,
+`F2` switches to light, and the command palette (`Ctrl+P`) can swap in any
+Textual theme.
 
 ### Demo mode
 

@@ -17,7 +17,7 @@ class StatCard(Widget):
         width: 1fr;
         height: 4;
         padding: 0 1;
-        border-left: outer $panel;
+        border-left: outer $bk-border;
         background: $surface;
     }
     StatCard .stat-label {

@@ -17,6 +17,7 @@ from benchkit.demo import DemoClient
 from benchkit.engine import JobSpec, SliceError, parse_slice, slice_label, task_count
 from benchkit.tui.formatting import fmt_count, fmt_size
 from benchkit.tui.screens.modals import LimitScreen
+from benchkit.tui.theme import score_palette
 from benchkit.tui.widgets import SectionTitle
 
 DESCRIPTIONS = {
@@ -101,7 +102,11 @@ class SetupScreen(Screen[None]):
         self._rebuild_benchmarks()
         self._refresh_summary()
         self.query_one("#model-list", SelectionList).focus()
+        self.watch(self.app, "theme", self._theme_changed, init=False)
         self._count_tasks()
+
+    def _theme_changed(self, _theme: str) -> None:
+        self._rebuild_benchmarks()
 
     # Task counting ----------------------------------------------------
 
@@ -145,7 +150,8 @@ class SetupScreen(Screen[None]):
         text.append(count_text.rjust(12), style="dim")
         limit = self.limits.get(key)
         if limit:
-            text.append(f"  {slice_label(limit)}", style="bold yellow")
+            accent = score_palette(self.app.current_theme.dark)["mid"]
+            text.append(f"  {slice_label(limit)}", style=f"bold {accent}")
         else:
             text.append(f"  {DESCRIPTIONS.get(key, '')}", style="dim")
         return text

@@ -28,7 +28,13 @@ from benchkit.engine import (
     plan_total_tasks,
 )
 from benchkit.report import save
-from benchkit.tui.formatting import bar, fmt_count, fmt_duration, score_color
+from benchkit.tui.formatting import (
+    bar,
+    fmt_count,
+    fmt_duration,
+    result_color,
+    score_color,
+)
 from benchkit.tui.screens.modals import ConfirmScreen, TaskDetailScreen
 from benchkit.tui.widgets import SectionTitle, StatCard, apply_compact
 
@@ -137,6 +143,10 @@ class RunScreen(Screen[None]):
         self.set_interval(0.5, self._tick)
         self._start_engine()
 
+    @property
+    def dark(self) -> bool:
+        return self.app.current_theme.dark
+
     def on_resize(self, event) -> None:
         apply_compact(self, event.size.height)
 
@@ -231,7 +241,7 @@ class RunScreen(Screen[None]):
         self._update_queue_row(
             event.index,
             progress=bar(event.completed / max(self.current_total, 1), 10),
-            score=Text(f"{score:.1f}%", style=f"bold {score_color(score)}"),
+            score=Text(f"{score:.1f}%", style=f"bold {score_color(score, self.dark)}"),
         )
         self._update_labels()
         self._update_stats()
@@ -242,7 +252,7 @@ class RunScreen(Screen[None]):
         self._update_queue_row(
             event.index,
             progress=bar(1.0, 10),
-            score=Text(f"{score:.1f}%", style=f"bold {score_color(score)}"),
+            score=Text(f"{score:.1f}%", style=f"bold {score_color(score, self.dark)}"),
             status="skipped" if event.skipped else "done",
             style="dim" if event.skipped else "",
         )
@@ -270,7 +280,7 @@ class RunScreen(Screen[None]):
         table.add_row(
             str(record.index + 1),
             record.label,
-            _result_cell(record),
+            _result_cell(record, self.dark),
             fmt_duration(record.response_time_s),
             f"{record.tok_s:.1f}" if record.tok_s else "—",
             key=f"{job_index}:{record.index}",
@@ -287,7 +297,7 @@ class RunScreen(Screen[None]):
             table.add_row(
                 str(record.index + 1),
                 record.label,
-                _result_cell(record),
+                _result_cell(record, self.dark),
                 fmt_duration(record.response_time_s),
                 f"{record.tok_s:.1f}" if record.tok_s else "—",
                 key=f"{self.current_index}:{record.index}",
@@ -432,9 +442,7 @@ class RunScreen(Screen[None]):
         self.notify(f"Auto-scroll {'on' if self.follow else 'off'}", timeout=2)
 
 
-def _result_cell(record: TaskRecord) -> Text:
-    if record.error:
-        return Text("ERROR", style="bold yellow")
-    if record.passed:
-        return Text("PASS", style="bold green")
-    return Text("FAIL", style="bold red")
+def _result_cell(record: TaskRecord, dark: bool = True) -> Text:
+    label = "ERROR" if record.error else ("PASS" if record.passed else "FAIL")
+    color = result_color(record.passed, bool(record.error), dark)
+    return Text(label, style=f"bold {color}")

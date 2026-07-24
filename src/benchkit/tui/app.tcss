@@ -5,22 +5,22 @@ Screen {
 }
 
 Header {
-    background: $panel;
+    background: $bk-raise;
 }
 
 Footer {
-    background: $panel;
+    background: $bk-raise;
 }
 
 .pane {
     background: $surface;
-    border: round $panel;
+    border: round $bk-border;
     padding: 0 1;
     height: 1fr;
 }
 
 .pane:focus-within {
-    border: round $accent;
+    border: round $primary;
 }
 
 .card-title {
@@ -49,14 +49,14 @@ Footer {
 
 .filter {
     border: none;
-    background: $panel;
+    background: $bk-raise;
     height: 1;
     margin: 0 0 1 0;
     padding: 0 1;
 }
 
 .filter:focus {
-    background: $panel-lighten-1;
+    background: $primary 15%;
 }
 
 SelectionList {
@@ -71,14 +71,14 @@ DataTable {
 }
 
 DataTable > .datatable--header {
-    background: $panel;
+    background: $bk-raise;
     color: $text-muted;
     text-style: bold;
 }
 
 DataTable > .datatable--cursor {
-    background: $accent 25%;
-    color: $text;
+    background: $bk-selection;
+    color: $foreground;
     text-style: bold;
 }
 
@@ -106,12 +106,12 @@ DataTable > .datatable--cursor {
     width: 72;
     height: auto;
     background: $surface;
-    border: round $panel;
+    border: round $bk-border;
     padding: 1 2;
 }
 
 #connect-card.busy {
-    border: round $accent;
+    border: round $primary;
 }
 
 #connect-form {
@@ -121,7 +121,7 @@ DataTable > .datatable--cursor {
 #connect-form Input,
 #connect-form Select {
     width: 1fr;
-    background: $panel;
+    background: $bk-raise;
 }
 
 #connect-actions {
@@ -180,7 +180,7 @@ DataTable > .datatable--cursor {
 .limit-input {
     width: 14;
     border: none;
-    background: $panel;
+    background: $bk-raise;
     padding: 0 1;
     height: 1;
     margin: 0 2 0 0;
@@ -195,7 +195,7 @@ DataTable > .datatable--cursor {
     height: 3;
     padding: 0 2;
     align-vertical: middle;
-    background: $panel;
+    background: $bk-raise;
 }
 
 #plan-summary {
@@ -259,7 +259,7 @@ DataTable > .datatable--cursor {
 }
 
 ProgressBar > Bar > .bar--bar {
-    color: $accent;
+    color: $primary;
 }
 
 ProgressBar > Bar > .bar--complete {
@@ -303,7 +303,7 @@ ProgressBar > Bar > .bar--complete {
 
 #task-search {
     border: none;
-    background: $panel;
+    background: $bk-raise;
     height: 1;
     margin: 0 0 1 0;
     padding: 0 1;
@@ -313,12 +313,12 @@ ProgressBar > Bar > .bar--complete {
 
 LimitScreen, TaskDetailScreen, ConfirmScreen, HelpScreen {
     align: center middle;
-    background: $background 60%;
+    background: $background 70%;
 }
 
 .dialog {
     background: $surface;
-    border: round $accent;
+    border: round $primary;
     padding: 1 2;
 }
 

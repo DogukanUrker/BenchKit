@@ -10,7 +10,12 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Input
 
 from benchkit.engine import slice_label
-from benchkit.tui.formatting import fmt_count, fmt_duration, score_color
+from benchkit.tui.formatting import (
+    fmt_count,
+    fmt_duration,
+    result_color,
+    score_color,
+)
 from benchkit.tui.screens.modals import TaskDetailScreen
 from benchkit.tui.widgets import SectionTitle, StatCard, apply_compact
 
@@ -75,10 +80,19 @@ class JobDetailScreen(Screen[None]):
         self.query_one("#stat-duration", StatCard).set_state(
             fmt_duration(result["total_time"])
         )
-        self.query_one("#stat-score", StatCard).styles.color = score_color(score)
+        self._restyle_score()
 
         self._fill()
+        self.watch(self.app, "theme", self._theme_changed, init=False)
         table.focus()
+
+    def _restyle_score(self) -> None:
+        color = score_color(self.result["score"], self.app.current_theme.dark)
+        self.query_one("#stat-score", StatCard).styles.color = color
+
+    def _theme_changed(self, _theme: str) -> None:
+        self._restyle_score()
+        self._fill()
 
     def on_resize(self, event) -> None:
         apply_compact(self, event.size.height)
@@ -113,7 +127,7 @@ class JobDetailScreen(Screen[None]):
             table.add_row(
                 str(index + 1),
                 label,
-                _result_cell(task),
+                _result_cell(task, self.app.current_theme.dark),
                 fmt_duration(task.get("response_time_s", 0)),
                 f"{task.get('tok_s', 0):.1f}",
                 key=str(index),
@@ -149,9 +163,8 @@ class JobDetailScreen(Screen[None]):
         self.app.pop_screen()
 
 
-def _result_cell(task: dict) -> Text:
-    if task.get("error"):
-        return Text("ERROR", style="bold yellow")
-    if task.get("passed"):
-        return Text("PASS", style="bold green")
-    return Text("FAIL", style="bold red")
+def _result_cell(task: dict, dark: bool = True) -> Text:
+    error = bool(task.get("error"))
+    passed = bool(task.get("passed"))
+    label = "ERROR" if error else ("PASS" if passed else "FAIL")
+    return Text(label, style=f"bold {result_color(passed, error, dark)}")

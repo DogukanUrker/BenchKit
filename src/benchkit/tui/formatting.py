@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from benchkit.tui.theme import score_palette
+
 
 def fmt_duration(seconds: float | None) -> str:
     """Compact duration: ``1h 04m``, ``4m 12s``, ``42s`` or ``0.8s``."""
@@ -40,12 +42,22 @@ def score_class(score: float) -> str:
     return "score-low"
 
 
-def score_color(score: float) -> str:
+def score_color(score: float, dark: bool = True) -> str:
+    """Score colour from the active Dogi palette."""
+    palette = score_palette(dark)
     if score >= 80:
-        return "#3fb950"
+        return palette["high"]
     if score >= 50:
-        return "#d29922"
-    return "#f85149"
+        return palette["mid"]
+    return palette["low"]
+
+
+def result_color(passed: bool, error: bool = False, dark: bool = True) -> str:
+    """Colour for a single task outcome."""
+    palette = score_palette(dark)
+    if error:
+        return palette["mid"]
+    return palette["high"] if passed else palette["low"]
 
 
 def bar(fraction: float, width: int = 12) -> str:

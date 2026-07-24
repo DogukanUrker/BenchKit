@@ -79,6 +79,7 @@ class ResultsScreen(Screen[None]):
 
         self._fill_table()
         self._fill_stats()
+        self.watch(self.app, "theme", self._theme_changed, init=False)
 
         if self.output is not None:
             path = self.output.resolve()
@@ -94,6 +95,10 @@ class ResultsScreen(Screen[None]):
     def on_resize(self, event) -> None:
         apply_compact(self, event.size.height)
 
+    def _theme_changed(self, _theme: str) -> None:
+        # Table cell colours are baked in, so redraw them for the new palette.
+        self._fill_table()
+
     # Rendering --------------------------------------------------------
 
     def _sorted(self) -> list[tuple[int, dict]]:
@@ -103,9 +108,10 @@ class ResultsScreen(Screen[None]):
     def _fill_table(self) -> None:
         table = self.query_one("#summary", DataTable)
         table.clear()
+        dark = self.app.current_theme.dark
         for index, result in self._sorted():
             score = result["score"]
-            color = score_color(score)
+            color = score_color(score, dark)
             table.add_row(
                 result["model"],
                 result["benchmark"]

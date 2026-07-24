@@ -15,7 +15,7 @@ HELP = """
 | --- | --- |
 | `?` / `F1` | This help |
 | `Ctrl+P` | Command palette |
-| `F2` | Toggle light / dark theme |
+| `F2` | Dogi light / dark theme |
 | `Ctrl+Q` | Quit |
 | `Tab` / `Shift+Tab` | Move between panes |
 
