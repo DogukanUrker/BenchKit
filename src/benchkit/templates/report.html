@@ -3,19 +3,82 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>BenchKit Results</title>
+  <script>
+    // Applied before paint so the report never flashes the wrong theme.
+    // Dogi Light is the default; an explicit choice is remembered.
+    (() => {
+      let stored = null;
+      try { stored = localStorage.getItem("benchkit-theme"); } catch (error) { stored = null; }
+      document.documentElement.dataset.theme = stored === "dark" ? "dark" : "light";
+    })();
+  </script>
   <style>
+    /* Dogi (https://github.com/DogukanUrker/DogiZed): flat black or white,
+       colour only where it carries meaning. */
+    :root,
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --page: #ffffff;
+      --card: #ffffff;
+      --ink: #0b0b0b;
+      --muted: #6b7280;
+      --line: rgba(11, 11, 11, .12);
+      --raise: rgba(11, 11, 11, .04);
+      --track: rgba(11, 11, 11, .09);
+      --green: #059669;
+      --green-soft: #10b981;
+      --red: #dc2626;
+      --blue: #2563eb;
+      --amber: #d97706;
+      --bar: #6b7280;
+      --bar-light: rgba(11, 11, 11, .09);
+      --shade-1: #dbeafe;
+      --shade-2: #bfdbfe;
+      --shade-3: #93c5fd;
+      --shade-4: #60a5fa;
+      --shade-5: #3b82f6;
+      --shade-6: #2563eb;
+      --shade-7: #1d4ed8;
+      --series-1: #059669;
+      --series-2: #2563eb;
+      --series-3: #db2777;
+      --series-4: #0891b2;
+      --series-5: #d97706;
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --page: #000000;
+      --card: #000000;
+      --ink: #ffffff;
+      --muted: #6b7280;
+      --line: rgba(255, 255, 255, .14);
+      --raise: rgba(255, 255, 255, .06);
+      --track: rgba(255, 255, 255, .12);
+      --green: #34d399;
+      --green-soft: #6ee7b7;
+      --red: #ef4444;
+      --blue: #60a5fa;
+      --amber: #facc15;
+      --bar: #9aa1ad;
+      --bar-light: rgba(255, 255, 255, .12);
+      --shade-1: #14304f;
+      --shade-2: #1b4470;
+      --shade-3: #235891;
+      --shade-4: #2c6cb2;
+      --shade-5: #3f86d4;
+      --shade-6: #4f95e8;
+      --shade-7: #60a5fa;
+      --series-1: #34d399;
+      --series-2: #60a5fa;
+      --series-3: #f472b6;
+      --series-4: #22d3ee;
+      --series-5: #facc15;
+    }
+
     :root {
-      --white: #ffffff;
-      --page: #f2f3f1;
-      --ink: #171a1d;
-      --muted: #9aa0a8;
-      --line: #e2e4e1;
-      --green: #16a34a;
-      --bar: #7d8795;
-      --bar-light: #d5d9df;
-      --red: #d74732;
       --sans: "Avenir Next", Avenir, "Century Gothic", sans-serif;
       --mono: "SFMono-Regular", "Cascadia Mono", Menlo, monospace;
     }
@@ -39,12 +102,30 @@
       gap: 32px;
       align-items: end;
       padding-bottom: 30px;
-      border-bottom: 1px solid #d9dcd8;
+      border-bottom: 1px solid var(--line);
     }
     h1, h2, h3, p { margin-top: 0; }
     h1 { margin-bottom: 7px; font-size: 42px; line-height: 1; letter-spacing: -.045em; }
-    .meta { margin: 0; color: #7e858d; font: 11px/1.55 var(--mono); }
+    .meta { margin: 0; color: var(--muted); font: 11px/1.55 var(--mono); }
+    .head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 18px; }
     .best { text-align: right; }
+
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--raise);
+      color: var(--ink);
+      cursor: pointer;
+      font: 700 9px/1 var(--mono);
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .theme-toggle:hover { border-color: var(--blue); color: var(--blue); }
+    .theme-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--blue); }
     .best-score { color: var(--green); font-size: 42px; font-weight: 800; line-height: 1; letter-spacing: -.045em; }
     .best-model { margin-top: 6px; font-size: 12px; font-weight: 800; }
 
@@ -52,7 +133,7 @@
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       margin: 28px 0 64px;
-      background: var(--white);
+      background: var(--card);
       border: 1px solid var(--line);
     }
     .stat { padding: 21px 24px; }
@@ -80,7 +161,7 @@
       overflow: hidden;
       border: 1px solid var(--line);
       border-radius: 22px;
-      background: var(--white);
+      background: var(--card);
     }
     .chart-header { display: flex; align-items: baseline; gap: 8px; }
     .chart-title { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -.035em; text-transform: none; }
@@ -122,7 +203,7 @@
       transform-origin: bottom;
       animation: rise .55s cubic-bezier(.25,.7,.2,1) both;
     }
-    .bar-item.winner .bar { background: linear-gradient(#20c65c, var(--green)); }
+    .bar-item.winner .bar { background: linear-gradient(var(--green-soft), var(--green)); }
     @keyframes rise { from { transform: scaleY(0); } }
 
     .bar-labels {
@@ -166,14 +247,14 @@
     }
     .grid-line { stroke: var(--line); stroke-width: 1; }
     .axis-label { fill: var(--muted); font: 9px var(--mono); }
-    .scatter-dot { fill: var(--bar); stroke: var(--white); stroke-width: 3; }
+    .scatter-dot { fill: var(--bar); stroke: var(--card); stroke-width: 3; }
     .scatter-dot.winner { fill: var(--green); }
     .scatter-label { fill: var(--ink); font: 800 10px var(--sans); }
 
     .stack-list { display: grid; gap: 24px; margin-top: 58px; }
     .stack-row { display: grid; grid-template-columns: 190px 1fr 70px; gap: 18px; align-items: center; }
     .stack-name { overflow: hidden; font-size: 12px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
-    .stack-track { display: flex; height: 28px; overflow: hidden; border-radius: 7px; background: var(--bar-light); }
+    .stack-track { display: flex; height: 28px; overflow: hidden; border-radius: 7px; background: var(--track); }
     .stack-pass { width: calc(var(--value) * 1%); background: var(--green); }
     .stack-score { font-size: 17px; font-weight: 800; text-align: right; }
     .stack-key { display: flex; gap: 18px; margin-top: 26px; color: var(--muted); font-size: 9px; }
@@ -183,25 +264,25 @@
     .horizontal-list { display: grid; gap: 20px; margin-top: 46px; }
     .horizontal-row { display: grid; grid-template-columns: 190px 1fr 88px; gap: 18px; align-items: center; }
     .horizontal-name { overflow: hidden; font-size: 12px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
-    .horizontal-track { height: 18px; border-radius: 5px; background: #eef0ed; overflow: hidden; }
+    .horizontal-track { height: 18px; border-radius: 5px; background: var(--track); overflow: hidden; }
     .horizontal-fill { width: calc(var(--value) * 1%); height: 100%; border-radius: inherit; background: var(--bar); }
     .horizontal-row.winner .horizontal-fill { background: var(--green); }
     .horizontal-value { color: var(--bar); font-size: 15px; font-weight: 800; text-align: right; }
     .horizontal-row.winner .horizontal-value { color: var(--green); }
 
     .matrix-card { display: flex; flex-direction: column; }
-    .matrix-wrap { margin-top: 34px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--white); }
+    .matrix-wrap { margin-top: 34px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 13px 14px; border-bottom: 1px solid var(--line); font-size: 10px; text-align: right; white-space: nowrap; }
     tr:last-child td { border-bottom: 0; }
-    th { color: var(--muted); background: #fafbfa; font: 8px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+    th { color: var(--muted); background: var(--raise); font: 8px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
     th:first-child, td:first-child { position: sticky; left: 0; text-align: left; }
-    th:first-child { z-index: 2; background: #fafbfa; }
-    td:first-child { z-index: 1; max-width: 240px; background: var(--white); font-weight: 800; overflow: hidden; text-overflow: ellipsis; }
+    th:first-child { z-index: 2; background: var(--raise); }
+    td:first-child { z-index: 1; max-width: 240px; background: var(--card); font-weight: 800; overflow: hidden; text-overflow: ellipsis; }
     .score-cell { color: var(--green); font-size: 14px; font-weight: 800; }
 
     .details { display: grid; gap: 8px; }
-    details { border: 1px solid var(--line); border-radius: 10px; background: var(--white); overflow: hidden; }
+    details { border: 1px solid var(--line); border-radius: 10px; background: var(--card); overflow: hidden; }
     summary {
       display: grid;
       grid-template-columns: 1fr auto auto;
@@ -223,15 +304,16 @@
     .status { color: var(--red); font-weight: 900; }
     .status.pass { color: var(--green); }
     .exchange { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
-    .code { min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: #fafbfa; overflow: hidden; }
+    .code { min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--raise); overflow: hidden; }
     .code-label { padding: 8px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font: 8px/1 var(--mono); text-transform: uppercase; }
     pre { max-height: 300px; margin: 0; padding: 11px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 9px/1.55 var(--mono); }
-    footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 70px; padding-top: 24px; border-top: 1px solid #d9dcd8; color: var(--muted); font: 8px/1.4 var(--mono); }
+    footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 70px; padding-top: 24px; border-top: 1px solid var(--line); color: var(--muted); font: 8px/1.4 var(--mono); }
 
     @media (max-width: 720px) {
       .page { width: min(100% - 24px, 600px); padding-top: 34px; }
       .report-head { display: block; }
-      .best { margin-top: 24px; text-align: left; }
+      .head-right { align-items: flex-start; margin-top: 24px; }
+      .best { text-align: left; }
       .summary { grid-template-columns: repeat(2, 1fr); }
       .stat:nth-child(3) { border-top: 1px solid var(--line); border-left: 0; }
       .stat:nth-child(4) { border-top: 1px solid var(--line); }
@@ -252,7 +334,12 @@
         <h1>BenchKit results</h1>
         <p class="meta" id="reportMeta"></p>
       </div>
-      <div class="best" id="best"></div>
+      <div class="head-right">
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch colour theme">
+          <span class="theme-dot"></span><span id="themeLabel">Dark</span>
+        </button>
+        <div class="best" id="best"></div>
+      </div>
     </header>
 
     <section class="summary" id="summary"></section>
@@ -281,6 +368,19 @@
 
   <script id="reportData" type="application/json">__BENCHKIT_REPORT_DATA__</script>
   <script>
+    const root = document.documentElement;
+    const themeLabel = document.getElementById("themeLabel");
+    const setTheme = mode => {
+      root.dataset.theme = mode;
+      themeLabel.textContent = mode === "dark" ? "Light" : "Dark";
+    };
+    setTheme(root.dataset.theme === "dark" ? "dark" : "light");
+    document.getElementById("themeToggle").addEventListener("click", () => {
+      const next = root.dataset.theme === "dark" ? "light" : "dark";
+      setTheme(next);
+      try { localStorage.setItem("benchkit-theme", next); } catch (error) { /* file:// */ }
+    });
+
     const report = JSON.parse(document.getElementById("reportData").textContent);
     const rows = [...report.results];
     const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
@@ -316,7 +416,7 @@
     const best = models[0] || { model: "No results", score: 0, passed: 0, total: 0, speed: 0 };
 
     const chartItems = items => [...items].sort((a, b) => b.value - a.value).slice(0, 7).sort((a, b) => a.value - b.value);
-    const shades = ["#d7dbe1", "#c2c8d0", "#aab2bd", "#929cab", "#7b8696", "#657184", "#505d71"];
+    const shades = [1, 2, 3, 4, 5, 6, 7].map(step => `var(--shade-${step})`);
     const chart = ({ title, subtitle, items, scale = 100, suffix = "%", meta }) => {
       const visible = chartItems(items);
       const max = Math.max(
@@ -376,7 +476,7 @@
     document.getElementById("benchmarkCharts").innerHTML = benchmarks.map((_, index) => chart(chartConfigs.get(`benchmark-${index}`))).join("");
 
     const visibleModels = models.slice(0, 5);
-    const seriesShades = ["#16a34a", "#566477", "#87919e", "#b0b7c0", "#d4d8dd"];
+    const seriesShades = [1, 2, 3, 4, 5].map(step => `var(--series-${step})`);
     const rowLookupForBenchmark = benchmark => new Map(
       rows.filter(row => row.benchmark === benchmark).map(row => [row.model, row])
     );
@@ -440,6 +540,7 @@
       </div>`).join("")}</div>
     </article>`;
 
+    const heat = value => `color-mix(in srgb, var(--green) ${(clamp(value) / 5).toFixed(2)}%, transparent)`;
     const rowLookup = new Map();
     rows.forEach(row => {
       if (!rowLookup.has(row.model)) rowLookup.set(row.model, new Map());
@@ -450,11 +551,11 @@
       <div class="matrix-wrap"><table>
       <thead><tr><th>Model</th><th>Overall</th>${benchmarks.map(item => `<th>${escapeHtml(item)}</th>`).join("")}<th>tok/s</th></tr></thead>
       <tbody>${models.slice(0, 8).map(model => `<tr>
-        <td>${escapeHtml(model.model)}</td><td class="score-cell" style="background:rgba(22,163,74,${clamp(model.score) / 500})">${number(model.score).toFixed(1)}%</td>
+        <td>${escapeHtml(model.model)}</td><td class="score-cell" style="background:${heat(model.score)}">${number(model.score).toFixed(1)}%</td>
         ${benchmarks.map(benchmark => {
           const row = rowLookup.get(model.model)?.get(benchmark);
           return row
-            ? `<td style="background:rgba(22,163,74,${clamp(row.score) / 500})">${number(row.score).toFixed(1)}%</td>`
+            ? `<td style="background:${heat(row.score)}">${number(row.score).toFixed(1)}%</td>`
             : "<td>—</td>";
         }).join("")}<td>${model.speed.toFixed(1)}</td>
       </tr>`).join("")}</tbody>

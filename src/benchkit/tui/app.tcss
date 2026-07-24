@@ -1,0 +1,406 @@
+/* BenchKit TUI stylesheet */
+
+Screen {
+    background: $background;
+}
+
+Header {
+    background: $bk-raise;
+}
+
+Footer {
+    background: $bk-raise;
+}
+
+.pane {
+    background: $surface;
+    border: round $bk-border;
+    padding: 0 1;
+    height: 1fr;
+}
+
+.pane:focus-within {
+    border: round $primary;
+}
+
+.card-title {
+    text-style: bold;
+    padding: 0 0 1 0;
+}
+
+.hint {
+    color: $text-muted;
+}
+
+.field {
+    height: 1;
+    margin: 0 0 1 0;
+}
+
+.field-label {
+    width: 12;
+    padding: 0 1 0 0;
+    color: $text-muted;
+}
+
+.field-label.wide {
+    width: 22;
+}
+
+.filter {
+    border: none;
+    background: $bk-raise;
+    height: 1;
+    margin: 0 0 1 0;
+    padding: 0 1;
+}
+
+.filter:focus {
+    background: $primary 15%;
+}
+
+SelectionList {
+    background: $surface;
+    height: 1fr;
+    padding: 0;
+}
+
+DataTable {
+    height: 1fr;
+    background: $surface;
+}
+
+DataTable > .datatable--header {
+    background: $bk-raise;
+    color: $text-muted;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: $bk-selection;
+    color: $foreground;
+    text-style: bold;
+}
+
+/* ---------------------------------------------------------------- Connect */
+
+#connect-root {
+    align: center middle;
+    height: 1fr;
+    padding: 1 2;
+}
+
+/* Every child is pinned to the card width so `align: center middle` has a
+   group narrower than the screen to centre. A full-width child (Static
+   defaults to one) would silently pin the group to the left edge. */
+#banner {
+    width: 72;
+    max-width: 100%;
+    color: $primary;
+    text-style: bold;
+    margin: 0 0 1 0;
+}
+
+#tagline {
+    width: 72;
+    max-width: 100%;
+    color: $text-muted;
+    margin: 0 0 1 0;
+}
+
+#connect-card {
+    width: 72;
+    max-width: 100%;
+    height: auto;
+    background: $surface;
+    border: round $bk-border;
+    padding: 1 2;
+}
+
+#connect-card.busy {
+    border: round $primary;
+}
+
+#connect-form {
+    height: auto;
+}
+
+#connect-form Input,
+#connect-form Select {
+    width: 1fr;
+    background: $bk-raise;
+}
+
+#connect-actions {
+    height: auto;
+    padding: 1 0 0 0;
+}
+
+#connect-actions Button {
+    margin: 0 2 0 0;
+}
+
+#connect-status {
+    height: auto;
+    padding: 1 0 0 0;
+    color: $text-muted;
+}
+
+#connect-status.working {
+    color: $accent;
+}
+
+#connect-status.ok {
+    color: $success;
+}
+
+#connect-status.error {
+    color: $error;
+}
+
+/* ------------------------------------------------------------------ Setup */
+
+#setup-body {
+    height: 1fr;
+    padding: 1 1 0 1;
+}
+
+#model-pane {
+    width: 2fr;
+    margin: 0 1 0 0;
+}
+
+#bench-pane {
+    width: 3fr;
+}
+
+#setup-options {
+    height: 1;
+    padding: 0 2;
+    margin: 1 0 0 0;
+}
+
+#setup-options .field-label {
+    padding: 0 1 0 0;
+}
+
+.limit-input {
+    width: 14;
+    border: none;
+    background: $bk-raise;
+    padding: 0 1;
+    height: 1;
+    margin: 0 2 0 0;
+}
+
+#setup-options .hint {
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#setup-footer {
+    height: 3;
+    padding: 0 2;
+    align-vertical: middle;
+    background: $bk-raise;
+}
+
+#plan-summary {
+    width: 1fr;
+    padding: 1 0 0 0;
+}
+
+/* -------------------------------------------------------------------- Run */
+
+#run-root {
+    height: 1fr;
+    padding: 1 1 0 1;
+}
+
+#run-head {
+    height: 1;
+    padding: 0 1;
+}
+
+#run-title {
+    width: 1fr;
+}
+
+.state {
+    width: auto;
+    padding: 0 1;
+    text-style: bold;
+}
+
+.state.running {
+    background: $success 20%;
+    color: $success;
+}
+
+.state.paused {
+    background: $warning 20%;
+    color: $warning;
+}
+
+.state.done {
+    background: $accent 20%;
+    color: $accent;
+}
+
+#progress-block {
+    height: auto;
+    padding: 1 1 0 1;
+}
+
+#progress-block Static {
+    color: $text-muted;
+}
+
+#progress-block ProgressBar {
+    width: 100%;
+    margin: 0 0 1 0;
+}
+
+#progress-block Bar {
+    width: 1fr;
+}
+
+ProgressBar > Bar > .bar--bar {
+    color: $primary;
+}
+
+ProgressBar > Bar > .bar--complete {
+    color: $success;
+}
+
+#stat-row {
+    height: 5;
+    padding: 0 1;
+}
+
+#run-body {
+    height: 1fr;
+    padding: 1 0 0 0;
+}
+
+#queue-pane {
+    width: 1fr;
+    margin: 0 1 0 0;
+}
+
+#task-pane {
+    width: 1fr;
+}
+
+/* --------------------------------------------------------------- Results */
+
+#results-root, #detail-root {
+    height: 1fr;
+    padding: 1 1 0 1;
+}
+
+#results-pane, #detail-pane {
+    height: 1fr;
+}
+
+#output-path {
+    height: 1;
+    padding: 0 2;
+}
+
+#task-search {
+    border: none;
+    background: $bk-raise;
+    height: 1;
+    margin: 0 0 1 0;
+    padding: 0 1;
+}
+
+/* --------------------------------------------------------------- Modals */
+
+LimitScreen, TaskDetailScreen, ConfirmScreen, HelpScreen {
+    align: center middle;
+    background: $background 70%;
+}
+
+.dialog {
+    background: $surface;
+    border: round $primary;
+    padding: 1 2;
+}
+
+#limit-dialog {
+    width: 64;
+    height: auto;
+}
+
+#limit-dialog Input {
+    margin: 1 0;
+}
+
+#confirm-dialog {
+    width: 56;
+    height: auto;
+}
+
+#task-dialog {
+    width: 90%;
+    height: 85%;
+}
+
+#task-dialog TabbedContent {
+    height: 1fr;
+}
+
+#task-dialog TextArea {
+    height: 1fr;
+    border: none;
+}
+
+#help-dialog {
+    width: 84;
+    height: 80%;
+}
+
+.dialog-actions {
+    height: auto;
+    padding: 1 0 0 0;
+}
+
+.dialog-actions Button {
+    margin: 0 2 0 0;
+}
+
+/* ------------------------------------------------ Short-terminal fallback */
+
+.compact #banner {
+    display: none;
+}
+
+.compact #tagline {
+    display: none;
+}
+
+.compact #stat-row {
+    height: 3;
+}
+
+.compact StatCard {
+    height: 2;
+}
+
+.compact .stat-hint {
+    display: none;
+}
+
+.compact #progress-block {
+    padding: 0 1;
+}
+
+.compact #progress-block ProgressBar {
+    margin: 0;
+}
+
+.compact #run-body {
+    padding: 0;
+}

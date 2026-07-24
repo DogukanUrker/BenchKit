@@ -1,5 +1,12 @@
-"""BenchKit CLI - interactive benchmark runner."""
+"""BenchKit entry point.
 
+Running `benchkit` opens the full-screen terminal app. `--headless` keeps a
+scriptable path that prints to stdout instead.
+"""
+
+from __future__ import annotations
+
+import argparse
 import sys
 
 from dotenv import load_dotenv
@@ -10,42 +17,59 @@ from rich.text import Text
 
 from benchkit.benchmarks import REGISTRY
 from benchkit.client import InferenceClient
+from benchkit.engine import JobSpec, SliceError, parse_slice, task_count
 from benchkit.report import save
 from benchkit.runner import run
+from benchkit.tui import run_tui
 
 console = Console(highlight=False)
 
 
-def _fmt_time(s: float) -> str:
-    s = int(round(s))
-    if s >= 60:
-        return f"{s // 60}m {s % 60}s"
-    return f"{s}s"
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="benchkit",
+        description="Benchmark local LLMs with real evaluation suites.",
+    )
+    parser.add_argument("--host", help="Inference host, overrides BENCHKIT_HOST")
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Run against a built-in offline model server (no inference server needed)",
+    )
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Skip the TUI and run from flags, printing progress to stdout",
+    )
+    parser.add_argument(
+        "--models",
+        default="",
+        help="Headless: comma separated model names, or 'all'",
+    )
+    parser.add_argument(
+        "--benchmarks",
+        default="",
+        help="Headless: comma separated benchmarks, e.g. humaneval:20,gsm8k:-50",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Print the available benchmarks and exit",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Headless: print every prompt and response",
+    )
+    return parser.parse_args(argv)
 
 
-def _section(title: str, subtitle: str | None = None) -> None:
-    console.print()
-    console.print(title)
-    if subtitle:
-        console.print(f"[dim]{subtitle}[/dim]")
-
-
-def _options_table(options: list[str], descriptions: list[str] | None = None) -> Table:
-    table = Table.grid(padding=(0, 2))
-    table.add_column(justify="right", style="dim", no_wrap=True)
-    table.add_column(style="white")
-
-    if descriptions:
-        table.add_column(style="dim")
-
-    table.add_row("0.", "All", *([] if not descriptions else [""]))
-    for i, opt in enumerate(options, 1):
-        if descriptions:
-            table.add_row(f"{i}.", opt, descriptions[i - 1])
-        else:
-            table.add_row(f"{i}.", opt)
-
-    return table
+def _fmt_time(seconds: float) -> str:
+    seconds = int(round(seconds))
+    if seconds >= 60:
+        return f"{seconds // 60}m {seconds % 60}s"
+    return f"{seconds}s"
 
 
 def _score_text(score: float) -> Text:
@@ -58,138 +82,101 @@ def _score_text(score: float) -> Text:
     return Text(f"{score:.1f}%", style=style)
 
 
-def _pick(
-    prompt: str, options: list[str], descriptions: list[str] | None = None
-) -> list[int]:
-    """Prompt user to pick one or more options. Returns selected indices."""
-    console.print(_options_table(options, descriptions))
-    console.print("[dim]Comma-separated. Use 0 to select all.[/dim]")
-    raw = console.input(f"{prompt}: ").strip()
-    indices = []
-    for part in raw.split(","):
-        part = part.strip()
-        if part == "0":
-            return list(range(len(options)))
-        if part.isdigit() and 1 <= int(part) <= len(options):
-            indices.append(int(part) - 1)
-
-    return indices
+def _list_benchmarks() -> None:
+    table = Table(box=box.MINIMAL, border_style="dim", header_style="bold")
+    table.add_column("Benchmark")
+    table.add_column("Tasks", justify="right")
+    for key in REGISTRY:
+        try:
+            count = f"{task_count(key):,}"
+        except Exception:
+            count = "?"
+        table.add_row(key, count)
+    console.print(table)
 
 
-def _pick_benchmarks(
-    options: list[str], descriptions: list[str] | None = None
-) -> list[tuple[int, str | None]]:
-    """Prompt user to pick benchmarks with optional slice specs.
+def _client(args: argparse.Namespace):
+    if args.demo:
+        from benchkit.demo import DemoClient
 
-    Returns list of (zero-based index, slice_spec) tuples where slice_spec
-    is None (all tasks) or a string like "10", "-10", "5-15".
-    """
-    console.print(_options_table(options, descriptions))
-    console.print("[dim]Examples: 1,2:10,3:-5,4:5-15[/dim]")
-    raw = console.input("Select benchmarks: ").strip()
+        return DemoClient()
 
-    picked: list[tuple[int, str | None]] = []
-    for part in raw.split(","):
+    client = InferenceClient.from_env()
+    if args.host:
+        client.host = args.host.rstrip("/")
+    return client
+
+
+def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSpec]:
+    if args.models.strip().lower() in {"all", "*"}:
+        models = available
+    else:
+        models = [name.strip() for name in args.models.split(",") if name.strip()]
+
+    unknown = [name for name in models if name not in available]
+    if unknown:
+        console.print(f"[red]Unknown model(s):[/red] {', '.join(unknown)}")
+        console.print(f"[dim]Available: {', '.join(available)}[/dim]")
+        sys.exit(1)
+    if not models:
+        console.print("[red]--models is required with --headless[/red]")
+        sys.exit(1)
+
+    specs: list[tuple[str, str | None]] = []
+    for part in args.benchmarks.split(","):
         part = part.strip()
         if not part:
             continue
+        key, _, slice_spec = part.partition(":")
+        key = key.strip()
+        slice_spec = slice_spec.strip() or None
+        if key not in REGISTRY:
+            console.print(f"[red]Unknown benchmark:[/red] {key}")
+            console.print(f"[dim]Available: {', '.join(REGISTRY)}[/dim]")
+            sys.exit(1)
+        try:
+            total = task_count(key)
+        except Exception as exc:
+            console.print(f"[red]Could not load {key}:[/red] {exc}")
+            sys.exit(1)
+        try:
+            parse_slice(slice_spec, total)
+        except SliceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            sys.exit(1)
+        specs.append((key, slice_spec))
 
-        if ":" in part:
-            num_str, slice_spec = part.split(":", 1)
-            num_str = num_str.strip()
-            slice_spec = slice_spec.strip() or None
-        else:
-            num_str = part
-            slice_spec = None
-
-        if num_str == "0":
-            return [(i, None) for i in range(len(options))]
-
-        if num_str.isdigit() and 1 <= int(num_str) <= len(options):
-            picked.append((int(num_str) - 1, slice_spec))
-
-    return picked
-
-
-def main() -> None:
-    load_dotenv()
-    verbose = "--verbose" in sys.argv or "-v" in sys.argv
-
-    console.print()
-    console.print("[bold]BenchKit[/bold]")
-    console.print("[dim]Benchmark your local LLMs[/dim]")
-
-    # Connect to an OpenAI-compatible server or Ollama.
-    try:
-        client = InferenceClient.from_env()
-    except ValueError as e:
-        console.print(f"[red]Configuration error:[/red] {e}")
+    if not specs:
+        console.print("[red]--benchmarks is required with --headless[/red]")
         sys.exit(1)
 
-    _section("Session")
-    console.print(f"[dim]Host  {client.host}[/dim]")
-    if verbose:
-        console.print("[dim]Verbose output enabled[/dim]")
+    return [JobSpec(model, key, spec) for model in models for key, spec in specs]
+
+
+def _headless(args: argparse.Namespace) -> None:
+    try:
+        client = _client(args)
+    except ValueError as exc:
+        console.print(f"[red]Configuration error:[/red] {exc}")
+        sys.exit(1)
+
+    console.print(f"[bold]BenchKit[/bold] [dim]{client.host}[/dim]")
 
     try:
         models = client.list_models()
-    except Exception as e:
-        console.print("[red]Connection failed[/red]")
-        console.print(f"[dim]{e}[/dim]")
-        console.print(
-            "[dim]Set BENCHKIT_HOST (and BENCHKIT_PROVIDER if needed), "
-            "then check that the server is running.[/dim]"
-        )
+    except Exception as exc:
+        console.print(f"[red]Connection failed:[/red] {exc}")
         sys.exit(1)
 
-    if not models:
-        console.print("[red]No models found[/red]")
-        console.print("[dim]Configure at least one model on the inference server.[/dim]")
-        sys.exit(1)
+    jobs = _headless_jobs(args, [model["name"] for model in models])
+    if args.demo:
+        client.prime(sorted({job.benchmark for job in jobs}))
 
-    # Model selection
-    console.print(
-        f"[dim]{len(models)} model(s) available via {client.label}[/dim]"
-    )
-    _section("Models")
-    model_names = [m["name"] for m in models]
-    model_details = []
-    for model in models:
-        size = model.get("size")
-        if isinstance(size, (int, float)) and size > 0:
-            model_details.append(f"{size / (1024**3):.1f} GB")
-        else:
-            detail = model.get("status") or model.get("owned_by") or client.label
-            model_details.append(str(detail))
-    picked = _pick("Select models", model_names, model_details)
-    if not picked:
-        console.print("[red]No models selected[/red]")
-        sys.exit(1)
-    selected_models = [model_names[i] for i in picked]
-    console.print(f"[dim]Selected {len(selected_models)} model(s)[/dim]")
+    results, failure = run(client, jobs, console, args.verbose)
+    if not results:
+        console.print("[yellow]No results.[/yellow]")
+        sys.exit(1 if failure else 0)
 
-    # Benchmark selection
-    _section("Benchmarks")
-    bench_names = list(REGISTRY.keys())
-    bench_descs = []
-    for name in bench_names:
-        b = REGISTRY[name]()
-        bench_descs.append(f"{len(b.load_tasks())} tasks")
-    picked = _pick_benchmarks(bench_names, bench_descs)
-    if not picked:
-        console.print("[red]No benchmarks selected[/red]")
-        sys.exit(1)
-    selected_benchmarks = [
-        (REGISTRY[bench_names[i]](), slice_spec) for i, slice_spec in picked
-    ]
-    console.print(f"[dim]Selected {len(selected_benchmarks)} benchmark run(s)[/dim]")
-
-    # Run
-    _section("Run")
-    results = run(client, selected_models, selected_benchmarks, console, verbose)
-
-    # Summary table
-    _section("Results")
     table = Table(
         box=box.MINIMAL,
         border_style="dim",
@@ -197,7 +184,7 @@ def main() -> None:
         pad_edge=False,
         padding=(0, 1),
     )
-    table.add_column("Model", style="white")
+    table.add_column("Model")
     table.add_column("Benchmark")
     table.add_column("Score", justify="right")
     table.add_column("Passed", justify="right")
@@ -205,22 +192,39 @@ def main() -> None:
     table.add_column("Avg Time", justify="right", style="dim")
     table.add_column("Total", justify="right", style="dim")
 
-    for r in results:
+    for result in results:
         table.add_row(
-            r["model"],
-            r["benchmark"],
-            _score_text(r["score"]),
-            f"{r['passed']}/{r['total']}",
-            str(r["tok_s"]),
-            f"{r['avg_response_time']}s",
-            _fmt_time(r["total_time"]),
+            result["model"],
+            result["benchmark"],
+            _score_text(result["score"]),
+            f"{result['passed']}/{result['total']}",
+            str(result["tok_s"]),
+            f"{result['avg_response_time']}s",
+            _fmt_time(result["total_time"]),
         )
 
+    console.print()
     console.print(table)
 
-    # Save
-    out = save(results, provider=client.label, host=client.host)
+    out = save(results, provider=getattr(client, "label", ""), host=client.host)
     console.print(f"[dim]Saved:[/dim] [white]{out}[/white]")
+    if failure:
+        sys.exit(1)
+
+
+def main(argv: list[str] | None = None) -> None:
+    load_dotenv()
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+
+    if args.list:
+        _list_benchmarks()
+        return
+
+    if args.headless:
+        _headless(args)
+        return
+
+    run_tui(demo=args.demo, host=args.host)
 
 
 if __name__ == "__main__":
