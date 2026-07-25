@@ -166,12 +166,12 @@ DataTable > .datatable--cursor {
 }
 
 #model-pane {
-    width: 2fr;
+    width: 5fr;
     margin: 0 1 0 0;
 }
 
 #bench-pane {
-    width: 3fr;
+    width: 7fr;
 }
 
 #setup-options {

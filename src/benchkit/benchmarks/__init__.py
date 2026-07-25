@@ -2,6 +2,7 @@
 
 from benchkit.benchmarks.arc import ARC
 from benchkit.benchmarks.boolq import BoolQ
+from benchkit.benchmarks.evalplus import HumanEvalPlus, MBPPPlus
 from benchkit.benchmarks.gpqa import GPQA
 from benchkit.benchmarks.gsm8k import GSM8K
 from benchkit.benchmarks.hellaswag import HellaSwag
@@ -17,7 +18,9 @@ from benchkit.benchmarks.winogrande import WinoGrande
 REGISTRY: dict[str, type] = {
     "quickbench": QuickBench,
     "humaneval": HumanEval,
+    "humaneval-plus": HumanEvalPlus,
     "mbpp": MBPP,
+    "mbpp-plus": MBPPPlus,
     "gsm8k": GSM8K,
     "arc": ARC,
     "gpqa": GPQA,

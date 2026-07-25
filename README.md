@@ -10,7 +10,7 @@ Not vibes. Actual scores.
 
 <img src="https://img.shields.io/badge/Python-3.11%2B-2563EB?style=flat-square&logo=python&logoColor=white&labelColor=0b0b0b" alt="Python 3.11+">
 <img src="https://img.shields.io/badge/TUI-Textual-60A5FA?style=flat-square&labelColor=0b0b0b" alt="Built with Textual">
-<img src="https://img.shields.io/badge/Suites-13-34D399?style=flat-square&labelColor=0b0b0b" alt="13 benchmark suites">
+<img src="https://img.shields.io/badge/Suites-15-34D399?style=flat-square&labelColor=0b0b0b" alt="15 benchmark suites">
 <img src="https://img.shields.io/badge/License-Apache%202.0-6B7280?style=flat-square&labelColor=0b0b0b" alt="Apache 2.0">
 
 </div>
@@ -39,32 +39,32 @@ LM Studio — as well as a native Ollama host.
   <img src="assets/benchkit-run.png" alt="BenchKit running a benchmark" width="940">
 </div>
 
-| Screen | What happens there |
-| ------ | ------------------ |
-| **Connect** | Host, provider, API key and timeout are editable in place. Auto-connects from your `.env`, shows the real error when it fails, retries on `Ctrl+R`. |
-| **Setup** | Multi-select panes for models and benchmarks with live filters, task counts, and a task limit set globally or per benchmark. A summary line keeps score: `3 models × 2 benchmarks = 6 runs · 1,240 tasks`. |
-| **Run** | Per-job and overall progress, live accuracy / tok-s / latency / elapsed / ETA, the run queue with per-job scores, and a task table that streams in. Pause, skip a job or stop at any point. |
-| **Results** | Sortable summary, drill-down into every task with a pass/fail/search filter, and the path to the saved reports. |
+| Screen      | What happens there                                                                                                                                                                                         |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Connect** | Host, provider, API key and timeout are editable in place. Auto-connects from your `.env`, shows the real error when it fails, retries on `Ctrl+R`.                                                        |
+| **Setup**   | Multi-select panes for models and benchmarks with live filters, task counts, and a task limit set globally or per benchmark. A summary line keeps score: `3 models × 2 benchmarks = 6 runs · 1,240 tasks`. |
+| **Run**     | Per-job and overall progress, live accuracy / tok-s / latency / elapsed / ETA, the run queue with per-job scores, and a task table that streams in. Pause, skip a job or stop at any point.                |
+| **Results** | Sortable summary, drill-down into every task with a pass/fail/search filter, and the path to the saved reports.                                                                                            |
 
 Press `Enter` on any task — during the run or afterwards — to read the exact
 prompt and the model's raw response.
 
 ## Keys
 
-| Key | Action |
-| --- | ------ |
-| `?` / `F1` | Keyboard reference |
-| `Space` | Toggle the highlighted model or benchmark |
+| Key             | Action                                       |
+| --------------- | -------------------------------------------- |
+| `?` / `F1`      | Keyboard reference                           |
+| `Space`         | Toggle the highlighted model or benchmark    |
 | `a` / `n` / `i` | Select all / clear / invert the focused list |
-| `l` | Task limit for the highlighted benchmark |
-| `/` | Jump to the filter box |
-| `s` / `F5` | Start the run |
-| `p` / `k` / `x` | Pause / skip job / stop during a run |
-| `f` | Failures only |
-| `Enter` | Inspect the highlighted row |
-| `F2` | Dogi light / dark |
-| `Ctrl+P` | Command palette |
-| `Ctrl+Q` | Quit |
+| `l`             | Task limit for the highlighted benchmark     |
+| `/`             | Jump to the filter box                       |
+| `s` / `F5`      | Start the run                                |
+| `p` / `k` / `x` | Pause / skip job / stop during a run         |
+| `f`             | Failures only                                |
+| `Enter`         | Inspect the highlighted row                  |
+| `F2`            | Dogi light / dark                            |
+| `Ctrl+P`        | Command palette                              |
+| `Ctrl+Q`        | Quit                                         |
 
 Task limits accept `20` (first 20), `-20` (last 20) and `40-80` (a range).
 
@@ -112,23 +112,32 @@ The per-request timeout defaults to 300 seconds and can be changed with
 
 ## Benchmarks
 
-| Benchmark | Key | Tasks | What it tests |
-| --------- | --- | ----: | ------------- |
-| QuickBench | `quickbench` | 20 | Fast code-generation smoke test |
-| HumanEval | `humaneval` | 164 | Code generation (pass@1) |
-| MBPP | `mbpp` | 500 | Python programming tasks |
-| GSM8K | `gsm8k` | 1,319 | Math reasoning with answer parse |
-| ARC | `arc` | 1,172 | Science multiple choice QA |
-| GPQA | `gpqa` | 198 | Graduate-level science reasoning |
-| MMLU | `mmlu` | 14,042 | Broad academic and professional knowledge |
-| OpenBookQA | `openbookqa` | 500 | Elementary science reasoning |
-| WinoGrande | `winogrande` | 1,267 | Commonsense pronoun resolution |
-| PIQA | `piqa` | 1,838 | Physical commonsense reasoning |
-| BoolQ | `boolq` | 3,270 | Yes/no reading comprehension |
-| TruthfulQA | `truthfulqa` | 817 | Truthfulness multiple choice QA |
-| HellaSwag | `hellaswag` | 1,000 | Commonsense sentence completion |
+| Benchmark  | Key              |  Tasks | What it tests                                                       |
+| ---------- | ---------------- | -----: | ------------------------------------------------------------------- |
+| QuickBench | `quickbench`     |     20 | Tiny Python tasks for a fast end-to-end sanity check                |
+| HumanEval  | `humaneval`      |    164 | Python function completion with the original unit tests             |
+| HumanEval+ | `humaneval-plus` |    164 | HumanEval with more than 122,000 tougher EvalPlus test inputs       |
+| MBPP       | `mbpp`           |    500 | Short Python functions from natural-language specifications         |
+| MBPP+      | `mbpp-plus`      |    378 | Sanitized MBPP with more than 39,000 EvalPlus test inputs           |
+| GSM8K      | `gsm8k`          |  1,319 | Multi-step grade-school math with exact numeric answers             |
+| ARC        | `arc`            |  1,172 | Challenging grade-school science multiple choice                    |
+| GPQA       | `gpqa`           |    198 | Expert-written graduate science questions designed to resist search |
+| MMLU       | `mmlu`           | 14,042 | Zero-shot coverage of 57 academic and professional subjects         |
+| OpenBookQA | `openbookqa`     |    500 | Elementary science requiring factual knowledge and reasoning        |
+| WinoGrande | `winogrande`     |  1,267 | Commonsense pronoun resolution in ambiguous sentences               |
+| PIQA       | `piqa`           |  1,838 | Physical plausibility of solutions to everyday tasks                |
+| BoolQ      | `boolq`          |  3,270 | Yes/no questions answered from evidence in a passage                |
+| TruthfulQA | `truthfulqa`     |    817 | Resistance to common misconceptions and false beliefs               |
+| HellaSwag  | `hellaswag`      |  1,000 | Plausible continuations of real-world scenarios                     |
 
 More coming soon.
+
+HumanEval+ and MBPP+ use the complete official EvalPlus datasets and both the
+base and expanded test inputs. The upstream datasets are downloaded and cached
+on first use. Generated code is untrusted; EvalPlus recommends running its
+evaluator in Docker for strong isolation, while BenchKit's integrated runner
+uses EvalPlus's guarded local subprocess evaluator for interactive per-task
+progress.
 
 ## Output
 

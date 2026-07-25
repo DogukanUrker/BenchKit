@@ -94,6 +94,9 @@ def tasks_for(key: str) -> list[Task]:
 
 
 def task_count(key: str) -> int:
+    declared = getattr(benchmark(key), "task_count", None)
+    if isinstance(declared, int):
+        return declared
     return len(tasks_for(key))
 
 

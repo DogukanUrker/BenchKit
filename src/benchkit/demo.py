@@ -112,7 +112,10 @@ class DemoClient:
             solutions = _canonical_solutions(key)
             for task in tasks_for(key):
                 prompt = bench.build_prompt(task)
-                self._answers[prompt] = (task, solutions.get(task.id))
+                solution = solutions.get(task.id) or task.metadata.get(
+                    "canonical_solution"
+                )
+                self._answers[prompt] = (task, solution)
             self._primed.add(key)
 
     def list_models(self) -> list[dict]:

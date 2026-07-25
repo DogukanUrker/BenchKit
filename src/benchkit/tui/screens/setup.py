@@ -21,20 +21,26 @@ from benchkit.tui.theme import score_palette
 from benchkit.tui.widgets import SectionTitle
 
 DESCRIPTIONS = {
-    "quickbench": "fast code-generation smoke test",
-    "humaneval": "code generation, pass@1",
-    "mbpp": "Python programming tasks",
-    "gsm8k": "grade-school math reasoning",
-    "arc": "science multiple choice",
-    "gpqa": "graduate-level science",
-    "mmlu": "broad academic knowledge",
-    "openbookqa": "elementary science reasoning",
-    "winogrande": "pronoun resolution",
-    "piqa": "physical commonsense",
-    "boolq": "yes/no reading comprehension",
-    "truthfulqa": "truthfulness multiple choice",
-    "hellaswag": "sentence completion",
+    "quickbench": "20 tiny Python tasks for a fast end-to-end sanity check",
+    "humaneval": "164 Python function completions with the original unit tests",
+    "humaneval-plus": "HumanEval with 122k+ tougher EvalPlus test inputs",
+    "mbpp": "500 short Python functions from natural-language specifications",
+    "mbpp-plus": "378 sanitized MBPP tasks with 39k+ EvalPlus test inputs",
+    "gsm8k": "multi-step grade-school math problems with exact numeric answers",
+    "arc": "challenging grade-school science questions with four choices",
+    "gpqa": "expert-written graduate science questions designed to resist search",
+    "mmlu": "57 academic and professional subjects, evaluated zero-shot",
+    "openbookqa": "elementary science questions requiring facts plus reasoning",
+    "winogrande": "commonsense pronoun resolution in ambiguous sentences",
+    "piqa": "choose the most physically plausible solution to everyday tasks",
+    "boolq": "answer yes/no questions using evidence from a passage",
+    "truthfulqa": "avoid common misconceptions and select the truthful answer",
+    "hellaswag": "choose the most plausible continuation of a real-world scenario",
 }
+
+MODEL_NAME_WIDTH = 40
+BENCHMARK_NAME_WIDTH = 15
+BENCHMARK_COUNT_WIDTH = 13
 
 
 class SetupScreen(Screen[None]):
@@ -132,7 +138,7 @@ class SetupScreen(Screen[None]):
             meta.get("status") or meta.get("owned_by") or ""
         )
         text = Text()
-        text.append(_clip(name, 34).ljust(34))
+        text.append(_clip(name, MODEL_NAME_WIDTH).ljust(MODEL_NAME_WIDTH))
         text.append(detail.rjust(9), style="dim")
         return text
 
@@ -146,8 +152,8 @@ class SetupScreen(Screen[None]):
             count_text = f"{fmt_count(count)} tasks"
 
         text = Text()
-        text.append(_clip(key, 12).ljust(13))
-        text.append(count_text.rjust(12), style="dim")
+        text.append(_clip(key, BENCHMARK_NAME_WIDTH).ljust(BENCHMARK_NAME_WIDTH))
+        text.append(count_text.rjust(BENCHMARK_COUNT_WIDTH), style="dim")
         limit = self.limits.get(key)
         if limit:
             accent = score_palette(self.app.current_theme.dark)["mid"]
