@@ -74,8 +74,7 @@ def _markdown(profile: dict) -> str:
     )
     for case in profile.get("cases", []):
         actual = case.get("actual_input_tokens") or "—"
-        marker = "†" if case.get("depth_method") == "calibrated" else ""
-        marker += "!" if not case.get("depth_within_tolerance", True) else ""
+        marker = "!" if not case.get("depth_within_tolerance", True) else ""
         pp = (
             f"{_number(case, 'pp_tps'):.1f}"
             if case.get("pp_reliable")
@@ -121,9 +120,9 @@ def _markdown(profile: dict) -> str:
         lines.extend(
             [
                 "",
-                "† Native tokenization was unavailable for these depths. "
-                "BenchKit calibrated deterministic text against the server's "
-                "reported input-token count.",
+                "Depth method: calibrated. The server does not expose its "
+                "native tokenizer route, so BenchKit calibrated deterministic "
+                "text against the reported input-token count.",
             ]
         )
     if inaccurate:

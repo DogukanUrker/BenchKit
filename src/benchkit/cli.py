@@ -359,9 +359,8 @@ def _perf(args: argparse.Namespace) -> None:
     table.add_column("Overhead", justify="right")
     table.add_column("Runs", justify="right")
     for case in profile["cases"]:
-        calibrated = case.get("depth_method") == "calibrated"
         inaccurate = not case.get("depth_within_tolerance", True)
-        depth = case["depth_label"] + ("†" if calibrated else "")
+        depth = case["depth_label"]
         if inaccurate:
             depth = f"[yellow]{depth}![/yellow]"
         table.add_row(
@@ -401,8 +400,8 @@ def _perf(args: argparse.Namespace) -> None:
     ]
     if calibrated:
         console.print(
-            "[yellow]† Native tokenizer unavailable; marked depths were "
-            "calibrated from server-reported input tokens.[/yellow]"
+            "[dim]Depth method: calibrated · native tokenizer is not exposed "
+            "by the server; server-reported input tokens were used.[/dim]"
         )
     if inaccurate:
         labels = ", ".join(case["depth_label"] for case in inaccurate)
