@@ -64,6 +64,12 @@ def _markdown(profile: dict) -> str:
             f"{drift['initial_tg_tps']:.1f} → {drift['final_tg_tps']:.1f} tok/s "
             f"({drift['change']:+.1%}){warning}"
         )
+    sweep = profile.get("sweep_summary") or {}
+    lines.append(
+        f"**Sweep median:** "
+        f"TG {float(sweep.get('tg_tps_median') or 0):.1f} tok/s · "
+        f"PP {float(sweep.get('pp_tps_median') or 0):.1f} tok/s"
+    )
 
     lines.extend(
         [

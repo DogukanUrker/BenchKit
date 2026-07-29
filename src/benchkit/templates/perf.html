@@ -346,6 +346,7 @@
     const environment = profile.environment || {};
     const startup = profile.startup || {};
     const drift = profile.drift_check || {};
+    const sweep = profile.sweep_summary || {};
     const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
     const number = value => Number(value) || 0;
     const median = (item, key) => number(item?.[key]?.median);
@@ -354,7 +355,14 @@
     const formatTime = (value, digits = 2) => `${number(value).toFixed(digits)}s`;
     const date = String(profile.generated_at || "").replace("T", " · ");
     const config = environment.config_note || environment.hardware || "";
-    const meta = [date, profile.provider, profile.host, config].filter(Boolean);
+    const meta = [
+      date,
+      profile.provider,
+      profile.host,
+      `${number(settings.gen_tokens)} output tokens`,
+      `${number(settings.reps)} measured reps`,
+      config,
+    ].filter(Boolean);
     document.getElementById("reportMeta").textContent = meta.join(" · ");
     document.getElementById("footerMeta").textContent = [profile.model, profile.provider, config].filter(Boolean).join(" · ");
 
@@ -364,8 +372,8 @@
 
     const summaryItems = [
       ["Depths", cases.length, cases.map(item => item.depth_label).join(" · ")],
-      ["Output", settings.gen_tokens || 0, "tokens per measured run"],
-      ["Repetitions", settings.reps || 0, `${settings.warmups || 0} warmup per depth`],
+      ["Median TG", `${number(sweep.tg_tps_median).toFixed(1)}`, `tok/s · ${number(sweep.tg_depths)} depths`],
+      ["Median PP", `${number(sweep.pp_tps_median).toFixed(1)}`, `tok/s · ${number(sweep.pp_depths)} reliable depths`],
       ["First request", startup.ttft_s != null ? formatTime(startup.ttft_s, 3) : "—", startup.label || "not captured"],
     ];
     document.getElementById("summary").innerHTML = summaryItems.map(item => `

@@ -317,6 +317,31 @@ def run_profile(
                 "tolerance": DRIFT_TOLERANCE,
             }
 
+    tg_depth_medians = [
+        float(case["tg_tps"]["median"])
+        for case in cases
+        if case["successful_reps"] and case["tg_tps"]["median"] > 0
+    ]
+    pp_depth_medians = [
+        float(case["pp_tps"]["median"])
+        for case in cases
+        if (
+            case["successful_reps"]
+            and case["pp_reliable"]
+            and case["pp_tps"]["median"] > 0
+        )
+    ]
+    sweep_summary = {
+        "tg_tps_median": round(statistics.median(tg_depth_medians), 3)
+        if tg_depth_medians
+        else 0.0,
+        "pp_tps_median": round(statistics.median(pp_depth_medians), 3)
+        if pp_depth_medians
+        else 0.0,
+        "tg_depths": len(tg_depth_medians),
+        "pp_depths": len(pp_depth_medians),
+    }
+
     return {
         "kind": "benchkit-performance-profile",
         "version": 1,
@@ -335,5 +360,6 @@ def run_profile(
         "settings": asdict(config),
         "startup": startup,
         "drift_check": drift_check,
+        "sweep_summary": sweep_summary,
         "cases": cases,
     }

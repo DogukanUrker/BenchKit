@@ -386,6 +386,14 @@ def _perf(args: argparse.Namespace) -> None:
     console.print()
     console.print(table)
 
+    sweep = profile.get("sweep_summary") or {}
+    console.print(
+        "[dim]Sweep median · "
+        f"TG {float(sweep.get('tg_tps_median') or 0):.1f} tok/s · "
+        f"PP {float(sweep.get('pp_tps_median') or 0):.1f} tok/s"
+        "[/dim]"
+    )
+
     calibrated = [
         case for case in profile["cases"]
         if case.get("depth_method") == "calibrated"
