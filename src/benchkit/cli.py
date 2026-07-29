@@ -18,6 +18,8 @@ from rich.text import Text
 from benchkit.benchmarks import REGISTRY
 from benchkit.client import InferenceClient
 from benchkit.engine import JobSpec, SliceError, parse_slice, task_count
+from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
+from benchkit.perf_report import save_profile
 from benchkit.report import save
 from benchkit.runner import run
 from benchkit.tui import run_tui
@@ -29,6 +31,18 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="benchkit",
         description="Benchmark local LLMs with real evaluation suites.",
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("perf",),
+        help="Run a dedicated model performance profile",
+    )
+    parser.add_argument(
+        "perf_model",
+        nargs="?",
+        metavar="MODEL",
+        help="Model name for `benchkit perf MODEL`",
     )
     parser.add_argument("--host", help="Inference host, overrides BENCHKIT_HOST")
     parser.add_argument(
@@ -61,6 +75,38 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--verbose",
         action="store_true",
         help="Headless: print every prompt and response",
+    )
+    parser.add_argument(
+        "--depths",
+        default=",".join(
+            "minimal" if value == 0 else f"{value // 1024}k"
+            for value in DEFAULT_DEPTHS
+        ),
+        help="Perf: comma-separated context depths (default: minimal,4k,16k,32k,64k)",
+    )
+    parser.add_argument(
+        "--gen",
+        type=int,
+        default=128,
+        metavar="TOKENS",
+        help="Perf: generated tokens per measured run (default: 128)",
+    )
+    parser.add_argument(
+        "--reps",
+        type=int,
+        default=5,
+        help="Perf: measured repetitions per depth (default: 5)",
+    )
+    parser.add_argument(
+        "--warmups",
+        type=int,
+        default=1,
+        help="Perf: discarded warmups per depth (default: 1)",
+    )
+    parser.add_argument(
+        "--config-note",
+        default="",
+        help="Perf: optional hardware or server configuration note",
     )
     return parser.parse_args(argv)
 
@@ -212,12 +258,198 @@ def _headless(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _perf(args: argparse.Namespace) -> None:
+    if args.demo:
+        console.print("[red]Performance profiling is unavailable in demo mode.[/red]")
+        sys.exit(1)
+    if not args.perf_model:
+        console.print("[red]A model name is required:[/red] benchkit perf MODEL")
+        sys.exit(1)
+    if args.gen < 1 or args.reps < 1 or args.warmups < 0:
+        console.print(
+            "[red]Perf settings require --gen and --reps above zero, "
+            "and --warmups at least zero.[/red]"
+        )
+        sys.exit(1)
+    try:
+        depths = parse_depths(args.depths)
+        client = _client(args)
+    except ValueError as exc:
+        console.print(f"[red]Configuration error:[/red] {exc}")
+        sys.exit(1)
+
+    console.print(f"[bold]BenchKit perf[/bold] [dim]{client.host}[/dim]")
+    try:
+        models = client.list_models()
+    except Exception as exc:
+        console.print(f"[red]Connection failed:[/red] {exc}")
+        sys.exit(1)
+
+    model_meta = next(
+        (model for model in models if model.get("name") == args.perf_model),
+        None,
+    )
+    if model_meta is None:
+        console.print(f"[red]Unknown model:[/red] {args.perf_model}")
+        console.print(
+            "[dim]Available: "
+            + ", ".join(str(model.get("name")) for model in models)
+            + "[/dim]"
+        )
+        sys.exit(1)
+    if client.provider != "openai":
+        console.print(
+            "[red]Perf v1 requires an OpenAI-compatible llama.cpp/llama-swap "
+            "endpoint.[/red]"
+        )
+        sys.exit(1)
+
+    model_status = str(model_meta.get("status") or "").strip().lower()
+    if model_status == "unloaded":
+        console.print(
+            "[yellow]Model status: unloaded[/yellow] "
+            "[dim]· the first request may measure a cold start[/dim]"
+        )
+    elif model_status == "loaded":
+        console.print(
+            "[green]Model status: loaded[/green] "
+            "[dim]· the model is already resident, so this is a warm test[/dim]"
+        )
+    elif model_status:
+        console.print(
+            f"[dim]Model status: {model_status} "
+            "· cold/warm state is not known[/dim]"
+        )
+    else:
+        console.print(
+            "[dim]Model status: unavailable · cold/warm state is not known[/dim]"
+        )
+
+    config = PerfConfig(
+        model=args.perf_model,
+        depths=depths,
+        gen_tokens=args.gen,
+        reps=args.reps,
+        warmups=args.warmups,
+        config_note=args.config_note,
+    )
+    try:
+        profile = run_profile(
+            client,
+            config,
+            model_meta=model_meta,
+            progress=lambda message: console.print(f"[dim]· {message}[/dim]"),
+        )
+    except Exception as exc:
+        console.print(f"[red]Performance profile failed:[/red] {exc}")
+        sys.exit(1)
+
+    table = Table(
+        box=box.MINIMAL,
+        border_style="dim",
+        header_style="bold",
+        pad_edge=False,
+    )
+    table.add_column("Depth")
+    table.add_column("Input", justify="right")
+    table.add_column("PP tok/s", justify="right")
+    table.add_column("TG tok/s", justify="right")
+    table.add_column("TTFT", justify="right")
+    table.add_column("Wall", justify="right")
+    table.add_column("Overhead", justify="right")
+    table.add_column("Runs", justify="right")
+    for case in profile["cases"]:
+        calibrated = case.get("depth_method") == "calibrated"
+        inaccurate = not case.get("depth_within_tolerance", True)
+        depth = case["depth_label"] + ("†" if calibrated else "")
+        if inaccurate:
+            depth = f"[yellow]{depth}![/yellow]"
+        table.add_row(
+            depth,
+            f"{case['actual_input_tokens']:,}"
+            if case["actual_input_tokens"]
+            else "—",
+            (
+                f"{case['pp_tps']['median']:.1f}"
+                if case.get("pp_reliable")
+                else "n/a"
+            ),
+            f"{case['tg_tps']['median']:.1f}",
+            f"{case['ttft_s']['median']:.3f}s",
+            f"{case['wall_time_s']['median']:.2f}s",
+            (
+                f"{case['overhead_s']['median']:.3f}s"
+                if case.get("overhead_available")
+                else "—"
+            ),
+            f"{case['successful_reps']}/{args.reps}",
+        )
+    console.print()
+    console.print(table)
+
+    calibrated = [
+        case for case in profile["cases"]
+        if case.get("depth_method") == "calibrated"
+    ]
+    inaccurate = [
+        case for case in profile["cases"]
+        if not case.get("depth_within_tolerance", True)
+    ]
+    estimated = [
+        case for case in profile["cases"]
+        if case.get("depth_method") == "estimated"
+    ]
+    if calibrated:
+        console.print(
+            "[yellow]† Native tokenizer unavailable; marked depths were "
+            "calibrated from server-reported input tokens.[/yellow]"
+        )
+    if inaccurate:
+        labels = ", ".join(case["depth_label"] for case in inaccurate)
+        console.print(
+            f"[bold yellow]! Depth tolerance not reached for: {labels}. "
+            "Use the Actual Input column when comparing results.[/bold yellow]"
+        )
+    if estimated:
+        labels = ", ".join(case["depth_label"] for case in estimated)
+        console.print(
+            f"[bold yellow]Depth calibration unavailable for: {labels}. "
+            "Use the Actual Input column.[/bold yellow]"
+        )
+
+    drift = profile.get("drift_check") or {}
+    if drift.get("error"):
+        console.print(f"[yellow]Drift check failed:[/yellow] {drift['error']}")
+    elif drift:
+        message = (
+            f"Drift check · {drift['depth_label']} TG "
+            f"{drift['initial_tg_tps']:.1f} → {drift['final_tg_tps']:.1f} tok/s "
+            f"({drift['change']:+.1%})"
+            + ("" if drift.get("stable") else " · possible warmup/drift anomaly")
+        )
+        console.print(
+            f"[dim]{message}[/dim]"
+            if drift.get("stable")
+            else f"[bold yellow]{message}[/bold yellow]"
+        )
+
+    output = save_profile(profile)
+    console.print(
+        f"[dim]Saved:[/dim] [white]{output}[/white] "
+        "[dim]· perf.json · csv · md · html[/dim]"
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     load_dotenv()
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     if args.list:
         _list_benchmarks()
+        return
+
+    if args.command == "perf":
+        _perf(args)
         return
 
     if args.headless:

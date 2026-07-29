@@ -81,6 +81,36 @@ uv run benchkit --list
 `--verbose` prints every prompt and response. Reports are saved exactly as they
 are from the TUI, and a run that fails part-way still keeps what finished.
 
+## Performance profiles
+
+Profile a model served by llama.cpp or llama-swap through its OpenAI-compatible
+endpoint:
+
+```bash
+uv run benchkit perf ornith-35b
+```
+
+The default sweep covers minimal, 4k, 16k, 32k and 64k contexts with one
+discarded warmup and five measured 128-token generations at each depth. It
+reports prompt processing (PP), token generation (TG), time to first token
+(TTFT), wall time, proxy/client overhead and the first-request latency that may
+include llama-swap model loading. When llama-swap does not expose llama.cpp's
+native tokenizer route, BenchKit calibrates deterministic prompt text against
+the input-token count reported by the server instead of relying on a fixed
+characters-per-token estimate.
+
+Defaults can be narrowed or expanded when needed:
+
+```bash
+uv run benchkit perf ornith-35b --depths minimal,4k,16k --gen 256 --reps 10
+```
+
+Each run writes `perf.json`, `perf.csv`, `perf.md` and a standalone
+`perf.html` dashboard under `results/<timestamp>/`. Add an optional reproducible
+configuration line with `BENCHKIT_PERF_CONFIG` in `.env` or `--config-note`;
+`BENCHKIT_HARDWARE` is used as a fallback. The first context is measured again
+at the end of the sweep to flag GPU warmup or performance drift.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and edit:
@@ -93,6 +123,8 @@ cp .env.example .env
 BENCHKIT_PROVIDER=openai
 BENCHKIT_HOST=http://hub:11434/v1
 BENCHKIT_HARDWARE=RTX 3060 12GB
+# Optional details shown in performance reports:
+BENCHKIT_PERF_CONFIG=RTX 3060 12GB | q8_0 KV | -np 1
 ```
 
 The `/v1` suffix is optional. BenchKit uses `GET /v1/models` for discovery and

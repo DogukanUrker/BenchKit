@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>BenchKit Performance Profile</title>
+  <script>
+    (() => {
+      let stored = null;
+      try { stored = localStorage.getItem("benchkit-theme"); } catch (error) { stored = null; }
+      document.documentElement.dataset.theme = stored === "dark" ? "dark" : "light";
+    })();
+  </script>
+  <style>
+    :root,
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --page: #ffffff;
+      --card: #ffffff;
+      --ink: #0b0b0b;
+      --muted: #6b7280;
+      --line: rgba(11, 11, 11, .12);
+      --raise: rgba(11, 11, 11, .04);
+      --track: rgba(11, 11, 11, .09);
+      --green: #059669;
+      --green-soft: #10b981;
+      --red: #dc2626;
+      --blue: #2563eb;
+      --amber: #d97706;
+      --bar: #6b7280;
+      --bar-light: rgba(11, 11, 11, .09);
+      --shade-1: #dbeafe;
+      --shade-2: #bfdbfe;
+      --shade-3: #93c5fd;
+      --shade-4: #60a5fa;
+      --shade-5: #3b82f6;
+      --shade-6: #2563eb;
+      --shade-7: #1d4ed8;
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --page: #000000;
+      --card: #000000;
+      --ink: #ffffff;
+      --muted: #6b7280;
+      --line: rgba(255, 255, 255, .14);
+      --raise: rgba(255, 255, 255, .06);
+      --track: rgba(255, 255, 255, .12);
+      --green: #34d399;
+      --green-soft: #6ee7b7;
+      --red: #ef4444;
+      --blue: #60a5fa;
+      --amber: #facc15;
+      --bar: #9aa1ad;
+      --bar-light: rgba(255, 255, 255, .12);
+      --shade-1: #14304f;
+      --shade-2: #1b4470;
+      --shade-3: #235891;
+      --shade-4: #2c6cb2;
+      --shade-5: #3f86d4;
+      --shade-6: #4f95e8;
+      --shade-7: #60a5fa;
+    }
+
+    :root {
+      --sans: "Avenir Next", Avenir, "Century Gothic", sans-serif;
+      --mono: "SFMono-Regular", "Cascadia Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--page); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background: var(--page);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    button { font: inherit; }
+    .page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 54px 0 70px; }
+
+    .report-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 32px;
+      align-items: end;
+      padding-bottom: 30px;
+      border-bottom: 1px solid var(--line);
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 7px; font-size: 42px; line-height: 1; letter-spacing: -.045em; }
+    .meta { margin: 0; color: var(--muted); font: 11px/1.55 var(--mono); }
+    .head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 18px; }
+    .best { text-align: right; }
+    .best-score { color: var(--green); font-size: 42px; font-weight: 800; line-height: 1; letter-spacing: -.045em; }
+    .best-model { margin-top: 6px; font-size: 12px; font-weight: 800; }
+
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--raise);
+      color: var(--ink);
+      cursor: pointer;
+      font: 700 9px/1 var(--mono);
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .theme-toggle:hover { border-color: var(--blue); color: var(--blue); }
+    .theme-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--blue); }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin: 28px 0 0;
+      background: var(--card);
+      border: 1px solid var(--line);
+    }
+    .stat { padding: 21px 24px; }
+    .stat + .stat { border-left: 1px solid var(--line); }
+    .stat-label { color: var(--muted); font: 9px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+    .stat-value { margin-top: 8px; font-size: 25px; font-weight: 800; letter-spacing: -.035em; }
+    .stat-detail { margin-top: 5px; color: var(--muted); font-size: 9px; }
+
+    .notice {
+      display: none;
+      margin-top: 14px;
+      padding: 13px 16px;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--blue);
+      border-radius: 7px;
+      background: var(--raise);
+      color: var(--muted);
+      font: 9px/1.65 var(--mono);
+    }
+    .notice.show { display: block; }
+    .notice.warn { border-left-color: var(--amber); color: var(--ink); }
+
+    .section { margin-top: 64px; }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 18px;
+    }
+    h2 { margin: 0; font-size: 24px; letter-spacing: -.035em; }
+    .section-note { margin: 0; color: var(--muted); font-size: 10px; }
+    .charts { display: grid; gap: 30px; }
+
+    .chart-shell {
+      position: relative;
+      width: 100%;
+      min-width: 0;
+      padding: 42px 52px 36px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--card);
+    }
+    .chart-header { display: flex; align-items: baseline; gap: 8px; }
+    .chart-title { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -.035em; }
+    .chart-subtitle { color: var(--muted); font-size: 22px; font-weight: 700; }
+
+    .bar-plot {
+      display: flex;
+      align-items: stretch;
+      gap: clamp(18px, 4vw, 54px);
+      height: 440px;
+      margin-top: 32px;
+      padding: 0 24px;
+      border-bottom: 2px solid var(--line);
+    }
+    .bar-item {
+      display: grid;
+      grid-template-rows: 54px 1fr;
+      flex: 1 1 0;
+      min-width: 0;
+      text-align: center;
+    }
+    .bar-value {
+      align-self: end;
+      padding-bottom: 12px;
+      color: var(--bar);
+      font-size: clamp(22px, 3vw, 38px);
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -.05em;
+    }
+    .bar-item.winner .bar-value { color: var(--green); }
+    .bar-slot { display: flex; align-items: end; min-height: 0; }
+    .bar {
+      width: 100%;
+      height: calc(var(--value) * 1%);
+      min-height: 3px;
+      border-radius: 11px 11px 0 0;
+      background: var(--shade, var(--bar));
+      transform-origin: bottom;
+      animation: rise .55s cubic-bezier(.25,.7,.2,1) both;
+    }
+    .bar-item.winner .bar { background: linear-gradient(var(--green-soft), var(--green)); }
+    @keyframes rise { from { transform: scaleY(0); } }
+    .bar-labels {
+      display: flex;
+      gap: clamp(18px, 4vw, 54px);
+      padding: 17px 24px 0;
+    }
+    .bar-label { flex: 1 1 0; min-width: 0; text-align: center; }
+    .model-name { overflow: hidden; font-size: clamp(10px, 1.5vw, 14px); font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+    .model-meta { margin-top: 5px; color: var(--muted); font-size: clamp(8px, 1vw, 10px); font-weight: 700; }
+
+    .horizontal-list { display: grid; gap: 20px; margin-top: 46px; }
+    .horizontal-row { display: grid; grid-template-columns: 110px 1fr 94px; gap: 18px; align-items: center; }
+    .horizontal-name { overflow: hidden; font-size: 12px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+    .horizontal-track { height: 18px; border-radius: 5px; background: var(--track); overflow: hidden; }
+    .horizontal-fill { width: calc(var(--value) * 1%); height: 100%; border-radius: inherit; background: var(--bar); }
+    .horizontal-row.winner .horizontal-fill { background: var(--green); }
+    .horizontal-value { color: var(--bar); font-size: 15px; font-weight: 800; text-align: right; }
+    .horizontal-row.winner .horizontal-value { color: var(--green); }
+
+    .matrix-card { display: flex; flex-direction: column; }
+    .matrix-wrap { margin-top: 34px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { padding: 13px 14px; border-bottom: 1px solid var(--line); font-size: 10px; text-align: right; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    th { color: var(--muted); background: var(--raise); font: 8px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+    th:first-child, td:first-child { position: sticky; left: 0; text-align: left; }
+    th:first-child { z-index: 2; background: var(--raise); }
+    td:first-child { z-index: 1; background: var(--card); font-weight: 800; }
+    .winner-cell { color: var(--green); font-size: 13px; font-weight: 800; }
+    .warning { color: var(--amber); font-weight: 800; }
+    .range { display: block; margin-top: 4px; color: var(--muted); font-size: 8px; }
+
+    .details { display: grid; gap: 8px; }
+    details { border: 1px solid var(--line); border-radius: 10px; background: var(--card); overflow: hidden; }
+    summary {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 18px;
+      align-items: center;
+      padding: 17px 19px;
+      list-style: none;
+      cursor: pointer;
+      font-size: 10px;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; color: var(--muted); font: 15px/1 var(--mono); }
+    details[open] summary::after { content: "−"; }
+    .detail-title { font-weight: 800; }
+    .detail-score { color: var(--muted); }
+    .raw-wrap { padding: 0 10px 10px; overflow-x: auto; }
+    .raw-wrap table { border-top: 1px solid var(--line); }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      margin-top: 70px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font: 8px/1.4 var(--mono);
+    }
+
+    @media (max-width: 720px) {
+      .page { width: min(100% - 24px, 600px); padding-top: 34px; }
+      .report-head { display: block; }
+      .head-right { align-items: flex-start; margin-top: 24px; }
+      .best { text-align: left; }
+      .summary { grid-template-columns: repeat(2, 1fr); }
+      .stat:nth-child(3) { border-top: 1px solid var(--line); border-left: 0; }
+      .stat:nth-child(4) { border-top: 1px solid var(--line); }
+      .chart-shell { padding: 25px 18px 24px; border-radius: 14px; }
+      .chart-title { font-size: 18px; }
+      .chart-subtitle { font-size: 17px; }
+      .bar-plot { height: 340px; gap: 12px; padding: 0 4px; }
+      .bar-labels { gap: 12px; padding: 14px 4px 0; }
+      .horizontal-row { grid-template-columns: 70px 1fr 74px; gap: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="report-head">
+      <div>
+        <h1>BenchKit performance</h1>
+        <p class="meta" id="reportMeta"></p>
+      </div>
+      <div class="head-right">
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch colour theme">
+          <span class="theme-dot"></span><span id="themeLabel">Dark</span>
+        </button>
+        <div class="best" id="best"></div>
+      </div>
+    </header>
+
+    <section class="summary" id="summary"></section>
+    <div class="notice" id="notice"></div>
+
+    <section class="section">
+      <div class="section-head"><h2>Chart gallery</h2><p class="section-note">Performance across context depth</p></div>
+      <div class="charts">
+        <div id="generationChart"></div>
+        <div id="promptChart"></div>
+        <div id="latencyChart"></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>Measurement matrix</h2><p class="section-note">Median with min—max range</p></div>
+      <div id="matrix"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>Raw repetitions</h2><p class="section-note">Open a depth to inspect every run</p></div>
+      <div class="details" id="details"></div>
+    </section>
+
+    <footer><span id="footerMeta"></span><span>Generated by BenchKit</span></footer>
+  </main>
+
+  <script id="perfData" type="application/json">__BENCHKIT_PERF_DATA__</script>
+  <script>
+    const root = document.documentElement;
+    const themeLabel = document.getElementById("themeLabel");
+    const setTheme = mode => {
+      root.dataset.theme = mode;
+      themeLabel.textContent = mode === "dark" ? "Light" : "Dark";
+    };
+    setTheme(root.dataset.theme === "dark" ? "dark" : "light");
+    document.getElementById("themeToggle").addEventListener("click", () => {
+      const next = root.dataset.theme === "dark" ? "light" : "dark";
+      setTheme(next);
+      try { localStorage.setItem("benchkit-theme", next); } catch (error) { /* file:// */ }
+    });
+
+    const profile = JSON.parse(document.getElementById("perfData").textContent);
+    const cases = profile.cases || [];
+    const settings = profile.settings || {};
+    const environment = profile.environment || {};
+    const startup = profile.startup || {};
+    const drift = profile.drift_check || {};
+    const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+    const number = value => Number(value) || 0;
+    const median = (item, key) => number(item?.[key]?.median);
+    const metricRange = (item, key, digits = 1) =>
+      `${number(item?.[key]?.min).toFixed(digits)}—${number(item?.[key]?.max).toFixed(digits)}`;
+    const formatTime = (value, digits = 2) => `${number(value).toFixed(digits)}s`;
+    const date = String(profile.generated_at || "").replace("T", " · ");
+    const config = environment.config_note || environment.hardware || "";
+    const meta = [date, profile.provider, profile.host, config].filter(Boolean);
+    document.getElementById("reportMeta").textContent = meta.join(" · ");
+    document.getElementById("footerMeta").textContent = [profile.model, profile.provider, config].filter(Boolean).join(" · ");
+
+    const peakTg = Math.max(0, ...cases.map(item => median(item, "tg_tps")));
+    document.getElementById("best").innerHTML =
+      `<div class="best-score">${peakTg.toFixed(1)}</div><div class="best-model">tok/s · peak TG · ${escapeHtml(profile.model)}</div>`;
+
+    const summaryItems = [
+      ["Depths", cases.length, cases.map(item => item.depth_label).join(" · ")],
+      ["Output", settings.gen_tokens || 0, "tokens per measured run"],
+      ["Repetitions", settings.reps || 0, `${settings.warmups || 0} warmup per depth`],
+      ["First request", startup.ttft_s != null ? formatTime(startup.ttft_s, 3) : "—", startup.label || "not captured"],
+    ];
+    document.getElementById("summary").innerHTML = summaryItems.map(item => `
+      <article class="stat"><div class="stat-label">${escapeHtml(item[0])}</div>
+      <div class="stat-value">${escapeHtml(item[1])}</div><div class="stat-detail">${escapeHtml(item[2])}</div></article>
+    `).join("");
+
+    const calibrated = cases.filter(item => item.depth_method === "calibrated");
+    const inaccurate = cases.filter(item => !item.depth_within_tolerance);
+    const estimated = cases.filter(item => item.depth_method === "estimated");
+    const notices = [];
+    if (calibrated.length) notices.push("† Native tokenizer unavailable; marked depths were calibrated from server-reported input tokens.");
+    if (inaccurate.length) notices.push(`⚠ Outside ±1% depth tolerance: ${inaccurate.map(item => item.depth_label).join(", ")}. Use Actual input.`);
+    if (estimated.length) notices.push(`⚠ Token-depth calibration unavailable: ${estimated.map(item => item.depth_label).join(", ")}. Use Actual input.`);
+    if (drift.error) {
+      notices.push(`⚠ End-of-sweep drift check failed: ${drift.error}`);
+    } else if (drift.depth_label) {
+      notices.push(
+        `Drift check · ${drift.depth_label} TG ${number(drift.initial_tg_tps).toFixed(1)} → ${number(drift.final_tg_tps).toFixed(1)} tok/s (${number(drift.change * 100).toFixed(1)}%)`
+        + (drift.stable ? "" : " · possible warmup/drift anomaly")
+      );
+    }
+    const notice = document.getElementById("notice");
+    if (notices.length) {
+      notice.textContent = notices.join("  ");
+      notice.classList.add("show");
+      if (inaccurate.length || estimated.length || drift.error || drift.stable === false) notice.classList.add("warn");
+    }
+
+    const shades = [1, 2, 3, 4, 5, 6, 7].map(step => `var(--shade-${step})`);
+    const barChart = ({title, subtitle, items, value, meta}) => {
+      const maximum = Math.max(1, ...items.map(value));
+      const bestValue = Math.max(0, ...items.map(value));
+      return `<article class="chart-shell">
+        <div class="chart-header"><h3 class="chart-title">${escapeHtml(title)}</h3><span class="chart-subtitle">· ${escapeHtml(subtitle)}</span></div>
+        <div class="bar-plot">${items.map((item, index) => {
+          const current = value(item);
+          const winner = current === bestValue;
+          const height = Math.max(0, Math.min(100, current / maximum * 100));
+          return `<div class="bar-item ${winner ? "winner" : ""}">
+            <div class="bar-value">${current.toFixed(1)}</div>
+            <div class="bar-slot"><div class="bar" style="--value:${height};--shade:${shades[Math.min(index, shades.length - 1)]};animation-delay:${index * 45}ms"></div></div>
+          </div>`;
+        }).join("")}</div>
+        <div class="bar-labels">${items.map(item => `<div class="bar-label">
+          <div class="model-name">${escapeHtml(item.depth_label)}</div>
+          <div class="model-meta">${escapeHtml(meta(item))}</div>
+        </div>`).join("")}</div>
+      </article>`;
+    };
+
+    document.getElementById("generationChart").innerHTML = barChart({
+      title: "Generation speed", subtitle: "TG tok/s", items: cases,
+      value: item => median(item, "tg_tps"),
+      meta: item => `${number(item.actual_input_tokens).toLocaleString()} input tokens`,
+    });
+
+    const promptCases = cases.filter(item => item.pp_reliable);
+    document.getElementById("promptChart").innerHTML = barChart({
+      title: "Prompt processing", subtitle: "PP tok/s", items: promptCases,
+      value: item => median(item, "pp_tps"),
+      meta: item => `${number(item.actual_input_tokens).toLocaleString()} input tokens`,
+    });
+
+    const maxTtft = Math.max(1, ...cases.map(item => median(item, "ttft_s")));
+    const fastestTtft = Math.min(...cases.map(item => median(item, "ttft_s")).filter(Boolean));
+    document.getElementById("latencyChart").innerHTML = `<article class="chart-shell">
+      <div class="chart-header"><h3 class="chart-title">Time to first token</h3><span class="chart-subtitle">· lower is better</span></div>
+      <div class="horizontal-list">${cases.map(item => {
+        const value = median(item, "ttft_s");
+        return `<div class="horizontal-row ${value === fastestTtft ? "winner" : ""}">
+          <div class="horizontal-name">${escapeHtml(item.depth_label)}</div>
+          <div class="horizontal-track"><div class="horizontal-fill" style="--value:${value / maxTtft * 100}"></div></div>
+          <div class="horizontal-value">${formatTime(value, 3)}</div>
+        </div>`;
+      }).join("")}</div>
+    </article>`;
+
+    const bestTg = Math.max(0, ...cases.map(item => median(item, "tg_tps")));
+    document.getElementById("matrix").innerHTML = `<article class="chart-shell matrix-card">
+      <div class="chart-header"><h3 class="chart-title">Performance matrix</h3><span class="chart-subtitle">· measured medians</span></div>
+      <div class="matrix-wrap"><table>
+        <thead><tr><th>Context</th><th>Actual input</th><th>PP tok/s</th><th>TG tok/s</th><th>TTFT</th><th>Wall</th><th>Overhead</th><th>Output</th><th>Runs</th></tr></thead>
+        <tbody>${cases.map(item => {
+          const marker = item.depth_method === "calibrated" ? "†" : "";
+          const warning = item.depth_within_tolerance ? "" : "!";
+          const failed = number(item.successful_reps) < number(settings.reps);
+          const pp = item.pp_reliable
+            ? `${median(item, "pp_tps").toFixed(1)}<span class="range">${metricRange(item, "pp_tps")}</span>`
+            : `n/a<span class="range">tiny prompt</span>`;
+          const overhead = item.overhead_available
+            ? `${formatTime(median(item, "overhead_s"), 3)}<span class="range">${metricRange(item, "overhead_s", 3)}s</span>`
+            : "n/a";
+          return `<tr>
+            <td class="${warning ? "warning" : ""}">${escapeHtml(item.depth_label)}${marker}${warning}</td>
+            <td>${number(item.actual_input_tokens).toLocaleString()}</td>
+            <td>${pp}</td>
+            <td class="${median(item, "tg_tps") === bestTg ? "winner-cell" : ""}">${median(item, "tg_tps").toFixed(1)}<span class="range">${metricRange(item, "tg_tps")}</span></td>
+            <td>${formatTime(median(item, "ttft_s"), 3)}<span class="range">${metricRange(item, "ttft_s", 3)}s</span></td>
+            <td>${formatTime(median(item, "wall_time_s"), 2)}<span class="range">${metricRange(item, "wall_time_s", 2)}s</span></td>
+            <td>${overhead}</td>
+            <td>${median(item, "output_tokens").toFixed(0)}</td>
+            <td class="${failed ? "warning" : ""}">${number(item.successful_reps)}/${number(settings.reps)}</td>
+          </tr>`;
+        }).join("")}</tbody>
+      </table></div>
+    </article>`;
+
+    document.getElementById("details").innerHTML = cases.map(item => `<details>
+      <summary>
+        <span class="detail-title">${escapeHtml(item.depth_label)} context · ${number(item.actual_input_tokens).toLocaleString()} actual tokens</span>
+        <span class="detail-score">${median(item, "tg_tps").toFixed(1)} TG tok/s · ${formatTime(median(item, "ttft_s"), 3)} TTFT</span>
+      </summary>
+      <div class="raw-wrap"><table>
+        <thead><tr><th>Run</th><th>Input</th><th>Output</th><th>PP tok/s</th><th>TG tok/s</th><th>Wall TG</th><th>TTFT</th><th>Wall</th><th>Overhead</th></tr></thead>
+        <tbody>${(item.runs || []).map(run => run.error
+          ? `<tr><td>${number(run.repetition)}</td><td colspan="8" class="warning">${escapeHtml(run.error)}</td></tr>`
+          : `<tr>
+            <td>${number(run.repetition)}</td>
+            <td>${number(run.input_tokens).toLocaleString()}</td>
+            <td>${number(run.output_tokens)}</td>
+            <td>${number(run.pp_tps).toFixed(1)}</td>
+            <td>${number(run.tg_tps).toFixed(1)}</td>
+            <td>${number(run.wall_tg_tps).toFixed(1)}</td>
+            <td>${formatTime(run.ttft_s, 3)}</td>
+            <td>${formatTime(run.wall_time_s, 2)}</td>
+            <td>${run.server_timings ? formatTime(run.overhead_s, 3) : "n/a"}</td>
+          </tr>`
+        ).join("")}</tbody>
+      </table></div>
+    </details>`).join("");
+  </script>
+</body>
+</html>

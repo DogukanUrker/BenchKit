@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass, field
@@ -156,12 +157,19 @@ class InferenceClient:
             model_id = model.get("id")
             if not model_id:
                 continue
+            raw_status = model.get("status")
+            status = (
+                raw_status.get("value", "")
+                if isinstance(raw_status, dict)
+                else str(raw_status or "")
+            )
             normalized.append(
                 {
                     "name": model_id,
                     "size": model.get("size"),
                     "owned_by": model.get("owned_by", ""),
-                    "status": (model.get("status") or {}).get("value", ""),
+                    "status": status,
+                    "meta": model.get("meta") or {},
                 }
             )
         return sorted(normalized, key=lambda model: model["name"].lower())
@@ -236,6 +244,178 @@ class InferenceClient:
             "eval_duration_ns": eval_duration_ns,
             "response_time_s": total_duration_ns / 1e9,
             "done_reason": data.get("done_reason", ""),
+        }
+
+    def tokenize(self, model: str, content: str) -> list[int] | None:
+        """Tokenize text through a llama.cpp-compatible native endpoint.
+
+        The endpoint is optional. Returning ``None`` lets performance profiling
+        fall back to a deterministic text prompt on generic OpenAI servers.
+        """
+        if self.provider != "openai":
+            return None
+        try:
+            response = httpx.post(
+                f"{_without_v1(self.host)}/tokenize",
+                headers=self._headers(),
+                json={
+                    "model": model,
+                    "content": content,
+                    "add_special": True,
+                },
+                timeout=min(self.timeout, 60),
+            )
+            response.raise_for_status()
+            tokens = response.json().get("tokens")
+            if isinstance(tokens, list) and all(
+                isinstance(token, int) for token in tokens
+            ):
+                return tokens
+        except (httpx.HTTPError, ValueError, TypeError):
+            pass
+        return None
+
+    def profile_completion(
+        self,
+        model: str,
+        prompt: str | list[int],
+        max_tokens: int,
+    ) -> dict:
+        """Stream a controlled completion and return normalized perf timings."""
+        if self.provider != "openai":
+            raise RuntimeError(
+                "Performance profiling currently targets OpenAI-compatible "
+                "llama.cpp/llama-swap endpoints"
+            )
+
+        advanced = {
+            "model": model,
+            "prompt": prompt,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "temperature": 0.0,
+            "seed": 42,
+            "ignore_eos": True,
+            "cache_prompt": False,
+            "timings_per_token": True,
+            "stream_options": {"include_usage": True},
+        }
+        try:
+            return self._stream_profile(advanced, advanced_options=True)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in {400, 404, 422}:
+                raise
+
+        portable = {
+            "model": model,
+            "prompt": prompt,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "temperature": 0.0,
+            "seed": 42,
+            "stream_options": {"include_usage": True},
+        }
+        return self._stream_profile(portable, advanced_options=False)
+
+    def _stream_profile(self, body: dict, *, advanced_options: bool) -> dict:
+        started = time.perf_counter()
+        first_token_at: float | None = None
+        finished_at = started
+        timings: dict = {}
+        usage: dict = {}
+        text_parts: list[str] = []
+
+        with httpx.stream(
+            "POST",
+            f"{_openai_base(self.host)}/completions",
+            headers=self._headers(),
+            json=body,
+            timeout=self.timeout,
+        ) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if not payload or payload == "[DONE]":
+                    continue
+                data = json.loads(payload)
+                if isinstance(data.get("timings"), dict):
+                    timings = data["timings"]
+                if isinstance(data.get("usage"), dict):
+                    usage = data["usage"]
+                choices = data.get("choices") or []
+                choice = choices[0] if choices else {}
+                piece = choice.get("text")
+                if isinstance(piece, str) and piece:
+                    if first_token_at is None:
+                        first_token_at = time.perf_counter()
+                    text_parts.append(piece)
+            finished_at = time.perf_counter()
+
+        prompt_tokens = int(
+            timings.get("prompt_n")
+            or usage.get("prompt_tokens")
+            or 0
+        )
+        cached_tokens = int(timings.get("cache_n") or 0)
+        output_tokens = int(
+            timings.get("predicted_n")
+            or usage.get("completion_tokens")
+            or 0
+        )
+        prompt_ms = float(timings.get("prompt_ms") or 0.0)
+        predicted_ms = float(timings.get("predicted_ms") or 0.0)
+        ttft_s = (
+            first_token_at - started
+            if first_token_at is not None
+            else finished_at - started
+        )
+        wall_time_s = finished_at - started
+        wall_decode_s = (
+            finished_at - first_token_at
+            if first_token_at is not None
+            else 0.0
+        )
+        server_time_s = (prompt_ms + predicted_ms) / 1000
+
+        return {
+            "response": "".join(text_parts),
+            "input_tokens": prompt_tokens + cached_tokens,
+            "processed_input_tokens": prompt_tokens,
+            "cached_input_tokens": cached_tokens,
+            "output_tokens": output_tokens,
+            "pp_tps": (
+                float(timings.get("prompt_per_second") or 0.0)
+                or (
+                    prompt_tokens / (prompt_ms / 1000)
+                    if prompt_tokens and prompt_ms > 0
+                    else 0.0
+                )
+            ),
+            "tg_tps": (
+                float(timings.get("predicted_per_second") or 0.0)
+                or (
+                    output_tokens / (predicted_ms / 1000)
+                    if output_tokens and predicted_ms > 0
+                    else 0.0
+                )
+            ),
+            "ttft_s": ttft_s,
+            "wall_time_s": wall_time_s,
+            "wall_tg_tps": (
+                (output_tokens - 1) / wall_decode_s
+                if output_tokens > 1 and wall_decode_s > 0
+                else 0.0
+            ),
+            "server_time_s": server_time_s,
+            "overhead_s": (
+                max(0.0, wall_time_s - server_time_s)
+                if server_time_s > 0
+                else 0.0
+            ),
+            "advanced_options": advanced_options,
+            "server_timings": bool(timings),
         }
 
     def unload_model(self, model: str) -> None:
