@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -9,6 +10,7 @@ from textual.content import Content
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    DataTable,
     Footer,
     Input,
     Static,
@@ -18,6 +20,7 @@ from textual.widgets import (
 )
 
 from benchkit.engine import SliceError, parse_slice, slice_label
+from benchkit.template_check import TemplateReport
 from benchkit.tui.formatting import fmt_count, fmt_duration
 
 
@@ -164,6 +167,51 @@ class TaskDetailScreen(ModalScreen[None]):
     def action_copy(self) -> None:
         self.app.copy_to_clipboard(self.task_data.get("response", ""))
         self.notify("Response copied to clipboard", timeout=2)
+
+
+class TemplateCheckScreen(ModalScreen[None]):
+    """Compact results for the setup screen's model template check."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close", show=False),
+    ]
+
+    def __init__(self, reports: list[TemplateReport]) -> None:
+        super().__init__()
+        self.reports = reports
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="template-check-dialog", classes="dialog"):
+            yield Static("Chat template checks", classes="card-title")
+            yield Static(
+                "Reference-free sanity checks using the server's rendered prompt.",
+                classes="hint",
+            )
+            yield DataTable(id="template-check-table", cursor_type="row")
+            with Horizontal(classes="dialog-actions"):
+                yield Button("Close", id="close", variant="primary")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one("#template-check-table", DataTable)
+        table.add_columns("Model", "Status", "Details")
+        labels = {
+            "pass": Text("PASS", style="green"),
+            "warn": Text("WARN", style="yellow"),
+            "fail": Text("FAIL", style="red"),
+            "unavailable": Text("N/A", style="dim"),
+        }
+        for report in self.reports:
+            table.add_row(report.model, labels[report.status], report.detail)
+        table.focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close":
+            self.action_close()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
 
 
 class ConfirmScreen(ModalScreen[bool]):

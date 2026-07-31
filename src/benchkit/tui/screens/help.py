@@ -34,6 +34,7 @@ HELP = """
 | `Space` / `Enter` | Toggle the highlighted row |
 | `a` / `n` / `i` | Select all / clear / invert the focused list |
 | `l` | Task limit for the highlighted benchmark |
+| `v` | Check chat templates (selected models, or all) |
 | `/` | Jump to the filter box |
 | `s` / `F5` | Start the run |
 | `Esc` | Back to the connection screen |

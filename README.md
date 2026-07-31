@@ -68,6 +68,11 @@ prompt and the model's raw response.
 
 Task limits accept `20` (first 20), `-20` (last 20) and `40-80` (a range).
 
+From the setup screen, press `v` or choose **Check templates** to run a quick
+chat-template sanity check on the selected models (or every model when none are
+selected). This uses llama.cpp/llama-swap's native template and tokenizer
+endpoints; other server types are shown as unavailable without blocking a run.
+
 ## Headless
 
 For CI and scripts, skip the TUI entirely:

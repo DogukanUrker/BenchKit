@@ -210,6 +210,16 @@ DataTable > .datatable--cursor {
     padding: 1 0 0 0;
 }
 
+#template-check-dialog {
+    width: 92%;
+    height: 70%;
+}
+
+#template-check-table {
+    height: 1fr;
+    margin: 1 0;
+}
+
 /* -------------------------------------------------------------------- Run */
 
 #run-root {

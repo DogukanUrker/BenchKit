@@ -15,8 +15,9 @@ from textual.widgets.selection_list import Selection
 from benchkit.benchmarks import REGISTRY
 from benchkit.demo import DemoClient
 from benchkit.engine import JobSpec, SliceError, parse_slice, slice_label, task_count
+from benchkit.template_check import TemplateReport, check_template
 from benchkit.tui.formatting import fmt_count, fmt_size
-from benchkit.tui.screens.modals import LimitScreen
+from benchkit.tui.screens.modals import LimitScreen, TemplateCheckScreen
 from benchkit.tui.theme import score_palette
 from benchkit.tui.widgets import SectionTitle
 
@@ -53,6 +54,7 @@ class SetupScreen(Screen[None]):
         Binding("n", "select_none", "Clear"),
         Binding("i", "invert", "Invert"),
         Binding("l", "set_limit", "Task limit"),
+        Binding("v", "check_templates", "Check templates"),
         Binding("slash", "focus_filter", "Filter"),
         Binding("escape", "back", "Back"),
     ]
@@ -66,6 +68,8 @@ class SetupScreen(Screen[None]):
         self.selected_benchmarks: set[str] = set()
         self.counts: dict[str, int] = {}
         self.limits: dict[str, str] = {}
+        self.template_status: dict[str, str] = {}
+        self.checking_templates = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -93,6 +97,7 @@ class SetupScreen(Screen[None]):
             )
         with Horizontal(id="setup-footer"):
             yield Static("", id="plan-summary")
+            yield Button("Check templates", id="check-templates")
             yield Button("Start run ▸", id="start", variant="primary")
         yield Footer()
 
@@ -139,7 +144,19 @@ class SetupScreen(Screen[None]):
         )
         text = Text()
         text.append(_clip(name, MODEL_NAME_WIDTH).ljust(MODEL_NAME_WIDTH))
-        text.append(detail.rjust(9), style="dim")
+        status = self.template_status.get(name)
+        if status == "checking":
+            text.append("… checking".rjust(11), style="dim")
+        elif status == "pass":
+            text.append("✓ template".rjust(11), style="green")
+        elif status == "warn":
+            text.append("! template".rjust(11), style="yellow")
+        elif status == "fail":
+            text.append("✗ template".rjust(11), style="red")
+        elif status == "unavailable":
+            text.append("— n/a".rjust(11), style="dim")
+        else:
+            text.append(detail.rjust(9), style="dim")
         return text
 
     def _bench_prompt(self, key: str) -> Text:
@@ -245,6 +262,8 @@ class SetupScreen(Screen[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "start":
             self.action_start()
+        elif event.button.id == "check-templates":
+            self.action_check_templates()
 
     # Actions ----------------------------------------------------------
 
@@ -298,10 +317,53 @@ class SetupScreen(Screen[None]):
 
         self.app.push_screen(LimitScreen(key, self.limits.get(key, ""), total), apply)
 
+    def action_check_templates(self) -> None:
+        targets = [
+            name for name in self.model_order
+            if not self.selected_models or name in self.selected_models
+        ]
+        if not targets:
+            return
+        if self.app.demo:
+            self.notify("Template checks require a llama.cpp or llama-swap server.")
+            return
+        for name in targets:
+            self.template_status[name] = "checking"
+        self.checking_templates = True
+        self._rebuild_models()
+        self.query_one("#check-templates", Button).disabled = True
+        self.query_one("#start", Button).disabled = True
+        self._run_template_checks(targets)
+
+    @work(thread=True, exclusive=True, group="template-checks")
+    def _run_template_checks(self, targets: list[str]) -> None:
+        reports: list[TemplateReport] = []
+        for name in targets:
+            report = check_template(self.app.client, name)
+            reports.append(report)
+            self.app.call_from_thread(self._template_check_ready, report)
+        self.app.call_from_thread(self._template_checks_finished, reports)
+
+    def _template_check_ready(self, report: TemplateReport) -> None:
+        self.template_status[report.model] = report.status
+        self._rebuild_models()
+
+    def _template_checks_finished(self, reports: list[TemplateReport]) -> None:
+        self.checking_templates = False
+        self.query_one("#check-templates", Button).disabled = False
+        self.query_one("#start", Button).disabled = False
+        self.app.push_screen(TemplateCheckScreen(reports))
+
     def action_back(self) -> None:
+        if self.checking_templates:
+            self.notify("Wait for the template check to finish.", timeout=3)
+            return
         self.app.pop_screen()
 
     def action_start(self) -> None:
+        if self.checking_templates:
+            self.notify("Wait for the template check to finish.", timeout=3)
+            return
         jobs = self._build_jobs()
         if jobs is None:
             return
