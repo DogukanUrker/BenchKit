@@ -30,6 +30,7 @@ def _extract_code(response: str) -> str:
 
 class MBPP:
     name = "mbpp"
+    evaluation_activity = "executing code and running tests"
 
     def load_tasks(self) -> list[Task]:
         tasks = []

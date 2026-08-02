@@ -252,6 +252,11 @@ DataTable > .datatable--cursor {
     color: $warning;
 }
 
+.state.evaluating {
+    background: $warning 20%;
+    color: $warning;
+}
+
 .state.done {
     background: $accent 20%;
     color: $accent;

@@ -24,6 +24,7 @@ from benchkit.engine import (
     RunControls,
     RunFailed,
     TaskCompleted,
+    TaskPhase,
     TaskRecord,
     plan_total_tasks,
 )
@@ -191,6 +192,8 @@ class RunScreen(Screen[None]):
         event = message.event
         if isinstance(event, JobStarted):
             self._job_started(event)
+        elif isinstance(event, TaskPhase):
+            self._task_phase(event)
         elif isinstance(event, TaskCompleted):
             self._task_completed(event)
         elif isinstance(event, JobCompleted):
@@ -224,6 +227,17 @@ class RunScreen(Screen[None]):
         self.query_one("#tasks", DataTable).clear()
         self._update_queue_row(event.index, status="running", style="bold")
         self._update_labels()
+
+    def _task_phase(self, event: TaskPhase) -> None:
+        if event.phase == "generating":
+            self._set_state("WAITING FOR MODEL", "running")
+        else:
+            self._set_state("EVALUATING", "evaluating")
+
+        self.query_one("#job-progress-label", Static).update(
+            f"Task {fmt_count(event.position)}/{fmt_count(event.total)} · "
+            f"{event.label} · {event.activity}"
+        )
 
     def _task_completed(self, event: TaskCompleted) -> None:
         record = event.record

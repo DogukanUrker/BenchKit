@@ -172,6 +172,7 @@ class _EvalPlusBenchmark:
     name: str
     task_count: int
     system: str
+    evaluation_activity = "executing code and running EvalPlus tests"
 
     def load_tasks(self) -> list[Task]:
         return [

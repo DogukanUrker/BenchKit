@@ -41,6 +41,7 @@ def _extract_code(response: str) -> str:
 
 class HumanEval:
     name = "humaneval"
+    evaluation_activity = "executing code and running tests"
 
     def load_tasks(self) -> list[Task]:
         tasks = []

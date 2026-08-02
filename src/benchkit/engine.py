@@ -12,6 +12,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 from benchkit.benchmarks import REGISTRY
 from benchkit.benchmarks.base import Task
@@ -160,6 +161,28 @@ class JobStarted:
     overall_total: int
 
 
+@dataclass(frozen=True)
+class TaskPhase:
+    """Current phase of a task before its terminal result is available."""
+
+    index: int
+    job: JobSpec
+    position: int
+    total: int
+    task_id: str
+    entry_point: str
+    phase: Literal["generating", "evaluating"]
+    activity: str
+
+    @property
+    def label(self) -> str:
+        return (
+            f"{self.task_id} ({self.entry_point})"
+            if self.entry_point
+            else self.task_id
+        )
+
+
 @dataclass
 class TaskCompleted:
     index: int
@@ -190,7 +213,13 @@ class RunFailed:
 
 
 EngineEvent = (
-    RunStarted | JobStarted | TaskCompleted | JobCompleted | RunCompleted | RunFailed
+    RunStarted
+    | JobStarted
+    | TaskPhase
+    | TaskCompleted
+    | JobCompleted
+    | RunCompleted
+    | RunFailed
 )
 Sink = Callable[[EngineEvent], None]
 
@@ -375,6 +404,17 @@ class Engine:
 
             prompt = bench.build_prompt(task)
             error = ""
+            phase = TaskPhase(
+                index=index,
+                job=job,
+                position=position + 1,
+                total=len(tasks),
+                task_id=task.id,
+                entry_point=str(task.metadata.get("entry_point", "")),
+                phase="generating",
+                activity="waiting for model",
+            )
+            self.emit(phase)
             try:
                 gen = self.client.generate(job.model, prompt)
             except Exception as exc:
@@ -382,6 +422,20 @@ class Engine:
                 gen = dict(ERROR_GENERATION)
                 errors += 1
 
+            self.emit(
+                TaskPhase(
+                    index=phase.index,
+                    job=phase.job,
+                    position=phase.position,
+                    total=phase.total,
+                    task_id=phase.task_id,
+                    entry_point=phase.entry_point,
+                    phase="evaluating",
+                    activity=getattr(
+                        bench, "evaluation_activity", "evaluating response"
+                    ),
+                )
+            )
             try:
                 ok = bool(bench.evaluate(task, gen["response"]))
             except Exception as exc:

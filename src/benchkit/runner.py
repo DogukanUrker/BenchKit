@@ -24,6 +24,7 @@ from benchkit.engine import (
     RunControls,
     RunFailed,
     TaskCompleted,
+    TaskPhase,
     slice_label,
 )
 
@@ -79,6 +80,13 @@ def run(
             )
             bars[event.index] = progress.add_task(
                 event.job.benchmark, total=max(event.total, 1)
+            )
+        elif isinstance(event, TaskPhase):
+            progress.update(
+                bars[event.index],
+                description=(
+                    f"{event.job.benchmark} · {event.label} · {event.activity}"
+                ),
             )
         elif isinstance(event, TaskCompleted):
             progress.update(bars[event.index], completed=event.completed)

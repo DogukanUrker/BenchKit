@@ -163,12 +163,20 @@ class InferenceClient:
                 if isinstance(raw_status, dict)
                 else str(raw_status or "")
             )
+            normalized_status = status.strip().lower()
             normalized.append(
                 {
                     "name": model_id,
                     "size": model.get("size"),
                     "owned_by": model.get("owned_by", ""),
                     "status": status,
+                    "loaded": (
+                        True
+                        if normalized_status in {"loaded", "running"}
+                        else False
+                        if normalized_status == "unloaded"
+                        else None
+                    ),
                     "meta": model.get("meta") or {},
                 }
             )
@@ -181,6 +189,41 @@ class InferenceClient:
         )
         response.raise_for_status()
         models = response.json().get("models", [])
+        running: set[str] | None = None
+        try:
+            response = httpx.get(
+                f"{_without_v1(self.host)}/api/ps",
+                timeout=10,
+            )
+            response.raise_for_status()
+            running = {
+                str(value)
+                for model in response.json().get("models", [])
+                for value in (
+                    model.get("name"),
+                    model.get("model"),
+                    model.get("digest"),
+                )
+                if value
+            }
+        except (httpx.HTTPError, ValueError, TypeError):
+            # Older or non-standard Ollama-compatible servers may not expose
+            # the optional running-model endpoint. Discovery should still work.
+            pass
+
+        if running is not None:
+            for model in models:
+                loaded = any(
+                    str(value) in running
+                    for value in (
+                        model.get("name"),
+                        model.get("model"),
+                        model.get("digest"),
+                    )
+                    if value
+                )
+                model["loaded"] = loaded
+                model["status"] = "loaded" if loaded else "unloaded"
         return sorted(models, key=lambda model: model.get("size", 0))
 
     def generate(self, model: str, prompt: str) -> dict:

@@ -105,7 +105,12 @@ class SetupScreen(Screen[None]):
         self.sub_title = f"{self.app.client.label} · {self.app.client.host}"
         self.model_order = [model["name"] for model in self.app.models]
         self.model_meta = {model["name"]: model for model in self.app.models}
-        if len(self.model_order) == 1:
+        self.selected_models = {
+            name
+            for name, model in self.model_meta.items()
+            if _model_is_loaded(model)
+        }
+        if not self.selected_models and len(self.model_order) == 1:
             self.selected_models = set(self.model_order)
         self.selected_benchmarks = {"quickbench"} if "quickbench" in REGISTRY else set()
 
@@ -139,9 +144,13 @@ class SetupScreen(Screen[None]):
 
     def _model_prompt(self, name: str) -> Text:
         meta = self.model_meta.get(name, {})
-        detail = fmt_size(meta.get("size")) or str(
-            meta.get("status") or meta.get("owned_by") or ""
-        )
+        status = str(meta.get("status") or "")
+        if isinstance(meta.get("loaded"), bool):
+            detail = status or ("loaded" if meta["loaded"] else "unloaded")
+        else:
+            detail = fmt_size(meta.get("size")) or status or str(
+                meta.get("owned_by") or ""
+            )
         text = Text()
         text.append(_clip(name, MODEL_NAME_WIDTH).ljust(MODEL_NAME_WIDTH))
         status = self.template_status.get(name)
@@ -457,3 +466,12 @@ class SetupScreen(Screen[None]):
 
 def _clip(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def _model_is_loaded(model: dict) -> bool:
+    """Return whether discovery positively identified a resident model."""
+    loaded = model.get("loaded")
+    if isinstance(loaded, bool):
+        return loaded
+    status = str(model.get("status") or "").strip().lower()
+    return status in {"loaded", "running"}
