@@ -205,7 +205,7 @@ class _EvalPlusBenchmark:
                 problem=problem,
                 solution=solution,
                 expected_output=_expected_output(self.dataset, task.id),
-                fast_check=False,
+                fast_check=True,
             )
         return result["base"][0] == pass_status and result["plus"][0] == pass_status
 
