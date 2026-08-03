@@ -68,7 +68,7 @@ class ConnectScreen(Screen[None]):
                             compact=True,
                         )
                     with Horizontal(classes="field"):
-                        yield Label("Timeout", classes="field-label")
+                        yield Label("Task timeout", classes="field-label")
                         yield Input(placeholder="300", id="timeout", compact=True)
                 with Horizontal(id="connect-actions"):
                     yield Button("Connect", id="connect", variant="primary")

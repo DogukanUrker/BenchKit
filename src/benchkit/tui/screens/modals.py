@@ -7,6 +7,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.content import Content
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -108,23 +109,32 @@ class TaskDetailScreen(ModalScreen[None]):
         Binding("escape", "close", "Close"),
         Binding("q", "close", "Close", show=False),
         Binding("c", "copy", "Copy response"),
+        Binding("y", "copy_thinking", "Copy thinking"),
     ]
 
-    def __init__(self, context: str, task: dict) -> None:
+    def __init__(self, context: str, task: dict, *, live: bool = False) -> None:
         super().__init__()
         self.context = context
         self.task_data = task
+        self.live = live
 
-    def compose(self) -> ComposeResult:
+    def _header(self) -> Content:
+        live_phase = self.task_data.get("live_phase") if self.live else None
         passed = self.task_data.get("passed")
         error = self.task_data.get("error")
-        if error:
+        if live_phase:
+            status, style = str(live_phase).upper(), "b blue"
+        elif self.task_data.get("loop_killed"):
+            status, style = "LOOP KILLED", "b red"
+        elif self.task_data.get("timed_out"):
+            status, style = "TIMEOUT", "b yellow"
+        elif error:
             status, style = "ERROR", "b yellow"
         elif passed:
             status, style = "PASS", "b green"
         else:
             status, style = "FAIL", "b red"
-        header = Content.from_markup(
+        return Content.from_markup(
             "[b]$task[/b]  [$style]$status[/$style]   [dim]$context[/dim]",
             task=self.task_data.get("task_id", ""),
             status=status,
@@ -132,19 +142,39 @@ class TaskDetailScreen(ModalScreen[None]):
             context=self.context,
         )
 
+    def _metadata(self) -> str:
+        loop_state = self.task_data.get("loop_state", "unavailable")
+        loop_score = float(self.task_data.get("loop_score", 0.0))
+        trace = self.task_data.get("trace_status", "unavailable")
+        pieces = [
+            fmt_duration(self.task_data.get("response_time_s", 0)),
+            f"{self.task_data.get('tok_s', 0)} tok/s",
+            f"trace {trace}",
+            f"loop {loop_state} ({loop_score:.0%})",
+        ]
+        if self.task_data.get("error"):
+            pieces.append(self.task_data["error"])
+        elif self.task_data.get("loop_kill_remaining_s") is not None:
+            pieces.append(f"kill in {self.task_data['loop_kill_remaining_s']:.1f}s")
+        return " · ".join(pieces)
+
+    def compose(self) -> ComposeResult:
         with Vertical(id="task-dialog", classes="dialog"):
-            yield Static(header)
+            yield Static(self._header(), id="task-header")
             yield Static(
-                f"{fmt_duration(self.task_data.get('response_time_s', 0))} · "
-                f"{self.task_data.get('tok_s', 0)} tok/s"
-                + (
-                    f" · {self.task_data['error']}"
-                    if self.task_data.get("error")
-                    else ""
-                ),
+                self._metadata(),
                 classes="hint",
+                id="task-meta",
             )
-            with TabbedContent(initial="response-tab"):
+            with TabbedContent(initial="thinking-tab" if self.live else "response-tab"):
+                with TabPane("Thinking", id="thinking-tab"):
+                    yield TextArea(
+                        self.task_data.get("thinking", "")
+                        or "(reasoning trace unavailable or empty)",
+                        read_only=True,
+                        soft_wrap=True,
+                        id="thinking-text",
+                    )
                 with TabPane("Response", id="response-tab"):
                     yield TextArea(
                         self.task_data.get("response", "") or "(empty response)",
@@ -161,12 +191,70 @@ class TaskDetailScreen(ModalScreen[None]):
                     )
         yield Footer()
 
+    def update_live(self, task: dict, *, finished: bool = False) -> None:
+        """Refresh an open task inspector from a streamed snapshot."""
+        self.task_data.update(task)
+        if finished:
+            self.live = False
+            self.task_data.pop("live_phase", None)
+        if not self.is_mounted:
+            return
+        try:
+            self.query_one("#task-header", Static).update(self._header())
+            self.query_one("#task-meta", Static).update(self._metadata())
+            _update_live_text(
+                self.query_one("#thinking-text", TextArea),
+                self.task_data.get("thinking", ""),
+                "(reasoning trace unavailable or empty)",
+            )
+            _update_live_text(
+                self.query_one("#response-text", TextArea),
+                self.task_data.get("response", ""),
+                "(empty response)",
+            )
+        except NoMatches:
+            # A final stream update may race with the modal being dismissed.
+            return
+
     def action_close(self) -> None:
         self.dismiss(None)
 
     def action_copy(self) -> None:
         self.app.copy_to_clipboard(self.task_data.get("response", ""))
         self.notify("Response copied to clipboard", timeout=2)
+
+    def action_copy_thinking(self) -> None:
+        self.app.copy_to_clipboard(self.task_data.get("thinking", ""))
+        self.notify("Thinking copied to clipboard", timeout=2)
+
+
+def _update_live_text(area: TextArea, text: str, empty: str) -> None:
+    """Append a live snapshot while preserving the reader's scroll position."""
+    value = text or empty
+    if value == area.text:
+        return
+
+    follow_tail = area.is_vertical_scroll_end
+    scroll_x, scroll_y = area.scroll_offset
+    if area.text != empty and value.startswith(area.text):
+        area.insert(value[len(area.text) :], area.document.end)
+        area.history.clear()
+    else:
+        # The analyzer retains a bounded tail, so very long streams may
+        # eventually drop an old prefix and require a full replacement.
+        area.load_text(value)
+
+    if follow_tail:
+        area.scroll_end(animate=False, x_axis=False)
+    else:
+        area.call_after_refresh(
+            lambda: area.scroll_to(
+                x=scroll_x,
+                y=scroll_y,
+                animate=False,
+                force=True,
+            )
+        )
 
 
 class TemplateCheckScreen(ModalScreen[None]):

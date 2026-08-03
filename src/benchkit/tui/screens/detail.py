@@ -43,6 +43,7 @@ class JobDetailScreen(Screen[None]):
             with Horizontal(id="stat-row"):
                 yield StatCard("Score", "--", id="stat-score")
                 yield StatCard("Passed", "--", id="stat-passed")
+                yield StatCard("Loop rate", "--", id="stat-loops")
                 yield StatCard("Speed", "--", id="stat-speed")
                 yield StatCard("Avg latency", "--", id="stat-latency")
                 yield StatCard("Duration", "--", id="stat-duration")
@@ -61,6 +62,8 @@ class JobDetailScreen(Screen[None]):
         table.add_column("#", key="index", width=5)
         table.add_column("Task", key="task")
         table.add_column("Result", key="result", width=8)
+        table.add_column("Loop", key="loop", width=9)
+        table.add_column("Think", key="thinking", width=8)
         table.add_column("Latency", key="latency", width=9)
         table.add_column("tok/s", key="tok_s", width=8)
 
@@ -71,6 +74,12 @@ class JobDetailScreen(Screen[None]):
         self.query_one("#stat-passed", StatCard).set_state(
             f"{result['passed']}/{result['total']}",
             f"{result.get('errors', 0)} error(s)",
+        )
+        self.query_one("#stat-loops", StatCard).set_state(
+            f"{result.get('loop_rate', 0):.1f}%",
+            f"{result.get('loops', 0)} loop · "
+            f"{result.get('suspected_loops', 0)} suspect · "
+            f"{result.get('loop_kills', 0)} killed",
         )
         self.query_one("#stat-speed", StatCard).set_state(
             f"{result['tok_s']:.1f} tok/s"
@@ -113,6 +122,7 @@ class JobDetailScreen(Screen[None]):
                 needle
                 and needle not in task["task_id"].lower()
                 and needle not in (task.get("response", "").lower())
+                and needle not in (task.get("thinking", "").lower())
             ):
                 continue
             rows.append((index, task))
@@ -129,6 +139,12 @@ class JobDetailScreen(Screen[None]):
                 str(index + 1),
                 label,
                 _result_cell(task, self.app.current_theme.dark),
+                _loop_cell(task),
+                (
+                    fmt_duration(task.get("thinking_time_s", 0))
+                    if task.get("thinking")
+                    else "—"
+                ),
                 fmt_duration(task.get("response_time_s", 0)),
                 f"{task.get('tok_s', 0):.1f}",
                 key=str(index),
@@ -167,5 +183,43 @@ class JobDetailScreen(Screen[None]):
 def _result_cell(task: dict, dark: bool = True) -> Text:
     error = bool(task.get("error"))
     passed = bool(task.get("passed"))
-    label = "ERROR" if error else ("PASS" if passed else "FAIL")
+    label = (
+        "LOOPKILL"
+        if task.get("loop_killed")
+        else "TIMEOUT"
+        if task.get("timed_out")
+        else "ERROR"
+        if error
+        else "PASS"
+        if passed
+        else "FAIL"
+    )
     return Text(label, style=f"bold {result_color(passed, error, dark)}")
+
+
+def _loop_cell(task: dict) -> Text:
+    state = task.get("loop_state", "unavailable")
+    source = task.get("loop_source", "none")
+    label = (
+        "OUTPUT"
+        if state == "looping" and source == "answer"
+        else "LOOPING"
+        if state == "looping"
+        else "SUSPECT"
+        if state == "suspected"
+        else "NO TRACE"
+        if state == "clear" and source == "answer"
+        else "CLEAR"
+        if state == "clear"
+        else "NO TRACE"
+    )
+    style = (
+        "bold red"
+        if state == "looping"
+        else "bold yellow"
+        if state == "suspected"
+        else "green"
+        if state == "clear" and source != "answer"
+        else "dim"
+    )
+    return Text(label, style=style)

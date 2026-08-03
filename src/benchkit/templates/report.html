@@ -131,7 +131,7 @@
 
     .summary {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       margin: 28px 0 64px;
       background: var(--card);
       border: 1px solid var(--line);
@@ -267,6 +267,8 @@
     .horizontal-track { height: 18px; border-radius: 5px; background: var(--track); overflow: hidden; }
     .horizontal-fill { width: calc(var(--value) * 1%); height: 100%; border-radius: inherit; background: var(--bar); }
     .horizontal-row.winner .horizontal-fill { background: var(--green); }
+    .horizontal-fill.loop-fill { background: var(--red); }
+    .horizontal-row.clean .horizontal-value { color: var(--green); }
     .horizontal-value { color: var(--bar); font-size: 15px; font-weight: 800; text-align: right; }
     .horizontal-row.winner .horizontal-value { color: var(--green); }
 
@@ -303,7 +305,11 @@
     .task-head { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 10px; font: 9px/1 var(--mono); }
     .status { color: var(--red); font-weight: 900; }
     .status.pass { color: var(--green); }
+    .loop-status { margin-left: 10px; color: var(--muted); font-weight: 900; }
+    .loop-status.looping { color: var(--red); }
+    .loop-status.suspected { color: var(--amber); }
     .exchange { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .thinking-code { grid-column: 1 / -1; }
     .code { min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--raise); overflow: hidden; }
     .code-label { padding: 8px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font: 8px/1 var(--mono); text-transform: uppercase; }
     pre { max-height: 300px; margin: 0; padding: 11px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 9px/1.55 var(--mono); }
@@ -317,6 +323,7 @@
       .summary { grid-template-columns: repeat(2, 1fr); }
       .stat:nth-child(3) { border-top: 1px solid var(--line); border-left: 0; }
       .stat:nth-child(4) { border-top: 1px solid var(--line); }
+      .stat:nth-child(5) { border-top: 1px solid var(--line); border-left: 0; }
       .chart-shell { padding: 25px 18px 24px; border-radius: 14px; }
       .chart-title { font-size: 18px; }
       .chart-subtitle { font-size: 17px; }
@@ -348,6 +355,7 @@
       <div class="section-head"><h2>Chart gallery</h2><p class="section-note">Inspect and capture any chart directly</p></div>
       <div class="charts">
         <div id="overallChart"></div>
+        <div id="loopChart"></div>
         <div id="benchmarkCharts" class="charts"></div>
         <div id="suiteChart"></div>
         <div id="efficiencyChart"></div>
@@ -396,14 +404,16 @@
     const date = report.generated_at.replace("_", " · ").replaceAll("-", ".");
     const benchmarks = [...new Set(rows.map(row => row.benchmark))];
     const totalTasks = rows.reduce((sum, row) => sum + number(row.total), 0);
+    const totalLoops = rows.reduce((sum, row) => sum + number(row.loops), 0);
     const totalRuntime = rows.reduce((sum, row) => sum + number(row.total_time), 0);
     const environment = [report.provider, report.hardware].filter(Boolean).join(" · ") || "Local inference";
 
     const grouped = new Map();
     rows.forEach(row => {
-      const item = grouped.get(row.model) || { model: row.model, passed: 0, total: 0, speedTotal: 0, runtime: 0 };
+      const item = grouped.get(row.model) || { model: row.model, passed: 0, total: 0, loops: 0, speedTotal: 0, runtime: 0 };
       item.passed += number(row.passed);
       item.total += number(row.total);
+      item.loops += number(row.loops);
       item.speedTotal += number(row.tok_s) * number(row.total);
       item.runtime += number(row.total_time);
       grouped.set(row.model, item);
@@ -411,6 +421,7 @@
     const models = [...grouped.values()].map(item => ({
       ...item,
       score: item.total ? item.passed / item.total * 100 : 0,
+      loopRate: item.total ? item.loops / item.total * 100 : 0,
       speed: item.total ? item.speedTotal / item.total : 0,
     })).sort((a, b) => b.score - a.score || b.speed - a.speed);
     const best = models[0] || { model: "No results", score: 0, passed: 0, total: 0, speed: 0 };
@@ -470,9 +481,19 @@
       ["Models", models.length],
       ["Benchmarks", benchmarks.length],
       ["Tasks scored", totalTasks],
+      ["Loops detected", `${totalLoops} · ${totalTasks ? (totalLoops / totalTasks * 100).toFixed(1) : "0.0"}%`],
       ["Runtime", formatTime(totalRuntime)],
     ].map(([label, value]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`).join("");
     document.getElementById("overallChart").innerHTML = chart(chartConfigs.get("overall"));
+    const maxLoopRate = Math.max(1, ...models.map(model => model.loopRate));
+    document.getElementById("loopChart").innerHTML = `<article class="chart-shell">
+      <div class="chart-header"><h3 class="chart-title">Generation loops</h3><span class="chart-subtitle">· lower is better</span></div>
+      <div class="horizontal-list">${[...models].sort((a, b) => a.loopRate - b.loopRate).slice(0, 7).map(model => `<div class="horizontal-row ${model.loopRate === 0 ? "clean" : ""}">
+        <div class="horizontal-name" title="${escapeHtml(model.model)}">${escapeHtml(model.model)}</div>
+        <div class="horizontal-track"><div class="horizontal-fill loop-fill" style="--value:${model.loopRate / maxLoopRate * 100}"></div></div>
+        <div class="horizontal-value">${model.loopRate.toFixed(1)}%</div>
+      </div>`).join("")}</div>
+    </article>`;
     document.getElementById("benchmarkCharts").innerHTML = benchmarks.map((_, index) => chart(chartConfigs.get(`benchmark-${index}`))).join("");
 
     const visibleModels = models.slice(0, 5);
@@ -549,7 +570,7 @@
     document.getElementById("matrix").innerHTML = `<article class="chart-shell matrix-card">
       <div class="chart-header"><h3 class="chart-title">Score matrix</h3><span class="chart-subtitle">· full suite</span></div>
       <div class="matrix-wrap"><table>
-      <thead><tr><th>Model</th><th>Overall</th>${benchmarks.map(item => `<th>${escapeHtml(item)}</th>`).join("")}<th>tok/s</th></tr></thead>
+      <thead><tr><th>Model</th><th>Overall</th>${benchmarks.map(item => `<th>${escapeHtml(item)}</th>`).join("")}<th>Loops</th><th>tok/s</th></tr></thead>
       <tbody>${models.slice(0, 8).map(model => `<tr>
         <td>${escapeHtml(model.model)}</td><td class="score-cell" style="background:${heat(model.score)}">${number(model.score).toFixed(1)}%</td>
         ${benchmarks.map(benchmark => {
@@ -557,7 +578,7 @@
           return row
             ? `<td style="background:${heat(row.score)}">${number(row.score).toFixed(1)}%</td>`
             : "<td>—</td>";
-        }).join("")}<td>${model.speed.toFixed(1)}</td>
+        }).join("")}<td>${model.loopRate.toFixed(1)}%</td><td>${model.speed.toFixed(1)}</td>
       </tr>`).join("")}</tbody>
       </table></div>
     </article>`;
@@ -567,8 +588,10 @@
       .map(row => `<details>
         <summary><span class="detail-title">${escapeHtml(row.model)} / ${escapeHtml(row.benchmark)}</span><span class="detail-score">${row.passed}/${row.total} · ${number(row.score).toFixed(1)}%</span></summary>
         <div class="tasks">${(row.tasks || []).map(task => `<article class="task">
-          <div class="task-head"><span>${escapeHtml(task.task_id)}</span><span class="status ${task.passed ? "pass" : ""}">${task.passed ? "PASS" : "FAIL"}</span></div>
+          <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} tokens</span><span><span class="status ${task.passed ? "pass" : ""}">${task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.error ? "ERROR" : task.passed ? "PASS" : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(task.loop_state === "clear" && task.loop_source === "answer" && task.trace_status === "unavailable" ? "NO TRACE" : (task.loop_state || "unavailable").toUpperCase())}</span></span></div>
           <div class="exchange">
+            ${task.error ? `<div class="code"><div class="code-label">Error</div><pre>${escapeHtml(task.error)}</pre></div>` : ""}
+            ${task.thinking ? `<div class="code thinking-code"><div class="code-label">Thinking · ${number(task.thinking_time_s).toFixed(1)}s · loop score ${(number(task.loop_score) * 100).toFixed(0)}%</div><pre>${escapeHtml(task.thinking)}</pre></div>` : ""}
             <div class="code"><div class="code-label">Prompt</div><pre>${escapeHtml(task.prompt)}</pre></div>
             <div class="code"><div class="code-label">Response</div><pre>${escapeHtml(task.response)}</pre></div>
           </div>

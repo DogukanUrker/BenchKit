@@ -18,6 +18,7 @@ from rich.progress import (
 from benchkit.client import InferenceClient
 from benchkit.engine import (
     Engine,
+    GenerationProgress,
     JobCompleted,
     JobSpec,
     JobStarted,
@@ -88,18 +89,48 @@ def run(
                     f"{event.job.benchmark} · {event.label} · {event.activity}"
                 ),
             )
+        elif isinstance(event, GenerationProgress):
+            loop = (
+                " · LOOPING"
+                if event.loop_state == "looping"
+                else " · loop suspected"
+                if event.loop_state == "suspected"
+                else ""
+            )
+            kill = (
+                f" · kill in {event.loop_kill_remaining_s:.1f}s"
+                if event.loop_kill_remaining_s is not None
+                else ""
+            )
+            progress.update(
+                bars[event.index],
+                description=(
+                    f"{event.job.benchmark} · {event.label} · {event.phase} · "
+                    f"{event.thinking_chars + event.response_chars:,} chars"
+                    f"{loop}{kill}"
+                ),
+            )
         elif isinstance(event, TaskCompleted):
             progress.update(bars[event.index], completed=event.completed)
             if verbose:
                 record = event.record
                 status = (
-                    "[bold green]PASS[/bold green]"
+                    "[bold red]LOOP KILLED[/bold red]"
+                    if record.loop_killed
+                    else "[bold yellow]TIMEOUT[/bold yellow]"
+                    if record.timed_out
+                    else "[bold green]PASS[/bold green]"
                     if record.passed
+                    else "[bold yellow]ERROR[/bold yellow]"
+                    if record.error
                     else "[bold red]FAIL[/bold red]"
                 )
                 console.print(f"[bold]{record.label}[/bold] [dim]·[/dim] {status}")
                 console.print("[dim]Prompt[/dim]")
                 console.print(record.prompt, markup=False, highlight=False)
+                if record.thinking:
+                    console.print("[dim]Thinking[/dim]")
+                    console.print(record.thinking, markup=False, highlight=False)
                 console.print("[dim]Response[/dim]")
                 console.print(record.response, markup=False, highlight=False)
                 console.print()
@@ -119,7 +150,9 @@ def run(
                 f"[dim]on[/dim] [white]{result['model']}[/white]  "
                 f"[bold {style}]{result['score']:.1f}%[/bold {style}] "
                 f"[dim]{result['passed']}/{result['total']} · "
-                f"{result['tok_s']:.1f} tok/s · {_fmt_time(result['total_time'])}[/dim]"
+                f"{result['tok_s']:.1f} tok/s · {result.get('loops', 0)} loops · "
+                f"{result.get('loop_kills', 0)} killed · "
+                f"{_fmt_time(result['total_time'])}[/dim]"
             )
 
     engine = Engine(client=client, jobs=jobs, sink=sink, controls=RunControls())

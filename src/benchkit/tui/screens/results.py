@@ -22,6 +22,7 @@ SORT_KEYS = {
     "score": lambda r: -r["score"],
     "passed": lambda r: -r["passed"],
     "errors": lambda r: -r.get("errors", 0),
+    "loops": lambda r: -r.get("loop_rate", 0),
     "tok_s": lambda r: -r["tok_s"],
     "avg": lambda r: r["avg_response_time"],
     "time": lambda r: r["total_time"],
@@ -53,6 +54,7 @@ class ResultsScreen(Screen[None]):
                 yield StatCard("Best score", "--", id="stat-best")
                 yield StatCard("Runs", "0", id="stat-runs")
                 yield StatCard("Tasks", "0", id="stat-tasks")
+                yield StatCard("Loops", "0", id="stat-loops")
                 yield StatCard("Fastest", "--", id="stat-fastest")
                 yield StatCard("Total time", "--", id="stat-time")
             with Vertical(classes="pane", id="results-pane"):
@@ -73,6 +75,7 @@ class ResultsScreen(Screen[None]):
         table.add_column("Score", key="score", width=8)
         table.add_column("", key="bar", width=14)
         table.add_column("Passed", key="passed", width=10)
+        table.add_column("Loops", key="loops", width=8)
         table.add_column("Errors", key="errors", width=7)
         table.add_column("tok/s", key="tok_s", width=8)
         table.add_column("Avg", key="avg", width=8)
@@ -120,6 +123,11 @@ class ResultsScreen(Screen[None]):
                 Text(f"{score:.1f}%", style=f"bold {color}"),
                 Text(bar(score / 100, 12), style=color),
                 f"{result['passed']}/{result['total']}",
+                (
+                    f"{result.get('loop_rate', 0):.1f}%"
+                    if result.get("loops", 0)
+                    else "—"
+                ),
                 str(result.get("errors", 0)) if result.get("errors") else "—",
                 f"{result['tok_s']:.1f}",
                 f"{result['avg_response_time']}s",
@@ -134,12 +142,18 @@ class ResultsScreen(Screen[None]):
         fastest = max(self.results, key=lambda r: r["tok_s"])
         tasks = sum(r["total"] for r in self.results)
         total_time = sum(r["total_time"] for r in self.results)
+        loops = sum(r.get("loops", 0) for r in self.results)
+        loop_kills = sum(r.get("loop_kills", 0) for r in self.results)
 
         self.query_one("#stat-best", StatCard).set_state(
             f"{best['score']:.1f}%", f"{best['model']} · {best['benchmark']}"
         )
         self.query_one("#stat-runs", StatCard).set_state(str(len(self.results)))
         self.query_one("#stat-tasks", StatCard).set_state(fmt_count(tasks))
+        self.query_one("#stat-loops", StatCard).set_state(
+            str(loops),
+            (f"{loops / tasks * 100:.1f}% · {loop_kills} killed" if tasks else ""),
+        )
         self.query_one("#stat-fastest", StatCard).set_state(
             f"{fastest['tok_s']:.0f} tok/s", fastest["model"]
         )

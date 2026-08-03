@@ -17,6 +17,7 @@ from textual.widgets import DataTable, Footer, Header, ProgressBar, Static
 
 from benchkit.engine import (
     Engine,
+    GenerationProgress,
     JobCompleted,
     JobSpec,
     JobStarted,
@@ -36,7 +37,7 @@ from benchkit.tui.formatting import (
     result_color,
     score_color,
 )
-from benchkit.tui.screens.modals import ConfirmScreen, TaskDetailScreen
+from benchkit.tui.screens.modals import TaskDetailScreen
 from benchkit.tui.widgets import SectionTitle, StatCard, apply_compact
 
 
@@ -78,6 +79,11 @@ class RunScreen(Screen[None]):
         self.only_failures = False
         self.follow = True
         self.finished = False
+        self.current_loops = 0
+        self.current_suspected = 0
+        self.live_progress: GenerationProgress | None = None
+        self.live_row_key: str | None = None
+        self.live_modal: TaskDetailScreen | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -94,9 +100,10 @@ class RunScreen(Screen[None]):
                 yield StatCard("Accuracy", "--", id="stat-accuracy")
                 yield StatCard("Passed", "0", id="stat-passed")
                 yield StatCard("Failed", "0", id="stat-failed")
+                yield StatCard("Loops", "0", id="stat-loops")
+                yield StatCard("Live", "--", id="stat-live")
                 yield StatCard("Speed", "--", id="stat-speed")
                 yield StatCard("Elapsed", "0s", id="stat-elapsed")
-                yield StatCard("ETA", "--", id="stat-eta")
             with Horizontal(id="run-body"):
                 with Vertical(classes="pane", id="queue-pane"):
                     yield SectionTitle("Run queue", id="queue-title")
@@ -133,7 +140,8 @@ class RunScreen(Screen[None]):
         tasks = self.query_one("#tasks", DataTable)
         tasks.add_column("#", key="index", width=4)
         tasks.add_column("Task", key="task", width=28)
-        tasks.add_column("Result", key="result", width=7)
+        tasks.add_column("Result", key="result", width=9)
+        tasks.add_column("Loop", key="loop", width=9)
         tasks.add_column("Latency", key="latency", width=8)
         tasks.add_column("tok/s", key="tok_s", width=7)
 
@@ -194,6 +202,8 @@ class RunScreen(Screen[None]):
             self._job_started(event)
         elif isinstance(event, TaskPhase):
             self._task_phase(event)
+        elif isinstance(event, GenerationProgress):
+            self._generation_progress(event)
         elif isinstance(event, TaskCompleted):
             self._task_completed(event)
         elif isinstance(event, JobCompleted):
@@ -210,11 +220,15 @@ class RunScreen(Screen[None]):
         self.current_completed = 0
         self.latency_sum = 0.0
         self.tok_s_sum = 0.0
+        self.current_loops = 0
+        self.current_suspected = 0
+        self.live_progress = None
+        self.live_row_key = None
         self.records[event.index] = []
 
         job = event.job
         title = Content.from_markup(
-            "[b]$bench[/b][dim]  on  [/dim]$model[dim]$slice[/dim]",
+            "[b]$bench[/b]  [dim]on[/dim]  $model[dim]$slice[/dim]",
             bench=job.benchmark,
             model=job.model,
             slice=f"   slice {job.slice_spec}" if job.slice_spec else "",
@@ -231,13 +245,100 @@ class RunScreen(Screen[None]):
     def _task_phase(self, event: TaskPhase) -> None:
         if event.phase == "generating":
             self._set_state("WAITING FOR MODEL", "running")
-        else:
+            self.live_progress = None
+            self.live_row_key = f"{event.index}:{event.position - 1}"
+            table = self.query_one("#tasks", DataTable)
+            table.add_row(
+                str(event.position),
+                event.label,
+                Text("WAIT", style="dim"),
+                Text("observing", style="dim"),
+                "0s",
+                "—",
+                key=self.live_row_key,
+            )
+            if self.follow:
+                table.scroll_end(animate=False)
+        elif event.phase == "evaluating":
             self._set_state("EVALUATING", "evaluating")
+        elif event.phase == "loop_killed":
+            self._set_state("DOOM LOOP KILLED", "looping")
+        else:
+            self._set_state("TASK TIMED OUT", "paused")
 
         self.query_one("#job-progress-label", Static).update(
             f"Task {fmt_count(event.position)}/{fmt_count(event.total)} · "
             f"{event.label} · {event.activity}"
         )
+
+    def _generation_progress(self, event: GenerationProgress) -> None:
+        self.live_progress = event
+        if event.loop_kill_remaining_s is not None:
+            self._set_state(
+                f"LOOPING · KILL IN {event.loop_kill_remaining_s:.1f}s",
+                "looping",
+            )
+        elif event.loop_state == "looping":
+            self._set_state("LOOPING DETECTED", "looping")
+        elif event.loop_state == "suspected":
+            self._set_state("LOOP SUSPECTED", "paused")
+        elif event.phase == "thinking":
+            self._set_state("THINKING", "running")
+        elif event.phase == "answering":
+            self._set_state("ANSWERING", "running")
+        else:
+            self._set_state("WAITING FOR MODEL", "running")
+
+        total_chars = event.thinking_chars + event.response_chars
+        self.query_one("#stat-live", StatCard).set_state(
+            event.phase.upper(),
+            f"{fmt_count(total_chars)} chars · {fmt_duration(event.elapsed_s)}",
+        )
+        live_loops = self.current_loops + int(event.loop_state == "looping")
+        live_suspected = self.current_suspected + int(event.loop_state == "suspected")
+        self.query_one("#stat-loops", StatCard).set_state(
+            str(live_loops),
+            (
+                f"kill in {event.loop_kill_remaining_s:.1f}s"
+                if event.loop_kill_remaining_s is not None
+                else f"{live_suspected} suspected"
+            ),
+        )
+        kill_detail = (
+            f" · kill in {event.loop_kill_remaining_s:.1f}s"
+            if event.loop_kill_remaining_s is not None
+            else ""
+        )
+        self.query_one("#job-progress-label", Static).update(
+            f"Task {fmt_count(event.position)}/{fmt_count(event.total)} · "
+            f"{event.label} · {event.phase} · {fmt_count(total_chars)} chars"
+            f"{kill_detail}"
+        )
+
+        if self.live_row_key is not None:
+            table = self.query_one("#tasks", DataTable)
+            table.update_cell(
+                self.live_row_key,
+                "result",
+                Text(event.phase[:7].upper(), style="bold"),
+            )
+            table.update_cell(
+                self.live_row_key,
+                "loop",
+                _loop_cell(event.loop_state, event.loop_source),
+            )
+            table.update_cell(
+                self.live_row_key,
+                "latency",
+                fmt_duration(event.elapsed_s),
+            )
+
+        if (
+            self.live_modal is not None
+            and self.live_modal.is_mounted
+            and self.live_modal.task_data.get("task_id") == event.label
+        ):
+            self.live_modal.update_live(_progress_task_data(event))
 
     def _task_completed(self, event: TaskCompleted) -> None:
         record = event.record
@@ -249,8 +350,27 @@ class RunScreen(Screen[None]):
             self.overall_passed += 1
         self.latency_sum += record.response_time_s
         self.tok_s_sum += record.tok_s
+        self.current_loops += int(record.loop_state == "looping")
+        self.current_suspected += int(record.loop_state == "suspected")
 
         self._add_task_row(event.index, record)
+        self.live_progress = None
+        self.live_row_key = None
+        self.query_one("#stat-live", StatCard).set_state(
+            "LOOP KILLED" if record.loop_killed else "DONE",
+            (
+                f"score {record.loop_kill_score:.0%}"
+                if record.loop_killed
+                else f"{fmt_count(record.output_tokens)} tokens"
+            ),
+        )
+        self.query_one("#stat-loops", StatCard).set_state(
+            str(self.current_loops),
+            f"{self.current_suspected} suspected",
+        )
+        if self.live_modal is not None and self.live_modal.is_mounted:
+            self.live_modal.update_live(_record_task_data(record), finished=True)
+            self.live_modal = None
         self.query_one("#job-progress", ProgressBar).update(progress=event.completed)
         self.query_one("#overall-progress", ProgressBar).update(
             progress=self.overall_completed
@@ -302,17 +422,35 @@ class RunScreen(Screen[None]):
     # Table helpers ----------------------------------------------------
 
     def _add_task_row(self, job_index: int, record: TaskRecord) -> None:
-        if self.only_failures and record.passed:
-            return
         table = self.query_one("#tasks", DataTable)
-        table.add_row(
-            str(record.index + 1),
-            record.label,
-            _result_cell(record, self.dark),
-            fmt_duration(record.response_time_s),
-            f"{record.tok_s:.1f}" if record.tok_s else "—",
-            key=f"{job_index}:{record.index}",
-        )
+        key = f"{job_index}:{record.index}"
+        if self.only_failures and record.passed:
+            if key == self.live_row_key:
+                table.remove_row(key)
+            return
+        if key == self.live_row_key:
+            table.update_cell(key, "result", _result_cell(record, self.dark))
+            table.update_cell(
+                key,
+                "loop",
+                _loop_cell(record.loop_state, record.loop_source),
+            )
+            table.update_cell(key, "latency", fmt_duration(record.response_time_s))
+            table.update_cell(
+                key,
+                "tok_s",
+                f"{record.tok_s:.1f}" if record.tok_s else "—",
+            )
+        else:
+            table.add_row(
+                str(record.index + 1),
+                record.label,
+                _result_cell(record, self.dark),
+                _loop_cell(record.loop_state, record.loop_source),
+                fmt_duration(record.response_time_s),
+                f"{record.tok_s:.1f}" if record.tok_s else "—",
+                key=key,
+            )
         if self.follow:
             table.scroll_end(animate=False)
 
@@ -326,6 +464,7 @@ class RunScreen(Screen[None]):
                 str(record.index + 1),
                 record.label,
                 _result_cell(record, self.dark),
+                _loop_cell(record.loop_state, record.loop_source),
                 fmt_duration(record.response_time_s),
                 f"{record.tok_s:.1f}" if record.tok_s else "—",
                 key=f"{self.current_index}:{record.index}",
@@ -383,13 +522,6 @@ class RunScreen(Screen[None]):
     def _tick(self) -> None:
         elapsed = time.monotonic() - self.started_at
         self.query_one("#stat-elapsed", StatCard).set_state(fmt_duration(elapsed))
-        eta = self.query_one("#stat-eta", StatCard)
-        if self.overall_completed and not self.finished:
-            per_task = elapsed / self.overall_completed
-            remaining = max(0, self.overall_total - self.overall_completed)
-            eta.set_state(fmt_duration(per_task * remaining), f"{per_task:.1f}s / task")
-        elif self.finished:
-            eta.set_state("done")
 
     def _set_state(self, label: str, css_class: str) -> None:
         state = self.query_one("#run-state", Static)
@@ -401,26 +533,26 @@ class RunScreen(Screen[None]):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "tasks":
             return
-        job_index, _, position = str(event.row_key.value).partition(":")
+        selected_key = str(event.row_key.value)
+        if selected_key == self.live_row_key and self.live_progress is not None:
+            modal = TaskDetailScreen(
+                self.live_progress.job.title,
+                _progress_task_data(self.live_progress),
+                live=True,
+            )
+            self.live_modal = modal
+            self.app.push_screen(modal, self._live_modal_closed)
+            return
+        job_index, _, position = selected_key.partition(":")
         records = self.records.get(int(job_index), [])
         record = next((r for r in records if r.index == int(position)), None)
         if record is None:
             return
         job = self.jobs[int(job_index)]
-        self.app.push_screen(
-            TaskDetailScreen(
-                job.title,
-                {
-                    "task_id": record.label,
-                    "passed": record.passed,
-                    "prompt": record.prompt,
-                    "response": record.response,
-                    "error": record.error,
-                    "tok_s": record.tok_s,
-                    "response_time_s": record.response_time_s,
-                },
-            )
-        )
+        self.app.push_screen(TaskDetailScreen(job.title, _record_task_data(record)))
+
+    def _live_modal_closed(self, _result: None) -> None:
+        self.live_modal = None
 
     # Actions ----------------------------------------------------------
 
@@ -436,29 +568,16 @@ class RunScreen(Screen[None]):
     def action_skip(self) -> None:
         if self.finished:
             return
-        # skip_job() also lifts a pause, so the header has to follow.
         self.controls.skip_job()
-        self._set_state("RUNNING", "running")
-        self.notify("Skipping to the next run…", timeout=2)
+        self._set_state("REQUEST CANCELLED", "paused")
+        self.notify("Active request cancelled — moving to the next job.", timeout=2)
 
     def action_stop(self) -> None:
         if self.finished:
             return
-
-        def confirm(answer: bool | None) -> None:
-            if answer:
-                self.controls.stop()
-                self._set_state("STOPPING", "paused")
-                self.notify("Stopping — finishing the current task.", timeout=4)
-
-        self.app.push_screen(
-            ConfirmScreen(
-                "Stop this run?",
-                "Finished tasks are kept and reports are still written.",
-                confirm="Stop run",
-            ),
-            confirm,
-        )
+        self.controls.stop()
+        self._set_state("STOPPED", "done")
+        self.notify("Run stopped. Active request cancelled.", timeout=2)
 
     def action_toggle_failures(self) -> None:
         self.only_failures = not self.only_failures
@@ -473,6 +592,93 @@ class RunScreen(Screen[None]):
 
 
 def _result_cell(record: TaskRecord, dark: bool = True) -> Text:
-    label = "ERROR" if record.error else ("PASS" if record.passed else "FAIL")
+    label = (
+        "LOOP KILL"
+        if record.loop_killed
+        else "TIMEOUT"
+        if record.timed_out
+        else "ERROR"
+        if record.error
+        else "PASS"
+        if record.passed
+        else "FAIL"
+    )
     color = result_color(record.passed, bool(record.error), dark)
     return Text(label, style=f"bold {color}")
+
+
+def _loop_label(state: str, source: str) -> str:
+    if state == "looping":
+        return "OUTPUT LOOP" if source == "answer" else "LOOPING"
+    if state == "suspected":
+        return "SUSPECT"
+    if state == "clear":
+        return "NO TRACE" if source == "answer" else "CLEAR"
+    if state == "observing":
+        return "WATCHING"
+    return "NO TRACE"
+
+
+def _loop_cell(state: str, source: str) -> Text:
+    label = _loop_label(state, source)
+    style = (
+        "bold red"
+        if state == "looping"
+        else "bold yellow"
+        if state == "suspected"
+        else "green"
+        if state == "clear" and source != "answer"
+        else "dim"
+    )
+    return Text(label, style=style)
+
+
+def _progress_task_data(event: GenerationProgress) -> dict:
+    return {
+        "task_id": event.label,
+        "passed": None,
+        "prompt": event.prompt,
+        "thinking": event.thinking,
+        "response": event.response,
+        "error": "",
+        "tok_s": 0.0,
+        "response_time_s": event.elapsed_s,
+        "live_phase": event.phase,
+        "trace_status": event.trace_status,
+        "loop_state": event.loop_state,
+        "loop_score": event.loop_score,
+        "loop_source": event.loop_source,
+        "loop_kill_remaining_s": event.loop_kill_remaining_s,
+        "thinking_chars": event.thinking_chars,
+        "response_chars": event.response_chars,
+    }
+
+
+def _record_task_data(record: TaskRecord) -> dict:
+    return {
+        "task_id": record.label,
+        "passed": record.passed,
+        "prompt": record.prompt,
+        "thinking": record.thinking,
+        "response": record.response,
+        "error": record.error,
+        "tok_s": record.tok_s,
+        "response_time_s": record.response_time_s,
+        "output_tokens": record.output_tokens,
+        "done_reason": record.done_reason,
+        "timed_out": record.timed_out,
+        "loop_killed": record.loop_killed,
+        "loop_kill_score": record.loop_kill_score,
+        "loop_killed_at_s": record.loop_killed_at_s,
+        "trace_status": record.trace_status,
+        "thinking_time_s": record.thinking_time_s,
+        "time_to_first_answer_s": record.time_to_first_answer_s,
+        "loop_state": record.loop_state,
+        "loop_score": record.loop_score,
+        "loop_source": record.loop_source,
+        "loop_detected_at_s": record.loop_detected_at_s,
+        "repeated_ngram_coverage": record.repeated_ngram_coverage,
+        "max_window_similarity": record.max_window_similarity,
+        "low_novelty_windows": record.low_novelty_windows,
+        "max_repeated_block": record.max_repeated_block,
+    }

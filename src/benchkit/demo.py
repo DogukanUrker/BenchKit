@@ -11,9 +11,12 @@ import hashlib
 import importlib
 import json
 import random
+import threading
 import time
+from collections.abc import Callable
 
 from benchkit.benchmarks.base import Task
+from benchkit.client import GenerationUpdate
 from benchkit.engine import benchmark, tasks_for
 
 LETTERS = "ABCD"
@@ -133,7 +136,13 @@ class DemoClient:
                 return entry
         return DEMO_MODELS[-1]
 
-    def generate(self, model: str, prompt: str) -> dict:
+    def generate(
+        self,
+        model: str,
+        prompt: str,
+        on_progress: Callable[[GenerationUpdate], None] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> dict:
         profile = self._profile(model)
         entry = self._answers.get(prompt)
 
@@ -153,18 +162,89 @@ class DemoClient:
                 else _bad_answer(task, solution is not None)
             )
 
-        tokens = 40 + int(roll * 260)
+        healthy_thinking = (
+            "I will identify the requested output, check the relevant facts, "
+            "compare the available choices, and then return the concise final "
+            "answer. The evidence points consistently toward one option. "
+        )
+        looping = roll > profile["skill"] + 0.12
+        thinking = (
+            (
+                "I should reconsider this carefully because the previous path "
+                "may be wrong, so I will inspect the same evidence once more. "
+            )
+            * 14
+            if looping
+            else healthy_thinking
+        )
+
+        tokens = max(40 + int(roll * 260), len((thinking + response).split()))
         tok_s = profile["speed"] * (0.85 + roll * 0.3)
         elapsed = tokens / tok_s
-        time.sleep(min(elapsed / (40 * self.speed), 0.35))
+        emitted_thinking = ""
+
+        def cancelled_result() -> dict:
+            return {
+                "thinking": emitted_thinking,
+                "response": "",
+                "trace_status": "observed" if emitted_thinking else "unavailable",
+                "tok_s": 0.0,
+                "eval_count": 0,
+                "eval_duration_ns": 0,
+                "response_time_s": 0.0,
+                "done_reason": "cancelled",
+                "timed_out": False,
+                "cancelled": True,
+            }
+
+        if cancel_event is not None and cancel_event.is_set():
+            return cancelled_result()
+        if on_progress is not None:
+            chunks = [
+                thinking[index : index + 80] for index in range(0, len(thinking), 80)
+            ]
+            for index, chunk in enumerate(chunks, start=1):
+                time.sleep(min(0.012 / self.speed, 0.03))
+                if cancel_event is not None and cancel_event.is_set():
+                    return cancelled_result()
+                emitted_thinking += chunk
+                on_progress(
+                    GenerationUpdate(
+                        thinking=chunk,
+                        elapsed_s=elapsed * index / (len(chunks) + 1),
+                        reasoning_channel_seen=True,
+                    )
+                )
+            on_progress(
+                GenerationUpdate(
+                    response=response,
+                    elapsed_s=elapsed,
+                    reasoning_channel_seen=True,
+                )
+            )
+            on_progress(
+                GenerationUpdate(
+                    elapsed_s=elapsed,
+                    reasoning_channel_seen=True,
+                    done=True,
+                )
+            )
+        else:
+            time.sleep(min(elapsed / (40 * self.speed), 0.35))
+            if cancel_event is not None and cancel_event.is_set():
+                return cancelled_result()
 
         return {
+            "thinking": thinking,
             "response": response,
+            "trace_status": "observed",
             "tok_s": tok_s,
             "eval_count": tokens,
             "eval_duration_ns": int(elapsed * 1e9),
             "response_time_s": elapsed,
             "done_reason": "stop",
+            "timed_out": False,
+            "cancelled": False,
         }
 
 

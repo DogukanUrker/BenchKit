@@ -43,11 +43,43 @@ LM Studio — as well as a native Ollama host.
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Connect** | Host, provider, API key and timeout are editable in place. Auto-connects from your `.env`, shows the real error when it fails, retries on `Ctrl+R`.                                                        |
 | **Setup**   | Multi-select panes for models and benchmarks with live filters, task counts, and a task limit set globally or per benchmark. A summary line keeps score: `3 models × 2 benchmarks = 6 runs · 1,240 tasks`. |
-| **Run**     | Per-job and overall progress, live accuracy / tok-s / latency / elapsed / ETA, the run queue with per-job scores, and a task table that streams in. Pause, skip a job or stop at any point.                |
+| **Run**     | Per-job and overall progress, live accuracy / tok-s / latency / elapsed, streamed thinking/answer phases, loop detection and configurable loop killing, and a task table that updates in place. Pause, skip a job or stop at any point. |
 | **Results** | Sortable summary, drill-down into every task with a pass/fail/search filter, and the path to the saved reports.                                                                                            |
 
-Press `Enter` on any task — during the run or afterwards — to read the exact
-prompt and the model's raw response.
+Press `Enter` on any task — during the run or afterwards — to watch or read the
+exact prompt, reasoning trace and final response.
+
+## Live thinking and loop detection
+
+Benchmark generations are streamed without a BenchKit token cap. The existing
+`BENCHKIT_TIMEOUT` remains a hard per-task deadline: on timeout, BenchKit closes
+the stream, keeps the partial trace, records a timeout error and continues with
+the next task. Doom-loop killing uses a continuous threshold: by default the
+request is killed only when its loop score stays at or above 80% for 10 seconds.
+If the score drops below 80%, the timer resets. The partial trace is saved as a
+`LOOP KILLED` task and the benchmark continues. The explicit **Stop run** action
+also closes the active stream immediately and keeps all tasks that finished.
+
+Configure the threshold in `.env`:
+
+```env
+BENCHKIT_LOOP_KILL_PERCENT=80
+BENCHKIT_LOOP_KILL_SECONDS=10
+```
+
+When a provider exposes reasoning, BenchKit captures Ollama's `thinking` stream
+or an OpenAI-compatible `reasoning_content` stream. Inline `<think>` blocks are
+recognized as a fallback. The run screen shows whether the model is waiting,
+thinking or answering and continuously analyzes repeated phrases, repeated
+blocks and low-novelty windows. Providers that hide reasoning are reported as
+`NO TRACE`, not as models that did no thinking; visible answer loops can still
+be identified separately. The live task inspector follows new tokens while you
+are at the bottom, then holds your exact scroll position when you scroll back to
+read earlier reasoning.
+
+Use `uv run benchkit --demo` for a quick offline check. Demo models emit healthy
+and intentionally looping traces so all live states and report fields are easy
+to inspect.
 
 ## Keys
 
@@ -83,8 +115,9 @@ uv run benchkit --headless --models all --benchmarks quickbench --verbose
 uv run benchkit --list
 ```
 
-`--verbose` prints every prompt and response. Reports are saved exactly as they
-are from the TUI, and a run that fails part-way still keeps what finished.
+`--verbose` prints every prompt, available reasoning trace and response. Reports
+are saved exactly as they are from the TUI, and a run that fails part-way still
+keeps what finished.
 
 ## Performance profiles
 
@@ -144,8 +177,8 @@ BENCHKIT_PROVIDER=ollama
 OLLAMA_HOST=http://localhost:11434
 ```
 
-The per-request timeout defaults to 300 seconds and can be changed with
-`BENCHKIT_TIMEOUT`.
+The per-task generation timeout defaults to 300 seconds and can be changed with
+`BENCHKIT_TIMEOUT` or on the Connect screen.
 
 ## Benchmarks
 
@@ -191,9 +224,10 @@ results/2026-03-21_14-30-00/
 Open `results.html` directly in a browser. It carries the same Dogi theme as the
 TUI, opens light, and has a toggle in the header. Inside is a gallery of
 screenshot-ready charts — overall and per-benchmark accuracy, a full suite
-overview, accuracy versus speed, raw generation speed, pass/fail composition,
-total runtime and a score matrix — followed by every task's prompt and response.
-No server or external web assets are required.
+overview, generation loop rate, accuracy versus speed, raw generation speed,
+pass/fail composition, total runtime and a score matrix — followed by every
+task's prompt, available reasoning, response and loop signals. No server or
+external web assets are required.
 
 ## Adding a benchmark
 

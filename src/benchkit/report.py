@@ -43,9 +43,7 @@ def render_html(
         }
     )
     template = (
-        files("benchkit")
-        .joinpath("templates/report.html")
-        .read_text(encoding="utf-8")
+        files("benchkit").joinpath("templates/report.html").read_text(encoding="utf-8")
     )
     return template.replace("__BENCHKIT_REPORT_DATA__", payload)
 
@@ -60,9 +58,7 @@ def save(
     out = Path("results") / ts
     out.mkdir(parents=True, exist_ok=True)
     hardware = (
-        hardware
-        if hardware is not None
-        else os.environ.get("BENCHKIT_HARDWARE", "")
+        hardware if hardware is not None else os.environ.get("BENCHKIT_HARDWARE", "")
     )
 
     # Full JSON (includes per-task details)
@@ -82,16 +78,18 @@ def save(
         f.write("# BenchKit Results\n\n")
         f.write(f"**Date:** {ts}\n\n")
         f.write(
-            "| Model | Benchmark | Score | Passed | Total | tok/s | Avg Resp | Total Time |\n"
+            "| Model | Benchmark | Score | Passed | Total | Loops | Killed | Trace | tok/s | Avg Resp | Total Time |\n"
         )
         f.write(
-            "|-------|-----------|-------|--------|-------|-------|----------|------------|\n"
+            "|-------|-----------|-------|--------|-------|-------|--------|-------|-------|----------|------------|\n"
         )
         for result in results:
             f.write(
                 f"| {result['model']} | {result['benchmark']} "
                 f"| {result['score']}% | {result['passed']} "
-                f"| {result['total']} | {result['tok_s']} "
+                f"| {result['total']} | {result.get('loop_rate', 0)}% "
+                f"| {result.get('loop_kills', 0)} "
+                f"| {result.get('trace_coverage', 0)}% | {result['tok_s']} "
                 f"| {result['avg_response_time']}s "
                 f"| {_fmt_time(result['total_time'])} |\n"
             )
@@ -103,10 +101,38 @@ def save(
                 task_id = task["task_id"]
                 entry = task.get("entry_point")
                 label = f"{task_id} ({entry})" if entry else task_id
-                status = "✅ PASS" if task["passed"] else "❌ FAIL"
-                f.write(f"### {label} — {status}\n\n")
+                status = (
+                    "🛑 LOOP KILLED"
+                    if task.get("loop_killed")
+                    else "⏱️ TIMEOUT"
+                    if task.get("timed_out")
+                    else "⚠️ ERROR"
+                    if task.get("error")
+                    else "✅ PASS"
+                    if task["passed"]
+                    else "❌ FAIL"
+                )
+                loop = task.get("loop_state", "unavailable").upper()
+                if (
+                    loop == "CLEAR"
+                    and task.get("loop_source") == "answer"
+                    and task.get("trace_status") == "unavailable"
+                ):
+                    loop = "NO TRACE"
+                f.write(f"### {label} — {status} · {loop}\n\n")
+                f.write(
+                    f"**Generation:** {task.get('output_tokens', 0)} tokens · "
+                    f"{task.get('response_time_s', 0)}s · "
+                    f"trace {task.get('trace_status', 'unavailable')} · "
+                    f"loop score {task.get('loop_score', 0):.1%}\n\n"
+                )
+                if task.get("error"):
+                    f.write(f"**Error:** {task['error']}\n\n")
                 f.write("**Prompt:**\n\n")
                 f.write(f"~~~\n{task['prompt'].rstrip()}\n~~~\n\n")
+                if task.get("thinking"):
+                    f.write("**Thinking:**\n\n")
+                    f.write(f"~~~\n{task['thinking'].rstrip()}\n~~~\n\n")
                 f.write("**Response:**\n\n")
                 f.write(f"~~~\n{task['response'].rstrip()}\n~~~\n\n")
                 f.write("---\n\n")

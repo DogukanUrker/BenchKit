@@ -79,8 +79,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--depths",
         default=",".join(
-            "minimal" if value == 0 else f"{value // 1024}k"
-            for value in DEFAULT_DEPTHS
+            "minimal" if value == 0 else f"{value // 1024}k" for value in DEFAULT_DEPTHS
         ),
         help="Perf: comma-separated context depths (default: minimal,4k,16k,32k,64k)",
     )
@@ -234,6 +233,7 @@ def _headless(args: argparse.Namespace) -> None:
     table.add_column("Benchmark")
     table.add_column("Score", justify="right")
     table.add_column("Passed", justify="right")
+    table.add_column("Loops/Killed", justify="right")
     table.add_column("tok/s", justify="right", style="dim")
     table.add_column("Avg Time", justify="right", style="dim")
     table.add_column("Total", justify="right", style="dim")
@@ -244,6 +244,7 @@ def _headless(args: argparse.Namespace) -> None:
             result["benchmark"],
             _score_text(result["score"]),
             f"{result['passed']}/{result['total']}",
+            f"{result.get('loops', 0)}/{result.get('loop_kills', 0)}",
             str(result["tok_s"]),
             f"{result['avg_response_time']}s",
             _fmt_time(result["total_time"]),
@@ -317,8 +318,7 @@ def _perf(args: argparse.Namespace) -> None:
         )
     elif model_status:
         console.print(
-            f"[dim]Model status: {model_status} "
-            "· cold/warm state is not known[/dim]"
+            f"[dim]Model status: {model_status} · cold/warm state is not known[/dim]"
         )
     else:
         console.print(
@@ -365,14 +365,8 @@ def _perf(args: argparse.Namespace) -> None:
             depth = f"[yellow]{depth}![/yellow]"
         table.add_row(
             depth,
-            f"{case['actual_input_tokens']:,}"
-            if case["actual_input_tokens"]
-            else "—",
-            (
-                f"{case['pp_tps']['median']:.1f}"
-                if case.get("pp_reliable")
-                else "n/a"
-            ),
+            f"{case['actual_input_tokens']:,}" if case["actual_input_tokens"] else "—",
+            (f"{case['pp_tps']['median']:.1f}" if case.get("pp_reliable") else "n/a"),
             f"{case['tg_tps']['median']:.1f}",
             f"{case['ttft_s']['median']:.3f}s",
             f"{case['wall_time_s']['median']:.2f}s",
@@ -395,16 +389,15 @@ def _perf(args: argparse.Namespace) -> None:
     )
 
     calibrated = [
-        case for case in profile["cases"]
-        if case.get("depth_method") == "calibrated"
+        case for case in profile["cases"] if case.get("depth_method") == "calibrated"
     ]
     inaccurate = [
-        case for case in profile["cases"]
+        case
+        for case in profile["cases"]
         if not case.get("depth_within_tolerance", True)
     ]
     estimated = [
-        case for case in profile["cases"]
-        if case.get("depth_method") == "estimated"
+        case for case in profile["cases"] if case.get("depth_method") == "estimated"
     ]
     if calibrated:
         console.print(
