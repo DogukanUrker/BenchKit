@@ -9,7 +9,6 @@ from typing import Literal
 
 LoopState = Literal["unavailable", "observing", "clear", "suspected", "looping"]
 LoopSource = Literal["none", "thinking", "answer"]
-LOOP_ANALYZER_VERSION = "2"
 
 _WORD_RE = re.compile(r"[^\W_]+(?:['’.-][^\W_]+)*", re.UNICODE)
 _OPEN_THINK = "<think>"
