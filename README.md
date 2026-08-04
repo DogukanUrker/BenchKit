@@ -60,12 +60,17 @@ If the score drops below 80%, the timer resets. The partial trace is saved as a
 `LOOP KILLED` task and the benchmark continues. The explicit **Stop run** action
 also closes the active stream immediately and keeps all tasks that finished.
 
-Configure the threshold in `.env`:
+Configure the kill switch and threshold in `.env`:
 
 ```env
+BENCHKIT_LOOP_KILL=true
 BENCHKIT_LOOP_KILL_PERCENT=80
 BENCHKIT_LOOP_KILL_SECONDS=10
 ```
+
+`BENCHKIT_LOOP_KILL` is `true` by default. Set it to `false` to let looping
+generations run to completion or to the `BENCHKIT_TIMEOUT` deadline; loop
+detection and reporting stay active either way.
 
 When a provider exposes reasoning, BenchKit captures Ollama's `thinking` stream
 or an OpenAI-compatible `reasoning_content` stream. Inline `<think>` blocks are

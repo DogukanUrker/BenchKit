@@ -412,14 +412,38 @@ class EngineIntegrationTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "BENCHKIT_LOOP_KILL": "false",
                 "BENCHKIT_LOOP_KILL_PERCENT": "87.5",
                 "BENCHKIT_LOOP_KILL_SECONDS": "6",
             },
         ):
             engine = Engine(client=LoopingClient(), jobs=[])
 
+        self.assertFalse(engine.loop_kill_enabled)
         self.assertEqual(engine.loop_kill_percent, 87.5)
         self.assertEqual(engine.loop_kill_seconds, 6)
+
+    def test_loop_kill_is_enabled_by_default(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            engine = Engine(client=LoopingClient(), jobs=[])
+
+        self.assertTrue(engine.loop_kill_enabled)
+
+    def test_disabled_loop_kill_lets_the_generation_finish(self) -> None:
+        results = Engine(
+            client=SurvivingLoopClient(),
+            jobs=[JobSpec("doom-model", "quickbench", "1")],
+            loop_kill_enabled=False,
+            loop_kill_percent=80,
+            loop_kill_seconds=1,
+        ).run()
+
+        result = results[0]
+        task = result["tasks"][0]
+        self.assertEqual(result["loop_kills"], 0)
+        self.assertEqual(result["passed"], 1)
+        self.assertFalse(task["loop_killed"])
+        self.assertFalse(result["loop_kill_enabled"])
 
 
 class LoopingClient:
@@ -579,6 +603,39 @@ class SustainedLoopClient:
             )
         )
         raise AssertionError("sustained loop should have killed the request")
+
+
+class SurvivingLoopClient:
+    """Loops hard, then finishes — used when loop killing is turned off."""
+
+    timeout = 30.0
+
+    def generate(
+        self, model: str, prompt: str, on_progress=None, cancel_event=None
+    ) -> dict:
+        repeated = (
+            "I must reconsider the same evidence and follow the same path again " * 500
+        )
+        for elapsed in (1.0, 3.0, 5.0):
+            on_progress(
+                GenerationUpdate(
+                    thinking=repeated,
+                    elapsed_s=elapsed,
+                    reasoning_channel_seen=True,
+                )
+            )
+        return {
+            "thinking": repeated,
+            "response": "return len(set(string.lower()))",
+            "trace_status": "observed",
+            "tok_s": 50.0,
+            "eval_count": 10,
+            "eval_duration_ns": 200_000_000,
+            "response_time_s": 5.0,
+            "done_reason": "stop",
+            "timed_out": False,
+            "cancelled": False,
+        }
 
 
 class ResettingLoopClient:
