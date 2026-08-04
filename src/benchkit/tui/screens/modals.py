@@ -144,13 +144,16 @@ class TaskDetailScreen(ModalScreen[None]):
 
     def _metadata(self) -> str:
         loop_state = self.task_data.get("loop_state", "unavailable")
+        loop_label = (
+            "recovered" if self.task_data.get("recovered_cycle") else loop_state
+        )
         loop_score = float(self.task_data.get("loop_score", 0.0))
         trace = self.task_data.get("trace_status", "unavailable")
         pieces = [
             fmt_duration(self.task_data.get("response_time_s", 0)),
             f"{self.task_data.get('tok_s', 0)} tok/s",
             f"trace {trace}",
-            f"loop {loop_state} ({loop_score:.0%})",
+            f"loop {loop_label} ({loop_score:.0%})",
         ]
         if self.task_data.get("error"):
             pieces.append(self.task_data["error"])

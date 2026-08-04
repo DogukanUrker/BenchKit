@@ -476,7 +476,9 @@ class _Reporter:
             f"  {record.response_time_s:.1f}s {glyphs.dot} {record.tok_s:.0f} tok/s",
             style="dim",
         )
-        if record.loop_state == "looping" and not record.loop_killed:
+        if record.recovered_cycle:
+            line.append(f" {glyphs.dot} loop recovered", style="yellow")
+        elif record.loop_state == "looping" and not record.loop_killed:
             line.append(f" {glyphs.dot} looped", style="magenta")
         if record.error:
             line.append(f"  {record.error}", style="dim")
