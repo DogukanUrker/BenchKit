@@ -43,6 +43,18 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def parse_slice(spec: str | None, total: int) -> tuple[int, int]:
     """Resolve a slice spec into ``(start, end)`` indices for a task list.
 
@@ -406,6 +418,9 @@ class Engine:
     jobs: list[JobSpec]
     sink: Sink | None = None
     controls: RunControls = field(default_factory=RunControls)
+    loop_kill_enabled: bool = field(
+        default_factory=lambda: _env_bool("BENCHKIT_LOOP_KILL", True)
+    )
     loop_kill_percent: float = field(
         default_factory=lambda: _env_float("BENCHKIT_LOOP_KILL_PERCENT", 80.0)
     )
@@ -577,7 +592,10 @@ class Engine:
                 if snapshot.state == "looping" and loop_detected_at is None:
                     loop_detected_at = update.elapsed_s
                 threshold = self.loop_kill_percent / 100
-                if snapshot.score >= threshold:
+                if not self.loop_kill_enabled:
+                    loop_above_since = None
+                    remaining = None
+                elif snapshot.score >= threshold:
                     if loop_above_since is None:
                         loop_above_since = now
                     above_for = now - loop_above_since
@@ -844,6 +862,7 @@ class Engine:
             "median_time_to_answer": round(median(answer_times), 1)
             if answer_times
             else 0.0,
+            "loop_kill_enabled": self.loop_kill_enabled,
             "loop_kill_percent": self.loop_kill_percent,
             "loop_kill_seconds": self.loop_kill_seconds,
             "tasks": [
