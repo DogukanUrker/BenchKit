@@ -9,13 +9,22 @@ from typing import Literal
 
 LoopState = Literal["unavailable", "observing", "clear", "suspected", "looping"]
 LoopSource = Literal["none", "thinking", "answer"]
-LOOP_ANALYZER_VERSION = "1"
+LOOP_ANALYZER_VERSION = "2"
 
 _WORD_RE = re.compile(r"[^\W_]+(?:['’.-][^\W_]+)*", re.UNICODE)
 _OPEN_THINK = "<think>"
 _CLOSE_THINK = "</think>"
 _ANALYSIS_WORD_LIMIT = 4096
 _ANALYSIS_CHAR_LIMIT = 131_072
+_LOOPING_MIN_WORDS = 192
+_SATURATED_COVERAGE = (0.60, 0.95)
+_SEVERITY: dict[LoopState, int] = {
+    "unavailable": 0,
+    "observing": 1,
+    "clear": 1,
+    "suspected": 2,
+    "looping": 3,
+}
 
 
 @dataclass(frozen=True)
@@ -128,23 +137,17 @@ class LoopAnalyzer:
         return self._answer_tail
 
     def snapshot(self, *, final: bool = False) -> LoopSnapshot:
+        # Report the worst channel. Ranking on state alone would hide a
+        # doom-looping answer behind calmer thinking whenever both land in the
+        # same bucket, and callers kill on the reported score.
+        candidates: list[LoopSnapshot] = []
         if self.thinking_chars:
-            thinking = _analyze_text(self.thinking, "thinking", final=final)
-            if self.answer_chars:
-                answer = _analyze_text(self.answer, "answer", final=final)
-                severity = {
-                    "unavailable": 0,
-                    "observing": 1,
-                    "clear": 1,
-                    "suspected": 2,
-                    "looping": 3,
-                }
-                if severity[answer.state] > severity[thinking.state]:
-                    return answer
-            return thinking
+            candidates.append(_analyze_text(self.thinking, "thinking", final=final))
         if self.answer_chars:
-            return _analyze_text(self.answer, "answer", final=final)
-        return LoopSnapshot("unavailable", 0.0, "none", 0, 0.0, 0.0, 0, 0)
+            candidates.append(_analyze_text(self.answer, "answer", final=final))
+        if not candidates:
+            return LoopSnapshot("unavailable", 0.0, "none", 0, 0.0, 0.0, 0, 0)
+        return max(candidates, key=lambda snap: (_SEVERITY[snap.state], snap.score))
 
 
 def _analyze_text(
@@ -169,19 +172,28 @@ def _analyze_text(
     similarity_strength = _scaled(similarity, 0.55, 0.95)
     run_strength = min(1.0, low_novelty / 3)
     block_strength = min(1.0, max(0, repeated_block - 1) / 3)
-    score = round(
+    blended = (
         0.35 * repeat_strength
         + 0.30 * similarity_strength
         + 0.20 * run_strength
-        + 0.15 * block_strength,
-        3,
+        + 0.15 * block_strength
     )
+    # Coverage is the only signal that survives a loop drifting by one token per
+    # cycle (a counter, a step number): exact block matching sees no repeat, and
+    # set-based shingle overlap is dominated by the drifting token. Without a
+    # coverage-only path the blend caps at 0.35 there, so a generation repeating
+    # one sentence forever would stay "suspected" and never be killed.
+    saturated = (
+        _scaled(coverage, *_SATURATED_COVERAGE) if count >= _LOOPING_MIN_WORDS else 0.0
+    )
+    score = round(max(blended, saturated), 3)
 
     if count < 128:
         state = "clear" if final else "observing"
-    elif count >= 192 and (
+    elif count >= _LOOPING_MIN_WORDS and (
         (coverage >= 0.30 and repeated_block >= 3)
         or (low_novelty >= 2 and similarity >= 0.82)
+        or coverage >= 0.80
         or score >= 0.75
     ):
         state = "looping"

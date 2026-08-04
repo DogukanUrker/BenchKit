@@ -16,6 +16,9 @@ dependencies = [
 [project.scripts]
 benchkit = "benchkit.cli:main"
 
+[dependency-groups]
+dev = ["pytest>=8.4.2"]
+
 [build-system]
 requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
