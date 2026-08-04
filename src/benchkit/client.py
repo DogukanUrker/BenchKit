@@ -12,6 +12,7 @@ from typing import Callable, Literal
 import httpx
 
 from benchkit.looping import InlineThinkingParser
+from benchkit.retry import RetryPolicy, is_retryable, run_with_retries
 
 Provider = Literal["auto", "openai", "ollama"]
 ProgressCallback = Callable[["GenerationUpdate"], None]
@@ -146,6 +147,13 @@ def _openai_metrics(data: dict, elapsed_s: float) -> dict:
     }
 
 
+@dataclass
+class _StreamState:
+    """Tracks whether an attempt already handed output to the caller."""
+
+    received: bool = False
+
+
 @dataclass(frozen=True)
 class GenerationUpdate:
     """A normalized piece of a live model generation."""
@@ -165,6 +173,7 @@ class InferenceClient:
     requested_provider: Provider = "auto"
     api_key: str | None = None
     timeout: float = 300.0
+    retries: RetryPolicy = field(default_factory=RetryPolicy)
     provider: Literal["openai", "ollama"] | None = field(default=None, init=False)
 
     @classmethod
@@ -181,7 +190,7 @@ class InferenceClient:
         )
         api_key = os.environ.get("BENCHKIT_API_KEY") or os.environ.get("OPENAI_API_KEY")
         timeout = float(os.environ.get("BENCHKIT_TIMEOUT", "300"))
-        return cls(host.rstrip("/"), provider, api_key, timeout)
+        return cls(host.rstrip("/"), provider, api_key, timeout, RetryPolicy.from_env())
 
     @property
     def label(self) -> str:
@@ -195,6 +204,46 @@ class InferenceClient:
         if not self.api_key:
             return {}
         return {"Authorization": f"Bearer {self.api_key}"}
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        cancel_event: threading.Event | None = None,
+        **kwargs: object,
+    ) -> httpx.Response:
+        """Issue a non-streaming request, retrying transient server failures."""
+
+        def attempt() -> httpx.Response:
+            response = httpx.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response
+
+        return run_with_retries(self.retries, attempt, cancel_event=cancel_event)
+
+    def _retry_stream(
+        self,
+        stream: Callable[["_StreamState"], dict],
+        cancel_event: threading.Event | None,
+    ) -> dict:
+        """Retry a generation only while nothing has been streamed to the caller.
+
+        Once tokens have reached ``on_progress`` a replay would duplicate output,
+        so a mid-stream failure is surfaced instead of retried.
+        """
+        state = _StreamState()
+
+        def attempt() -> dict:
+            state.received = False
+            return stream(state)
+
+        return run_with_retries(
+            self.retries,
+            attempt,
+            cancel_event=cancel_event,
+            retryable=lambda exc: not state.received and is_retryable(exc),
+        )
 
     def list_models(self) -> list[dict]:
         """Discover models and lock in the detected provider."""
@@ -221,12 +270,12 @@ class InferenceClient:
         )
 
     def _list_openai_models(self) -> list[dict]:
-        response = httpx.get(
+        response = self._request(
+            "GET",
             f"{_openai_base(self.host)}/models",
             headers=self._headers(),
             timeout=10,
         )
-        response.raise_for_status()
         models = response.json().get("data", [])
         normalized = []
         for model in models:
@@ -259,19 +308,19 @@ class InferenceClient:
         return sorted(normalized, key=lambda model: model["name"].lower())
 
     def _list_ollama_models(self) -> list[dict]:
-        response = httpx.get(
+        response = self._request(
+            "GET",
             f"{_without_v1(self.host)}/api/tags",
             timeout=10,
         )
-        response.raise_for_status()
         models = response.json().get("models", [])
         running: set[str] | None = None
         try:
-            response = httpx.get(
+            response = self._request(
+                "GET",
                 f"{_without_v1(self.host)}/api/ps",
                 timeout=10,
             )
-            response.raise_for_status()
             running = {
                 str(value)
                 for model in response.json().get("models", [])
@@ -334,21 +383,31 @@ class InferenceClient:
             "stream_options": {"include_usage": True},
         }
         try:
-            return self._stream_openai(body, on_progress, cancel_event)
+            return self._retry_stream(
+                lambda state: self._stream_openai(
+                    body, on_progress, cancel_event, state
+                ),
+                cancel_event,
+            )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code not in {400, 404, 422}:
                 raise
         # Some older compatible servers reject the optional usage request but
         # still support standard streamed chat completions.
         body.pop("stream_options")
-        return self._stream_openai(body, on_progress, cancel_event)
+        return self._retry_stream(
+            lambda state: self._stream_openai(body, on_progress, cancel_event, state),
+            cancel_event,
+        )
 
     def _stream_openai(
         self,
         body: dict,
         on_progress: ProgressCallback | None,
         cancel_event: threading.Event | None,
+        state: _StreamState | None = None,
     ) -> dict:
+        state = state if state is not None else _StreamState()
         started = time.perf_counter()
         thinking_parts: list[str] = []
         response_parts: list[str] = []
@@ -424,6 +483,8 @@ class InferenceClient:
 
                         thinking_parts.append(thinking_piece)
                         response_parts.append(answer_piece)
+                        if thinking_piece or answer_piece:
+                            state.received = True
                         if on_progress is not None and (
                             thinking_piece or answer_piece or reasoning_field
                         ):
@@ -512,6 +573,22 @@ class InferenceClient:
         on_progress: ProgressCallback | None,
         cancel_event: threading.Event | None,
     ) -> dict:
+        return self._retry_stream(
+            lambda state: self._stream_ollama(
+                model, prompt, on_progress, cancel_event, state
+            ),
+            cancel_event,
+        )
+
+    def _stream_ollama(
+        self,
+        model: str,
+        prompt: str,
+        on_progress: ProgressCallback | None,
+        cancel_event: threading.Event | None,
+        state: _StreamState | None = None,
+    ) -> dict:
+        state = state if state is not None else _StreamState()
         started = time.perf_counter()
         thinking_parts: list[str] = []
         response_parts: list[str] = []
@@ -579,6 +656,8 @@ class InferenceClient:
 
                         thinking_parts.append(thinking_piece)
                         response_parts.append(answer_piece)
+                        if thinking_piece or answer_piece:
+                            state.received = True
                         if on_progress is not None and (
                             thinking_piece or answer_piece or reasoning_field
                         ):
@@ -670,7 +749,8 @@ class InferenceClient:
         if self.provider != "openai":
             return None
         try:
-            response = httpx.post(
+            response = self._request(
+                "POST",
                 f"{_without_v1(self.host)}/tokenize",
                 headers=self._headers(),
                 json={
@@ -680,7 +760,6 @@ class InferenceClient:
                 },
                 timeout=min(self.timeout, 60),
             )
-            response.raise_for_status()
             tokens = response.json().get("tokens")
             if isinstance(tokens, list) and all(
                 isinstance(token, int) for token in tokens
@@ -716,7 +795,10 @@ class InferenceClient:
             "stream_options": {"include_usage": True},
         }
         try:
-            return self._stream_profile(advanced, advanced_options=True)
+            return run_with_retries(
+                self.retries,
+                lambda: self._stream_profile(advanced, advanced_options=True),
+            )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code not in {400, 404, 422}:
                 raise
@@ -730,7 +812,10 @@ class InferenceClient:
             "seed": 42,
             "stream_options": {"include_usage": True},
         }
-        return self._stream_profile(portable, advanced_options=False)
+        return run_with_retries(
+            self.retries,
+            lambda: self._stream_profile(portable, advanced_options=False),
+        )
 
     def _stream_profile(self, body: dict, *, advanced_options: bool) -> dict:
         started = time.perf_counter()
@@ -832,7 +917,8 @@ class InferenceClient:
         """
         if self.provider != "ollama":
             return
-        httpx.post(
+        self._request(
+            "POST",
             f"{_without_v1(self.host)}/api/generate",
             json={"model": model, "keep_alive": 0},
             timeout=30,
