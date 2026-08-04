@@ -127,6 +127,16 @@ def _score_text(score: float) -> Text:
     return Text(f"{score:.1f}%", style=style)
 
 
+def _outcome_counts(result: dict) -> tuple[int, int, int]:
+    """Return pass, ordinary failure and error-task counts for a result."""
+    tasks = result.get("tasks", [])
+    failed = sum(
+        not task.get("passed") and not task.get("error") for task in tasks
+    )
+    errors = sum(not task.get("passed") and bool(task.get("error")) for task in tasks)
+    return int(result["passed"]), failed, errors
+
+
 def _list_benchmarks() -> None:
     table = Table(box=box.MINIMAL, border_style="dim", header_style="bold")
     table.add_column("Benchmark")
@@ -232,18 +242,19 @@ def _headless(args: argparse.Namespace) -> None:
     table.add_column("Model")
     table.add_column("Benchmark")
     table.add_column("Score", justify="right")
-    table.add_column("Passed", justify="right")
+    table.add_column("P/F/E", justify="right")
     table.add_column("Loops/Killed", justify="right")
     table.add_column("tok/s", justify="right", style="dim")
     table.add_column("Avg Time", justify="right", style="dim")
     table.add_column("Total", justify="right", style="dim")
 
     for result in results:
+        passed, failed, errors = _outcome_counts(result)
         table.add_row(
             result["model"],
             result["benchmark"],
             _score_text(result["score"]),
-            f"{result['passed']}/{result['total']}",
+            f"{passed}/{failed}/{errors}",
             f"{result.get('loops', 0)}/{result.get('loop_kills', 0)}",
             str(result["tok_s"]),
             f"{result['avg_response_time']}s",
