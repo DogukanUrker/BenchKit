@@ -21,7 +21,7 @@ import httpx
 from benchkit.benchmarks import REGISTRY
 from benchkit.benchmarks.base import Task
 from benchkit.client import GenerationUpdate, InferenceClient
-from benchkit.looping import LOOP_ANALYZER_VERSION, LoopAnalyzer
+from benchkit.looping import LoopAnalyzer
 
 
 class SliceError(ValueError):
@@ -394,7 +394,6 @@ def _empty_result(job: JobSpec) -> dict:
         "trace_coverage": 0.0,
         "median_thinking_time": 0.0,
         "median_time_to_answer": 0.0,
-        "loop_analyzer_version": LOOP_ANALYZER_VERSION,
         "tasks": [],
     }
 
@@ -845,7 +844,6 @@ class Engine:
             "median_time_to_answer": round(median(answer_times), 1)
             if answer_times
             else 0.0,
-            "loop_analyzer_version": LOOP_ANALYZER_VERSION,
             "loop_kill_percent": self.loop_kill_percent,
             "loop_kill_seconds": self.loop_kill_seconds,
             "tasks": [

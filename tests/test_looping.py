@@ -111,6 +111,53 @@ class LoopAnalyzerTests(unittest.TestCase):
         self.assertEqual(snapshot.state, "looping")
         self.assertEqual(snapshot.source, "answer")
 
+    def test_loop_drifting_by_one_token_still_reaches_looping(self) -> None:
+        analyzer = LoopAnalyzer()
+        analyzer.add(
+            answer=" ".join(
+                f"Step {index}: I need to reconsider the problem and check my work."
+                for index in range(1, 101)
+            )
+        )
+
+        snapshot = analyzer.snapshot(final=True)
+
+        # The counter defeats exact-block and shingle matching, so coverage has
+        # to carry both the state and a killable score on its own.
+        self.assertEqual(snapshot.state, "looping")
+        self.assertGreater(snapshot.repeated_ngram_coverage, 0.8)
+        self.assertEqual(snapshot.max_repeated_block, 1)
+        self.assertGreaterEqual(snapshot.score, 0.8)
+
+    def test_worst_channel_wins_when_both_share_a_state(self) -> None:
+        analyzer = LoopAnalyzer()
+        analyzer.add(
+            thinking=(
+                " ".join(f"distinct{index}" for index in range(200))
+                + " "
+                + " ".join(f"distinct{index}" for index in range(20))
+            ),
+            answer=("the answer is the answer is the answer is " * 20),
+        )
+
+        snapshot = analyzer.snapshot()
+
+        # Both channels land in "suspected"; the reported score drives the kill
+        # decision, so the looping answer must not hide behind calmer thinking.
+        self.assertEqual(snapshot.source, "answer")
+        self.assertGreaterEqual(snapshot.score, 0.8)
+
+    def test_structured_answer_without_repetition_stays_clear(self) -> None:
+        analyzer = LoopAnalyzer()
+        analyzer.add(
+            answer="\n".join(
+                f"| model{index} | {index * 3} | {index * 7} | pass |"
+                for index in range(60)
+            )
+        )
+
+        self.assertEqual(analyzer.snapshot(final=True).state, "clear")
+
     def test_live_analysis_retains_a_bounded_tail(self) -> None:
         analyzer = LoopAnalyzer()
         analyzer.add(thinking="x" * 200_000)
