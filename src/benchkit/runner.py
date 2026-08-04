@@ -121,17 +121,9 @@ def run(
     Returns the results plus the failure message when the run ended early.
     """
     progress = Progress(
-        TextColumn(
-            "[dim]{task.description}",
-            table_column=Column(
-                ratio=1,
-                min_width=8,
-                no_wrap=True,
-                overflow="ellipsis",
-            ),
-        ),
+        TextColumn("[dim]{task.description}"),
         BarColumn(
-            bar_width=12,
+            bar_width=None,
             style="bright_black",
             complete_style="white",
             finished_style="white",
