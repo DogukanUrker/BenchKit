@@ -393,6 +393,11 @@
     const rows = [...report.results];
     const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
     const number = value => Number(value) || 0;
+    const loopLabel = task => task.recovered_cycle
+      ? "RECOVERED"
+      : task.loop_state === "clear" && task.loop_source === "answer" && task.trace_status === "unavailable"
+        ? "NO TRACE"
+        : (task.loop_state || "unavailable").toUpperCase();
     const formatScore = value => `${number(value).toFixed(1)}<small>%</small>`;
     const clamp = value => Math.max(0, Math.min(100, number(value)));
     const formatTime = value => {
@@ -588,7 +593,7 @@
       .map(row => `<details>
         <summary><span class="detail-title">${escapeHtml(row.model)} / ${escapeHtml(row.benchmark)}</span><span class="detail-score">${row.passed}/${row.total} · ${number(row.score).toFixed(1)}%</span></summary>
         <div class="tasks">${(row.tasks || []).map(task => `<article class="task">
-          <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} tokens</span><span><span class="status ${task.passed ? "pass" : ""}">${task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.error ? "ERROR" : task.passed ? "PASS" : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(task.loop_state === "clear" && task.loop_source === "answer" && task.trace_status === "unavailable" ? "NO TRACE" : (task.loop_state || "unavailable").toUpperCase())}</span></span></div>
+          <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} tokens</span><span><span class="status ${task.passed ? "pass" : ""}">${task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.error ? "ERROR" : task.passed ? "PASS" : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(loopLabel(task))}</span></span></div>
           <div class="exchange">
             ${task.error ? `<div class="code"><div class="code-label">Error</div><pre>${escapeHtml(task.error)}</pre></div>` : ""}
             ${task.thinking ? `<div class="code thinking-code"><div class="code-label">Thinking · ${number(task.thinking_time_s).toFixed(1)}s · loop score ${(number(task.loop_score) * 100).toFixed(0)}%</div><pre>${escapeHtml(task.thinking)}</pre></div>` : ""}

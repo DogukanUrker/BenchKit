@@ -122,12 +122,13 @@ class LoopAnalyzerTests(unittest.TestCase):
 
         snapshot = analyzer.snapshot(final=True)
 
-        # The counter defeats exact-block and shingle matching, so coverage has
-        # to carry both the state and a killable score on its own.
+        # The literal cycle changes at the counter, so normalized suffix
+        # evidence and high literal coverage must agree.
         self.assertEqual(snapshot.state, "looping")
         self.assertGreater(snapshot.repeated_ngram_coverage, 0.8)
         self.assertEqual(snapshot.max_repeated_block, 1)
         self.assertGreaterEqual(snapshot.score, 0.8)
+        self.assertEqual(snapshot.evidence, "numeric_cycle")
 
     def test_worst_channel_wins_when_both_share_a_state(self) -> None:
         analyzer = LoopAnalyzer()
@@ -157,6 +158,181 @@ class LoopAnalyzerTests(unittest.TestCase):
         )
 
         self.assertEqual(analyzer.snapshot(final=True).state, "clear")
+
+    def test_two_finite_copies_are_not_called_a_loop(self) -> None:
+        paragraph = " ".join(f"unique{index}" for index in range(100))
+        analyzer = LoopAnalyzer()
+        analyzer.add(answer=f"{paragraph} {paragraph}")
+
+        snapshot = analyzer.snapshot(final=True)
+
+        self.assertEqual(snapshot.state, "suspected")
+        self.assertFalse(snapshot.active_cycle)
+        self.assertLess(snapshot.score, 0.8)
+
+    def test_punctuation_only_loop_is_detected(self) -> None:
+        analyzer = LoopAnalyzer()
+        analyzer.add(answer="#" * 100)
+
+        snapshot = analyzer.snapshot(final=True)
+
+        self.assertEqual(snapshot.state, "looping")
+        self.assertEqual(snapshot.evidence, "exact_cycle")
+        self.assertEqual(snapshot.cycle_period_tokens, 1)
+        self.assertEqual(snapshot.analyzed_words, 0)
+
+    def test_live_cycle_needs_more_generated_evidence_to_confirm(self) -> None:
+        cycle = "same evidence leads down the same broken path again "
+        analyzer = LoopAnalyzer()
+        analyzer.add(thinking=cycle * 12)
+
+        first = analyzer.snapshot()
+        analyzer.add(thinking=cycle * 12)
+        second = analyzer.snapshot()
+
+        self.assertEqual(first.state, "suspected")
+        self.assertTrue(first.active_cycle)
+        self.assertFalse(first.confirmed_cycle)
+        self.assertEqual(second.state, "looping")
+        self.assertTrue(second.confirmed_cycle)
+        self.assertGreaterEqual(second.evidence_growth_tokens, 32)
+
+    def test_live_cycle_confirmation_survives_chunk_rotation(self) -> None:
+        cycle = "same evidence leads down the same broken path again "
+        analyzer = LoopAnalyzer()
+        analyzer.add(thinking=cycle * 12 + "same evidence ")
+
+        first = analyzer.snapshot()
+        analyzer.add(
+            thinking="leads down the same broken path again " + cycle * 12,
+        )
+        second = analyzer.snapshot()
+
+        self.assertEqual(first.cycle_period_tokens, second.cycle_period_tokens)
+        self.assertTrue(second.confirmed_cycle)
+        self.assertEqual(second.state, "looping")
+
+    def test_answer_phase_cannot_be_killed_by_historical_thinking(self) -> None:
+        cycle = "same evidence leads down the same broken path again "
+        analyzer = LoopAnalyzer()
+        analyzer.add(thinking=cycle * 12)
+        analyzer.snapshot()
+        analyzer.add(thinking=cycle * 12)
+        self.assertTrue(analyzer.snapshot().confirmed_cycle)
+
+        analyzer.add(answer="The final answer is B.")
+        recovered = analyzer.snapshot()
+
+        self.assertEqual(recovered.source, "answer")
+        self.assertFalse(recovered.active_cycle)
+        self.assertNotEqual(recovered.state, "looping")
+
+        final = analyzer.snapshot(final=True)
+        self.assertEqual(final.source, "thinking")
+        self.assertEqual(final.state, "suspected")
+        self.assertTrue(final.recovered_cycle)
+        self.assertFalse(final.active_cycle)
+
+    def test_visible_answer_loop_wins_over_a_thinking_loop(self) -> None:
+        analyzer = LoopAnalyzer()
+        analyzer.add(
+            thinking="thinking repeats the same longer argument forever " * 30,
+            answer="answer repeats the same conclusion forever " * 20,
+        )
+
+        snapshot = analyzer.snapshot(final=True)
+
+        self.assertEqual(snapshot.source, "answer")
+        self.assertEqual(snapshot.state, "looping")
+        self.assertTrue(snapshot.active_cycle)
+        self.assertFalse(snapshot.recovered_cycle)
+
+    def test_confirmed_cycle_that_breaks_is_reported_as_recovered(self) -> None:
+        cycle = "same evidence leads down the same broken path again "
+        analyzer = LoopAnalyzer()
+        analyzer.add(thinking=cycle * 12)
+        analyzer.snapshot()
+        analyzer.add(thinking=cycle * 12)
+        self.assertTrue(analyzer.snapshot().confirmed_cycle)
+
+        analyzer.add(thinking=" ".join(f"novel{index}" for index in range(300)))
+        recovered_live = analyzer.snapshot()
+        final = analyzer.snapshot(final=True)
+
+        self.assertFalse(recovered_live.active_cycle)
+        self.assertNotEqual(recovered_live.state, "looping")
+        self.assertEqual(final.state, "suspected")
+        self.assertTrue(final.recovered_cycle)
+        self.assertFalse(final.active_cycle)
+
+    def test_final_payload_reconciliation_preserves_live_cycle_history(self) -> None:
+        cycle = "same evidence leads down the same broken path again "
+        streamed = cycle * 24
+        analyzer = LoopAnalyzer()
+        analyzer.add(thinking=streamed[: len(streamed) // 2])
+        analyzer.snapshot()
+        analyzer.add(thinking=streamed[len(streamed) // 2 :])
+        self.assertTrue(analyzer.snapshot().confirmed_cycle)
+
+        final_thinking = streamed + " A new argument resolves the issue."
+        self.assertTrue(
+            analyzer.reconcile(
+                thinking=final_thinking,
+                answer="The final answer is B.",
+            )
+        )
+        final = analyzer.snapshot(final=True)
+
+        self.assertEqual(analyzer.thinking_chars, len(final_thinking))
+        self.assertTrue(final.recovered_cycle)
+        self.assertEqual(final.state, "suspected")
+
+    def test_mismatched_final_payload_is_not_reconciled(self) -> None:
+        analyzer = LoopAnalyzer()
+        analyzer.add(thinking="streamed reasoning")
+
+        self.assertFalse(
+            analyzer.reconcile(
+                thinking="different final reasoning",
+                answer="answer",
+            )
+        )
+        self.assertEqual(analyzer.thinking, "streamed reasoning")
+        self.assertEqual(analyzer.answer, "")
+
+    def test_long_exact_cycle_is_detected_beyond_the_old_period_limit(self) -> None:
+        cycle = " ".join(f"unique{index}" for index in range(180)) + " "
+        analyzer = LoopAnalyzer()
+        analyzer.add(answer=cycle * 4)
+
+        snapshot = analyzer.snapshot(final=True)
+
+        self.assertEqual(snapshot.state, "looping")
+        self.assertTrue(snapshot.active_cycle)
+        self.assertEqual(snapshot.cycle_period_tokens, 180)
+        self.assertEqual(snapshot.cycle_repetitions, 4)
+
+    def test_finite_repeated_code_structure_is_advisory_only(self) -> None:
+        block = """
+for i in range(n):
+    for j in range(n):
+        ni, nj = i + {di}, j + {dj}
+        while 0 <= ni < n and 0 <= nj < n:
+            count += grid[ni][nj]
+            ni += {di}
+            nj += {dj}
+"""
+        answer = "\n".join(
+            block.format(di=di, dj=dj) for di, dj in ((0, 1), (1, 0), (1, 1), (1, -1))
+        )
+        analyzer = LoopAnalyzer()
+        analyzer.add(answer=answer)
+
+        snapshot = analyzer.snapshot(final=True)
+
+        self.assertNotEqual(snapshot.state, "looping")
+        self.assertFalse(snapshot.active_cycle)
+        self.assertLess(snapshot.score, 0.8)
 
     def test_live_analysis_retains_a_bounded_tail(self) -> None:
         analyzer = LoopAnalyzer()
@@ -300,18 +476,27 @@ class EngineIntegrationTests(unittest.TestCase):
         events: list[object] = []
         client = LoopingClient()
 
-        results = Engine(
-            client=client,
-            jobs=[JobSpec("looping-model", "quickbench", "1")],
-            sink=events.append,
-        ).run()
+        with patch(
+            "benchkit.engine.time.monotonic",
+            side_effect=[0.0, 1.0, 2.0, 3.0],
+        ):
+            results = Engine(
+                client=client,
+                jobs=[JobSpec("looping-model", "quickbench", "1")],
+                sink=events.append,
+            ).run()
 
         live = [event for event in events if isinstance(event, GenerationProgress)]
         self.assertTrue(any(event.loop_state == "looping" for event in live))
-        self.assertEqual(results[0]["loops"], 1)
-        self.assertEqual(results[0]["loop_rate"], 100.0)
+        self.assertEqual(results[0]["loops"], 0)
+        self.assertEqual(results[0]["suspected_loops"], 0)
+        self.assertEqual(results[0]["recovered_loops"], 1)
+        self.assertEqual(results[0]["loop_rate"], 0.0)
         self.assertEqual(results[0]["trace_coverage"], 100.0)
-        self.assertEqual(results[0]["tasks"][0]["loop_state"], "looping")
+        task = results[0]["tasks"][0]
+        self.assertEqual(task["loop_state"], "suspected")
+        self.assertTrue(task["recovered_cycle"])
+        self.assertFalse(task["active_cycle"])
 
     def test_timeout_skips_evaluation_and_continues_to_next_task(self) -> None:
         client = TimeoutClient()
@@ -378,10 +563,12 @@ class EngineIntegrationTests(unittest.TestCase):
         self.assertEqual(results[0]["passed"], 1)
 
     def test_sustained_doom_loop_score_kills_the_task(self) -> None:
-        with patch("benchkit.engine.time.monotonic", side_effect=[0.0, 2.0]):
+        events: list[object] = []
+        with patch("benchkit.engine.time.monotonic", side_effect=[0.0, 1.0, 3.0]):
             results = Engine(
                 client=SustainedLoopClient(),
                 jobs=[JobSpec("doom-model", "quickbench", "1")],
+                sink=events.append,
                 loop_kill_percent=80,
                 loop_kill_seconds=1,
             ).run()
@@ -394,7 +581,14 @@ class EngineIntegrationTests(unittest.TestCase):
         self.assertTrue(task["loop_killed"])
         self.assertEqual(task["done_reason"], "loop_killed")
         self.assertGreaterEqual(task["loop_kill_score"], 0.8)
+        self.assertIn("confirmed active cycle", task["error"])
         self.assertIn("at or above 80% for 1s", task["error"])
+        confirmed = [
+            event
+            for event in events
+            if isinstance(event, GenerationProgress) and event.loop_state == "looping"
+        ]
+        self.assertEqual(confirmed[-1].loop_kill_remaining_s, 1.0)
 
     def test_loop_kill_timer_resets_below_threshold(self) -> None:
         with patch("benchkit.engine.time.monotonic", side_effect=[0.0, 1.0, 2.0]):
@@ -403,6 +597,18 @@ class EngineIntegrationTests(unittest.TestCase):
                 jobs=[JobSpec("recovering-model", "quickbench", "1")],
                 loop_kill_percent=80,
                 loop_kill_seconds=1.5,
+            ).run()
+
+        self.assertEqual(results[0]["loop_kills"], 0)
+        self.assertEqual(results[0]["passed"], 1)
+
+    def test_completed_stream_is_not_killed_on_its_done_update(self) -> None:
+        with patch("benchkit.engine.time.monotonic", side_effect=[0.0, 2.0]):
+            results = Engine(
+                client=CompletedLoopClient(),
+                jobs=[JobSpec("recovering-model", "quickbench", "1")],
+                loop_kill_percent=80,
+                loop_kill_seconds=1,
             ).run()
 
         self.assertEqual(results[0]["loop_kills"], 0)
@@ -458,7 +664,14 @@ class LoopingClient:
         if on_progress is not None:
             on_progress(
                 GenerationUpdate(
-                    thinking=thinking,
+                    thinking=thinking[: len(thinking) // 2],
+                    elapsed_s=1.0,
+                    reasoning_channel_seen=True,
+                )
+            )
+            on_progress(
+                GenerationUpdate(
+                    thinking=thinking[len(thinking) // 2 :],
                     elapsed_s=2.0,
                     reasoning_channel_seen=True,
                 )
@@ -585,9 +798,8 @@ class SustainedLoopClient:
     def generate(
         self, model: str, prompt: str, on_progress=None, cancel_event=None
     ) -> dict:
-        repeated = (
-            "I must reconsider the same evidence and follow the same path again " * 500
-        )
+        cycle = "I must reconsider the same evidence and follow the same path again "
+        repeated = cycle * 500
         on_progress(
             GenerationUpdate(
                 thinking=repeated,
@@ -597,8 +809,15 @@ class SustainedLoopClient:
         )
         on_progress(
             GenerationUpdate(
-                thinking="same evidence same path again " * 50,
+                thinking=cycle * 50,
                 elapsed_s=3.0,
+                reasoning_channel_seen=True,
+            )
+        )
+        on_progress(
+            GenerationUpdate(
+                thinking=cycle * 50,
+                elapsed_s=5.0,
                 reasoning_channel_seen=True,
             )
         )
@@ -632,6 +851,44 @@ class SurvivingLoopClient:
             "eval_count": 10,
             "eval_duration_ns": 200_000_000,
             "response_time_s": 5.0,
+            "done_reason": "stop",
+            "timed_out": False,
+            "cancelled": False,
+        }
+
+
+class CompletedLoopClient:
+    """Ends on the update that confirms a loop, so there is nothing to kill."""
+
+    timeout = 30.0
+
+    def generate(
+        self, model: str, prompt: str, on_progress=None, cancel_event=None
+    ) -> dict:
+        cycle = "I keep reconsidering the same evidence along the same path "
+        on_progress(
+            GenerationUpdate(
+                thinking=cycle * 20,
+                elapsed_s=1.0,
+                reasoning_channel_seen=True,
+            )
+        )
+        on_progress(
+            GenerationUpdate(
+                thinking=cycle * 20,
+                elapsed_s=3.0,
+                reasoning_channel_seen=True,
+                done=True,
+            )
+        )
+        return {
+            "thinking": cycle * 40,
+            "response": "return len(set(string.lower()))",
+            "trace_status": "observed",
+            "tok_s": 50.0,
+            "eval_count": 10,
+            "eval_duration_ns": 200_000_000,
+            "response_time_s": 3.0,
             "done_reason": "stop",
             "timed_out": False,
             "cancelled": False,

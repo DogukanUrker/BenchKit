@@ -54,11 +54,14 @@ exact prompt, reasoning trace and final response.
 Benchmark generations are streamed without a BenchKit token cap. The existing
 `BENCHKIT_TIMEOUT` remains a hard per-task deadline: on timeout, BenchKit closes
 the stream, keeps the partial trace, records a timeout error and continues with
-the next task. Doom-loop killing uses a continuous threshold: by default the
-request is killed only when its loop score stays at or above 80% for 10 seconds.
-If the score drops below 80%, the timer resets. The partial trace is saved as a
-`LOOP KILLED` task and the benchmark continues. The explicit **Stop run** action
-also closes the active stream immediately and keeps all tasks that finished.
+the next task. Doom-loop killing requires a repeated cycle anchored at the live
+output suffix, additional generated evidence confirming that the same cycle is
+still growing, and a continuous score threshold. By default, the confirmed
+cycle must stay at or above 80% for 10 seconds. Global repetition and structural
+code similarity remain advisory and cannot kill a task by themselves. The
+partial trace is saved as a `LOOP KILLED` task and the benchmark continues. The
+explicit **Stop run** action also closes the active stream immediately and keeps
+all tasks that finished.
 
 Configure the kill switch and threshold in `.env`:
 
@@ -75,12 +78,14 @@ detection and reporting stay active either way.
 When a provider exposes reasoning, BenchKit captures Ollama's `thinking` stream
 or an OpenAI-compatible `reasoning_content` stream. Inline `<think>` blocks are
 recognized as a fallback. The run screen shows whether the model is waiting,
-thinking or answering and continuously analyzes repeated phrases, repeated
-blocks and low-novelty windows. Providers that hide reasoning are reported as
-`NO TRACE`, not as models that did no thinking; visible answer loops can still
-be identified separately. The live task inspector follows new tokens while you
-are at the bottom, then holds your exact scroll position when you scroll back to
-read earlier reasoning.
+thinking or answering and continuously analyzes active suffix cycles, repeated
+phrases, repeated blocks and low-novelty windows. Once answering starts, an old
+thinking cycle is reported as `RECOVERED`/suspected, not counted as a final task
+loop, and is no longer actionable. Providers that hide reasoning are reported
+as `NO TRACE`, not as models that did no thinking; visible answer loops can
+still be identified separately. The live task inspector follows new tokens
+while you are at the bottom, then holds your exact scroll position when you
+scroll back to read earlier reasoning.
 
 Use `uv run benchkit --demo` for a quick offline check. Demo models emit healthy
 and intentionally looping traces so all live states and report fields are easy

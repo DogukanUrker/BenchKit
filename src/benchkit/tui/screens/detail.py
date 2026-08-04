@@ -79,6 +79,7 @@ class JobDetailScreen(Screen[None]):
             f"{result.get('loop_rate', 0):.1f}%",
             f"{result.get('loops', 0)} loop · "
             f"{result.get('suspected_loops', 0)} suspect · "
+            f"{result.get('recovered_loops', 0)} recovered · "
             f"{result.get('loop_kills', 0)} killed",
         )
         self.query_one("#stat-speed", StatCard).set_state(
@@ -201,7 +202,9 @@ def _loop_cell(task: dict) -> Text:
     state = task.get("loop_state", "unavailable")
     source = task.get("loop_source", "none")
     label = (
-        "OUTPUT"
+        "RECOVERED"
+        if task.get("recovered_cycle")
+        else "OUTPUT"
         if state == "looping" and source == "answer"
         else "LOOPING"
         if state == "looping"
@@ -214,7 +217,9 @@ def _loop_cell(task: dict) -> Text:
         else "NO TRACE"
     )
     style = (
-        "bold red"
+        "bold yellow"
+        if task.get("recovered_cycle")
+        else "bold red"
         if state == "looping"
         else "bold yellow"
         if state == "suspected"

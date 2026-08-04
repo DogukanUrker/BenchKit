@@ -189,6 +189,12 @@ class TaskRecord:
     max_window_similarity: float = 0.0
     low_novelty_windows: int = 0
     max_repeated_block: int = 0
+    loop_evidence: str = "none"
+    active_cycle: bool = False
+    recovered_cycle: bool = False
+    cycle_period_tokens: int = 0
+    cycle_repetitions: int = 0
+    repeated_suffix_tokens: int = 0
 
     @property
     def label(self) -> str:
@@ -595,12 +601,12 @@ class Engine:
                 if not self.loop_kill_enabled:
                     loop_above_since = None
                     remaining = None
-                elif snapshot.score >= threshold:
+                elif snapshot.confirmed_cycle and snapshot.score >= threshold:
                     if loop_above_since is None:
                         loop_above_since = now
                     above_for = now - loop_above_since
                     remaining = max(0.0, self.loop_kill_seconds - above_for)
-                    if above_for >= self.loop_kill_seconds:
+                    if above_for >= self.loop_kill_seconds and not update.done:
                         loop_killed_at_s = update.elapsed_s
                         loop_kill_score = snapshot.score
                         raise _DoomLoopKilled
@@ -691,13 +697,21 @@ class Engine:
             if gen.get("cancelled"):
                 break
 
-            # Keep custom clients and final provider normalization honest even
-            # if no live callbacks were emitted.
-            final_analyzer = LoopAnalyzer()
-            final_analyzer.add(
-                thinking=gen.get("thinking", ""),
-                answer=gen.get("response", ""),
-            )
+            # Preserve confirmed/recovered live evidence when the provider's
+            # final payload agrees with its stream. If a custom client returns
+            # different content, rebuild from that authoritative payload.
+            final_analyzer = analyzer
+            final_thinking = gen.get("thinking", "") or ""
+            final_answer = gen.get("response", "") or ""
+            if not final_analyzer.reconcile(
+                thinking=final_thinking,
+                answer=final_answer,
+            ):
+                final_analyzer = LoopAnalyzer()
+                final_analyzer.add(
+                    thinking=final_thinking,
+                    answer=final_answer,
+                )
             loop = final_analyzer.snapshot(final=True)
             if loop.state == "looping" and loop_detected_at is None:
                 loop_detected_at = gen.get("response_time_s", 0.0)
@@ -709,7 +723,7 @@ class Engine:
             if loop_killed:
                 ok = False
                 error = (
-                    "doom loop killed after score stayed at or above "
+                    "doom loop killed after a confirmed active cycle stayed at or above "
                     f"{self.loop_kill_percent:g}% for "
                     f"{self.loop_kill_seconds:g}s"
                 )
@@ -814,6 +828,12 @@ class Engine:
                 max_window_similarity=loop.max_window_similarity,
                 low_novelty_windows=loop.low_novelty_windows,
                 max_repeated_block=loop.max_repeated_block,
+                loop_evidence=loop.evidence,
+                active_cycle=loop.active_cycle,
+                recovered_cycle=loop.recovered_cycle,
+                cycle_period_tokens=loop.cycle_period_tokens,
+                cycle_repetitions=loop.cycle_repetitions,
+                repeated_suffix_tokens=loop.repeated_suffix_tokens,
             )
             records.append(record)
             self.emit(TaskCompleted(index, job, record, passed, position + 1))
@@ -826,7 +846,11 @@ class Engine:
         tok_s = total_tokens / (total_eval_ns / 1e9) if total_eval_ns > 0 else 0.0
         score = passed / completed * 100 if completed else 0.0
         loops = sum(record.loop_state == "looping" for record in records)
-        suspected = sum(record.loop_state == "suspected" for record in records)
+        suspected = sum(
+            record.loop_state == "suspected" and not record.recovered_cycle
+            for record in records
+        )
+        recovered = sum(record.recovered_cycle for record in records)
         timeouts = sum(record.timed_out for record in records)
         loop_kills = sum(record.loop_killed for record in records)
         traced = sum(record.trace_status != "unavailable" for record in records)
@@ -854,6 +878,7 @@ class Engine:
             "loop_kills": loop_kills,
             "loops": loops,
             "suspected_loops": suspected,
+            "recovered_loops": recovered,
             "loop_rate": round(loops / completed * 100, 1),
             "trace_coverage": round(traced / completed * 100, 1),
             "median_thinking_time": round(median(thinking_times), 1)
@@ -893,6 +918,12 @@ class Engine:
                     "max_window_similarity": record.max_window_similarity,
                     "low_novelty_windows": record.low_novelty_windows,
                     "max_repeated_block": record.max_repeated_block,
+                    "loop_evidence": record.loop_evidence,
+                    "active_cycle": record.active_cycle,
+                    "recovered_cycle": record.recovered_cycle,
+                    "cycle_period_tokens": record.cycle_period_tokens,
+                    "cycle_repetitions": record.cycle_repetitions,
+                    "repeated_suffix_tokens": record.repeated_suffix_tokens,
                 }
                 for record in records
             ],

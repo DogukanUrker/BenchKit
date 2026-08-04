@@ -81,6 +81,7 @@ class RunScreen(Screen[None]):
         self.finished = False
         self.current_loops = 0
         self.current_suspected = 0
+        self.current_recovered = 0
         self.live_progress: GenerationProgress | None = None
         self.live_row_key: str | None = None
         self.live_modal: TaskDetailScreen | None = None
@@ -222,6 +223,7 @@ class RunScreen(Screen[None]):
         self.tok_s_sum = 0.0
         self.current_loops = 0
         self.current_suspected = 0
+        self.current_recovered = 0
         self.live_progress = None
         self.live_row_key = None
         self.records[event.index] = []
@@ -301,7 +303,7 @@ class RunScreen(Screen[None]):
             (
                 f"kill in {event.loop_kill_remaining_s:.1f}s"
                 if event.loop_kill_remaining_s is not None
-                else f"{live_suspected} suspected"
+                else f"{live_suspected} suspect · {self.current_recovered} recovered"
             ),
         )
         kill_detail = (
@@ -351,7 +353,10 @@ class RunScreen(Screen[None]):
         self.latency_sum += record.response_time_s
         self.tok_s_sum += record.tok_s
         self.current_loops += int(record.loop_state == "looping")
-        self.current_suspected += int(record.loop_state == "suspected")
+        self.current_suspected += int(
+            record.loop_state == "suspected" and not record.recovered_cycle
+        )
+        self.current_recovered += int(record.recovered_cycle)
 
         self._add_task_row(event.index, record)
         self.live_progress = None
@@ -366,7 +371,7 @@ class RunScreen(Screen[None]):
         )
         self.query_one("#stat-loops", StatCard).set_state(
             str(self.current_loops),
-            f"{self.current_suspected} suspected",
+            f"{self.current_suspected} suspect · {self.current_recovered} recovered",
         )
         if self.live_modal is not None and self.live_modal.is_mounted:
             self.live_modal.update_live(_record_task_data(record), finished=True)
@@ -433,7 +438,11 @@ class RunScreen(Screen[None]):
             table.update_cell(
                 key,
                 "loop",
-                _loop_cell(record.loop_state, record.loop_source),
+                _loop_cell(
+                    record.loop_state,
+                    record.loop_source,
+                    recovered=record.recovered_cycle,
+                ),
             )
             table.update_cell(key, "latency", fmt_duration(record.response_time_s))
             table.update_cell(
@@ -446,7 +455,11 @@ class RunScreen(Screen[None]):
                 str(record.index + 1),
                 record.label,
                 _result_cell(record, self.dark),
-                _loop_cell(record.loop_state, record.loop_source),
+                _loop_cell(
+                    record.loop_state,
+                    record.loop_source,
+                    recovered=record.recovered_cycle,
+                ),
                 fmt_duration(record.response_time_s),
                 f"{record.tok_s:.1f}" if record.tok_s else "—",
                 key=key,
@@ -464,7 +477,11 @@ class RunScreen(Screen[None]):
                 str(record.index + 1),
                 record.label,
                 _result_cell(record, self.dark),
-                _loop_cell(record.loop_state, record.loop_source),
+                _loop_cell(
+                    record.loop_state,
+                    record.loop_source,
+                    recovered=record.recovered_cycle,
+                ),
                 fmt_duration(record.response_time_s),
                 f"{record.tok_s:.1f}" if record.tok_s else "—",
                 key=f"{self.current_index}:{record.index}",
@@ -619,10 +636,12 @@ def _loop_label(state: str, source: str) -> str:
     return "NO TRACE"
 
 
-def _loop_cell(state: str, source: str) -> Text:
-    label = _loop_label(state, source)
+def _loop_cell(state: str, source: str, *, recovered: bool = False) -> Text:
+    label = "RECOVERED" if recovered else _loop_label(state, source)
     style = (
-        "bold red"
+        "bold yellow"
+        if recovered
+        else "bold red"
         if state == "looping"
         else "bold yellow"
         if state == "suspected"
@@ -681,4 +700,10 @@ def _record_task_data(record: TaskRecord) -> dict:
         "max_window_similarity": record.max_window_similarity,
         "low_novelty_windows": record.low_novelty_windows,
         "max_repeated_block": record.max_repeated_block,
+        "loop_evidence": record.loop_evidence,
+        "active_cycle": record.active_cycle,
+        "recovered_cycle": record.recovered_cycle,
+        "cycle_period_tokens": record.cycle_period_tokens,
+        "cycle_repetitions": record.cycle_repetitions,
+        "repeated_suffix_tokens": record.repeated_suffix_tokens,
     }

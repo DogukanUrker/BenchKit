@@ -112,7 +112,11 @@ def save(
                     if task["passed"]
                     else "❌ FAIL"
                 )
-                loop = task.get("loop_state", "unavailable").upper()
+                loop = (
+                    "RECOVERED"
+                    if task.get("recovered_cycle")
+                    else task.get("loop_state", "unavailable").upper()
+                )
                 if (
                     loop == "CLEAR"
                     and task.get("loop_source") == "answer"
