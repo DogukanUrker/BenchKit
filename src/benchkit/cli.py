@@ -239,8 +239,10 @@ def _headless(args: argparse.Namespace) -> None:
         pad_edge=False,
         padding=(0, 1),
     )
-    table.add_column("Model")
-    table.add_column("Benchmark")
+    # Fold long model and benchmark names instead of ellipsizing them: the
+    # summary is the part of a headless run people copy into a report.
+    table.add_column("Model", overflow="fold")
+    table.add_column("Benchmark", overflow="fold")
     table.add_column("Score", justify="right")
     table.add_column("P/F/E", justify="right")
     table.add_column("Loops/Killed", justify="right")
