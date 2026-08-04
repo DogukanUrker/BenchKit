@@ -249,7 +249,7 @@ class _Dashboard:
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
     ) -> RenderResult:
-        width = max(40, min(options.max_width, 120))
+        width = max(40, options.max_width)
         state = self.state
         view = state.current
 
