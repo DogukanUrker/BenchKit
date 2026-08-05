@@ -261,6 +261,7 @@ never duplicated.
 | IFEval     | `ifeval`         |    541 | instruction generative             | Instruction following under constraints a checker can verify        |
 | RULER      | `ruler`          | 20 × 6 | long-context retrieval generative  | Multi-key retrieval and variable tracking from 4K through 128K      |
 | GPQA       | `gpqa`           |    198 | knowledge mcq low-signal           | Expert-written graduate science questions designed to resist search |
+| MMLU-Pro   | `mmlu-pro`       | 12,032 | knowledge mcq                      | Ten-option reasoning questions across 14 categories                 |
 | MMLU       | `mmlu`           | 14,042 | knowledge mcq saturated low-signal | Zero-shot coverage of 57 academic and professional subjects         |
 | ARC        | `arc`            |  1,172 | knowledge mcq saturated low-signal | Challenging grade-school science multiple choice                    |
 | OpenBookQA | `openbookqa`     |    500 | knowledge mcq saturated low-signal | Elementary science requiring factual knowledge and reasoning        |
@@ -271,6 +272,13 @@ never duplicated.
 | HellaSwag  | `hellaswag`      |  1,000 | commonsense mcq saturated low-signal | Plausible continuations of real-world scenarios                   |
 
 More coming soon.
+
+MMLU-Pro is the knowledge suite to reach for first. Ten options per question
+drop the random-guess floor from 25% to 10%, and the questions were filtered
+for ones that need reasoning rather than recall, so it still separates models
+that all sit near MMLU's ceiling. All 12,032 questions is a long run, so slice
+it like any other suite (`--benchmarks mmlu-pro:200`). MMLU stays in the
+registry for comparability with published numbers.
 
 ### Tags
 
