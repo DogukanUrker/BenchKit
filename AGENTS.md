@@ -14,7 +14,7 @@ BenchKit is a Python 3.11 package using a `src/` layout. `src/benchkit/cli.py` p
 - `uv run ruff check .` / `uv run ruff format .`: lint and format.
 - `uv run pre-commit run -a`: run every hook against the whole tree.
 
-The package metadata and CLI entrypoint are defined in `pyproject.toml`; `uv build` produces the sdist and wheel. `.github/workflows/ci.yml` runs lint, the test suite on Python 3.11-3.13, an offline `--demo` smoke run and the package build on every pull request.
+The package metadata and CLI entrypoint are defined in `pyproject.toml`; `uv build` produces the sdist and wheel. Two workflows run on every pull request: `.github/workflows/lint.yml` (ruff check and format) and `.github/workflows/tests.yml` (the test suite on Python 3.11-3.13, an offline `--demo` smoke run and the package build).
 
 ## Coding Style & Naming Conventions
 Ruff owns formatting and linting; its configuration lives in `pyproject.toml` (88 columns, `py311` target). Run `uv run ruff format .` rather than hand-wrapping, and fence hand-aligned data tables with `# fmt: off` / `# fmt: on` when the layout matters. Use 4-space indentation, type hints, and short module docstrings consistent with the existing codebase. Prefer `snake_case` for modules and functions, `PascalCase` for classes, and lowercase benchmark registry keys such as `quickbench` or `humaneval`. Keep new benchmark code narrow in scope: implement `load_tasks()`, `build_prompt()`, and `evaluate()`, store dataset payloads as JSONL, and register new classes in `src/benchkit/benchmarks/__init__.py`.

@@ -1,0 +1,36 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      # Only the dev group is needed here, so the heavy runtime deps are skipped.
+      - name: Install lint tooling
+        run: uv sync --only-group dev
+
+      - name: ruff check
+        run: uv run --no-sync ruff check --output-format=github .
+
+      - name: ruff format
+        run: uv run --no-sync ruff format --check --diff .

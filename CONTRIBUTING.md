@@ -33,11 +33,18 @@ rules). Data tables that are more readable hand-wrapped can be fenced with
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`:
+Two workflows run on every pull request and on pushes to `main`:
+
+`.github/workflows/lint.yml`
 
 | Job | What it does |
 | --- | --- |
-| `lint` | `ruff check` and `ruff format --check` |
+| `ruff` | `ruff check` and `ruff format --check` |
+
+`.github/workflows/tests.yml`
+
+| Job | What it does |
+| --- | --- |
 | `test` | `pytest` on Python 3.11, 3.12 and 3.13 |
 | `smoke` | `benchkit --list` plus a `--demo --headless` run, asserting `results.{json,csv,md,html}` are written; uploads them as an artifact |
 | `build` | `uv build` and an import check against the built wheel |

@@ -15,6 +15,4 @@
 
 ## Notes
 
-- [ ] `uv run ruff check .` and `uv run ruff format .` are clean
-- [ ] `uv run pytest` passes
 - [ ] Terminal or report snippet attached if CLI output changed
