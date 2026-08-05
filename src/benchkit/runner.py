@@ -618,12 +618,18 @@ class _Reporter:
         line.append_text(_score_text(result["score"]))
         line.append("  ")
         line.append_text(_counters(stats))
+        if result.get("concurrency", 1) > 1:
+            throughput = (
+                f" {glyphs.dot} {aggregate_tok_s(result):.1f} aggregate tok/s"
+                f" {glyphs.dot} {stream_tok_s(result):.1f} stream tok/s"
+                f" {glyphs.dot} {effective_concurrency(result):.2f}x effective"
+            )
+        else:
+            throughput = f" {glyphs.dot} {stream_tok_s(result):.1f} tok/s"
         line.append(
             f"  {_plural(result['total'], 'task')}"
             f"{' (partial)' if partial else ''}"
-            f" {glyphs.dot} {aggregate_tok_s(result):.1f} aggregate tok/s"
-            f" {glyphs.dot} {stream_tok_s(result):.1f} stream tok/s"
-            f" {glyphs.dot} {effective_concurrency(result):.2f}x effective"
+            f"{throughput}"
             f" {glyphs.dot} {result.get('loop_kills', 0)} killed"
             f" {glyphs.dot} {_fmt_time(result['total_time'])}",
             style="dim",

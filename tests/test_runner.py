@@ -10,6 +10,7 @@ from rich.console import Console
 from benchkit.cli import _outcome_counts
 from benchkit.engine import (
     GenerationProgress,
+    JobCompleted,
     JobSpec,
     JobStarted,
     RunStarted,
@@ -42,7 +43,8 @@ def _record(
 
 def _console(**kwargs: object) -> Console:
     kwargs.setdefault("force_terminal", False)
-    return Console(width=100, **kwargs)
+    kwargs.setdefault("width", 100)
+    return Console(**kwargs)
 
 
 def _ascii_console() -> Console:
@@ -201,6 +203,57 @@ class PlainReporterTests(unittest.TestCase):
         self.assertEqual(view.generated_chars, 120)
         self.assertIn("1 active request", str(view.activity))
         self.assertIn("120 chars generated", str(view.activity))
+
+    def test_serial_job_summary_only_shows_stream_speed_as_tok_s(self) -> None:
+        console = _console(record=True, width=200)
+        reporter = _Reporter(console, verbose=False)
+        job = JobSpec("model", "quickbench", None)
+        result = {
+            "model": "model",
+            "benchmark": "quickbench",
+            "score": 50.0,
+            "passed": 1,
+            "total": 2,
+            "tok_s_per_stream": 62.6,
+            "tok_s_aggregate": 58.4,
+            "concurrency_eff": 1.0,
+            "concurrency": 1,
+            "loop_kills": 0,
+            "total_time": 2.0,
+        }
+
+        reporter(JobCompleted(0, job, result, skipped=False))
+
+        output = console.export_text()
+        self.assertIn("62.6 tok/s", output)
+        self.assertNotIn("aggregate tok/s", output)
+        self.assertNotIn("stream tok/s", output)
+        self.assertNotIn("effective", output)
+
+    def test_parallel_job_summary_keeps_parallel_throughput_metrics(self) -> None:
+        console = _console(record=True, width=200)
+        reporter = _Reporter(console, verbose=False)
+        job = JobSpec("model", "quickbench", None)
+        result = {
+            "model": "model",
+            "benchmark": "quickbench",
+            "score": 50.0,
+            "passed": 1,
+            "total": 2,
+            "tok_s_per_stream": 62.6,
+            "tok_s_aggregate": 116.8,
+            "concurrency_eff": 1.87,
+            "concurrency": 2,
+            "loop_kills": 0,
+            "total_time": 1.0,
+        }
+
+        reporter(JobCompleted(0, job, result, skipped=False))
+
+        output = console.export_text()
+        self.assertIn("116.8 aggregate tok/s", output)
+        self.assertIn("62.6 stream tok/s", output)
+        self.assertIn("1.87x effective", output)
 
 
 if __name__ == "__main__":
