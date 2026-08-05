@@ -53,6 +53,16 @@ split distributed with SuperGLUE.
 - Source: <https://github.com/google-research-datasets/boolean-questions>
 - Dataset license: [Creative Commons Attribution-ShareAlike 3.0][cc-by-sa-3.0]
 
+## IFEval
+
+`ifeval.jsonl` is a transformed copy of the 541 prompts distributed with the
+IFEval paper. Only the schema changed: `key` became `task_id`, and the
+`instruction_id_list` / `kwargs` pairs are carried over unmodified.
+
+- Source: <https://github.com/google-research/google-research/tree/master/instruction_following_eval>
+- Paper: <https://arxiv.org/abs/2311.07911>
+- Dataset license: Apache 2.0
+
 [afl-3.0]: https://opensource.org/license/afl-3-0-php
 [cc-by-2.0]: https://creativecommons.org/licenses/by/2.0/
 [cc-by-sa-3.0]: https://creativecommons.org/licenses/by-sa/3.0/

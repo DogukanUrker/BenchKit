@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from benchkit.benchmarks import REGISTRY
+from benchkit.benchmarks import REGISTRY, all_tags, keys_for_tags, tags_for
 from benchkit.client import InferenceClient
 from benchkit.engine import JobSpec, SliceError, parse_slice, task_count
 from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
@@ -64,6 +64,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--benchmarks",
         default="",
         help="Headless: comma separated benchmarks, e.g. humaneval:20,gsm8k:-50",
+    )
+    parser.add_argument(
+        "--tag",
+        default="",
+        help=(
+            "Select benchmarks by tag, e.g. --tag code or --tag mcq,-saturated. "
+            "Combines with --benchmarks; a per-benchmark slice can be appended "
+            "with --benchmarks. Tags: " + " ".join(all_tags())
+        ),
     )
     parser.add_argument(
         "--list",
@@ -137,16 +146,50 @@ def _outcome_counts(result: dict) -> tuple[int, int, int]:
     return int(result["passed"]), failed, errors
 
 
-def _list_benchmarks() -> None:
+def _split_tags(value: str) -> tuple[list[str], list[str]]:
+    """Split a --tag value into required and excluded tags."""
+    include: list[str] = []
+    exclude: list[str] = []
+    for term in value.replace(" ", ",").split(","):
+        term = term.strip().lower()
+        if not term:
+            continue
+        if term.startswith("-"):
+            exclude.append(term[1:])
+        else:
+            include.append(term)
+    return include, exclude
+
+
+def _keys_for_tag_option(value: str) -> list[str]:
+    """Resolve a --tag value to benchmark keys, or exit with a clear error."""
+    include, exclude = _split_tags(value)
+    known = set(all_tags())
+    unknown = [tag for tag in include + exclude if tag not in known]
+    if unknown:
+        console.print(f"[red]Unknown tag(s):[/red] {', '.join(unknown)}")
+        console.print(f"[dim]Available: {', '.join(sorted(known))}[/dim]")
+        sys.exit(1)
+
+    keys = keys_for_tags(include, exclude)
+    if not keys:
+        console.print(f"[red]No benchmark matches --tag {value}[/red]")
+        sys.exit(1)
+    return keys
+
+
+def _list_benchmarks(tag: str = "") -> None:
+    keys = _keys_for_tag_option(tag) if tag.strip() else list(REGISTRY)
     table = Table(box=box.MINIMAL, border_style="dim", header_style="bold")
     table.add_column("Benchmark")
     table.add_column("Tasks", justify="right")
-    for key in REGISTRY:
+    table.add_column("Tags")
+    for key in keys:
         try:
             count = f"{task_count(key):,}"
         except Exception:
             count = "?"
-        table.add_row(key, count)
+        table.add_row(key, count, f"[dim]{' '.join(tags_for(key))}[/dim]")
     console.print(table)
 
 
@@ -177,8 +220,14 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
         console.print("[red]--models is required with --headless[/red]")
         sys.exit(1)
 
+    requested = [part for part in args.benchmarks.split(",") if part.strip()]
+    if args.tag.strip():
+        tagged = _keys_for_tag_option(args.tag)
+        explicit = {part.partition(":")[0].strip() for part in requested}
+        requested += [key for key in tagged if key not in explicit]
+
     specs: list[tuple[str, str | None]] = []
-    for part in args.benchmarks.split(","):
+    for part in requested:
         part = part.strip()
         if not part:
             continue
@@ -202,7 +251,9 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
         specs.append((key, slice_spec))
 
     if not specs:
-        console.print("[red]--benchmarks is required with --headless[/red]")
+        console.print(
+            "[red]--benchmarks or --tag is required with --headless[/red]"
+        )
         sys.exit(1)
 
     return [JobSpec(model, key, spec) for model in models for key, spec in specs]
@@ -458,7 +509,7 @@ def main(argv: list[str] | None = None) -> None:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     if args.list:
-        _list_benchmarks()
+        _list_benchmarks(args.tag)
         return
 
     if args.command == "perf":
