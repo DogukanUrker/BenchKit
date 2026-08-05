@@ -341,6 +341,19 @@ class MyBenchmark:
 
 Then add it to `REGISTRY` in `benchmarks/__init__.py`. Done.
 
+## Development
+
+```bash
+uv sync                     # runtime + dev dependencies
+uv run pre-commit install   # ruff on commit, tests on push
+uv run ruff check .         # lint
+uv run ruff format .        # format
+uv run pytest               # tests
+```
+
+CI runs lint, the test suite on Python 3.11-3.13, an offline `--demo` smoke run
+and a package build on every pull request. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 Apache License 2.0
