@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from benchkit.benchmarks import REGISTRY
+from benchkit.benchmarks import CURRENT_BENCHMARKS, REGISTRY
 from benchkit.client import InferenceClient
 from benchkit.engine import JobSpec, SliceError, parse_slice, task_count
 from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
@@ -141,12 +141,14 @@ def _list_benchmarks() -> None:
     table = Table(box=box.MINIMAL, border_style="dim", header_style="bold")
     table.add_column("Benchmark")
     table.add_column("Tasks", justify="right")
+    table.add_column("Group")
     for key in REGISTRY:
         try:
             count = f"{task_count(key):,}"
         except Exception:
             count = "?"
-        table.add_row(key, count)
+        group = "current" if key in CURRENT_BENCHMARKS else "classic"
+        table.add_row(key, count, f"[dim]{group}[/dim]")
     console.print(table)
 
 

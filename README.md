@@ -201,6 +201,13 @@ never duplicated.
 
 ## Benchmarks
 
+Benchmarks are grouped into the suites current models still separate on, and
+the classic suites that most current models saturate. Both groups run exactly
+the same way; the split only decides how they are listed in the app and in
+`--list`.
+
+### Current
+
 | Benchmark  | Key              |  Tasks | What it tests                                                       |
 | ---------- | ---------------- | -----: | ------------------------------------------------------------------- |
 | QuickBench | `quickbench`     |     20 | Tiny Python tasks for a fast end-to-end sanity check                |
@@ -209,9 +216,15 @@ never duplicated.
 | MBPP       | `mbpp`           |    500 | Short Python functions from natural-language specifications         |
 | MBPP+      | `mbpp-plus`      |    378 | Sanitized MBPP with more than 39,000 EvalPlus test inputs           |
 | GSM8K      | `gsm8k`          |  1,319 | Multi-step grade-school math with exact numeric answers             |
-| ARC        | `arc`            |  1,172 | Challenging grade-school science multiple choice                    |
+| IFEval     | `ifeval`         |    541 | Instruction following under constraints a checker can verify        |
 | GPQA       | `gpqa`           |    198 | Expert-written graduate science questions designed to resist search |
 | MMLU       | `mmlu`           | 14,042 | Zero-shot coverage of 57 academic and professional subjects         |
+
+### Classic
+
+| Benchmark  | Key              |  Tasks | What it tests                                                       |
+| ---------- | ---------------- | -----: | ------------------------------------------------------------------- |
+| ARC        | `arc`            |  1,172 | Challenging grade-school science multiple choice                    |
 | OpenBookQA | `openbookqa`     |    500 | Elementary science requiring factual knowledge and reasoning        |
 | WinoGrande | `winogrande`     |  1,267 | Commonsense pronoun resolution in ambiguous sentences               |
 | PIQA       | `piqa`           |  1,838 | Physical plausibility of solutions to everyday tasks                |
@@ -220,6 +233,11 @@ never duplicated.
 | HellaSwag  | `hellaswag`      |  1,000 | Plausible continuations of real-world scenarios                     |
 
 More coming soon.
+
+IFEval scores strict prompt-level accuracy: a prompt counts as passed only when
+every verifiable instruction attached to it is followed. The checkers are a
+dependency-free port of the reference implementation, with NLTK tokenization
+and `langdetect` replaced by built-in equivalents.
 
 HumanEval+ and MBPP+ use the complete official EvalPlus datasets and both the
 base and expanded test inputs. The upstream datasets are downloaded and cached

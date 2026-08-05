@@ -12,7 +12,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, Label, SelectionList, Static
 from textual.widgets.selection_list import Selection
 
-from benchkit.benchmarks import REGISTRY
+from benchkit.benchmarks import CURRENT_BENCHMARKS, LEGACY_BENCHMARKS, REGISTRY
 from benchkit.demo import DemoClient
 from benchkit.engine import JobSpec, SliceError, parse_slice, slice_label, task_count
 from benchkit.template_check import TemplateReport, check_template
@@ -28,6 +28,7 @@ DESCRIPTIONS = {
     "mbpp": "500 short Python functions from natural-language specifications",
     "mbpp-plus": "378 sanitized MBPP tasks with 39k+ EvalPlus test inputs",
     "gsm8k": "multi-step grade-school math problems with exact numeric answers",
+    "ifeval": "541 prompts with code-checkable instruction-following constraints",
     "arc": "challenging grade-school science questions with four choices",
     "gpqa": "expert-written graduate science questions designed to resist search",
     "mmlu": "57 academic and professional subjects, evaluated zero-shot",
@@ -42,6 +43,14 @@ DESCRIPTIONS = {
 MODEL_NAME_WIDTH = 40
 BENCHMARK_NAME_WIDTH = 15
 BENCHMARK_COUNT_WIDTH = 13
+
+# The benchmark pane shows two lists: the suites worth reaching for today and
+# the older ones that most current models saturate.
+BENCH_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
+    ("bench-list", "bench-current-title", "Current", CURRENT_BENCHMARKS),
+    ("bench-legacy-list", "bench-legacy-title", "Classic", LEGACY_BENCHMARKS),
+]
+BENCH_LIST_IDS = {list_id for list_id, _, _, _ in BENCH_GROUPS}
 
 
 class SetupScreen(Screen[None]):
@@ -87,7 +96,9 @@ class SetupScreen(Screen[None]):
                     id="bench-filter",
                     classes="filter",
                 )
-                yield SelectionList(id="bench-list")
+                for list_id, title_id, title, _keys in BENCH_GROUPS:
+                    yield SectionTitle(title, id=title_id, classes="group-title")
+                    yield SelectionList(id=list_id)
         with Horizontal(id="setup-options"):
             yield Label("Tasks per benchmark", classes="field-label wide")
             yield Input(placeholder="all", id="global-limit", classes="limit-input")
@@ -207,23 +218,35 @@ class SetupScreen(Screen[None]):
         )
 
     def _rebuild_benchmarks(self) -> None:
-        widget = self.query_one("#bench-list", SelectionList)
         needle = self.query_one("#bench-filter", Input).value.strip().lower()
-        visible = [
-            key
-            for key in self.bench_order
-            if needle in key.lower() or needle in DESCRIPTIONS.get(key, "").lower()
-        ]
-        highlighted = widget.highlighted
-        widget.clear_options()
-        widget.add_options(
-            [
-                Selection(self._bench_prompt(key), key, key in self.selected_benchmarks)
-                for key in visible
+
+        for list_id, _title_id, _title, keys in BENCH_GROUPS:
+            widget = self.query_one(f"#{list_id}", SelectionList)
+            visible = [
+                key
+                for key in self.bench_order
+                if key in keys
+                and (
+                    needle in key.lower()
+                    or needle in DESCRIPTIONS.get(key, "").lower()
+                )
             ]
-        )
-        if visible:
-            widget.highlighted = min(highlighted or 0, len(visible) - 1)
+            highlighted = widget.highlighted
+            widget.clear_options()
+            widget.add_options(
+                [
+                    Selection(
+                        self._bench_prompt(key), key, key in self.selected_benchmarks
+                    )
+                    for key in visible
+                ]
+            )
+            if visible:
+                widget.highlighted = min(highlighted or 0, len(visible) - 1)
+        self._refresh_bench_group_titles()
+        self._refresh_bench_title()
+
+    def _refresh_bench_title(self) -> None:
         self.query_one("#bench-title", SectionTitle).set_detail(
             f"{len(self.selected_benchmarks)}/{len(self.bench_order)} selected"
         )
@@ -240,10 +263,10 @@ class SetupScreen(Screen[None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id in {"model-filter", "bench-filter"}:
-            target = (
-                "#model-list" if event.input.id == "model-filter" else "#bench-list"
-            )
-            self.query_one(target, SelectionList).focus()
+            if event.input.id == "model-filter":
+                self.query_one("#model-list", SelectionList).focus()
+            else:
+                self._first_populated_bench_list().focus()
         elif event.input.id == "global-limit":
             self.action_start()
 
@@ -263,10 +286,19 @@ class SetupScreen(Screen[None]):
             )
         else:
             self.selected_benchmarks = (self.selected_benchmarks - visible) | chosen
-            self.query_one("#bench-title", SectionTitle).set_detail(
-                f"{len(self.selected_benchmarks)}/{len(self.bench_order)} selected"
-            )
+            self._refresh_bench_group_titles()
+            self._refresh_bench_title()
         self._refresh_summary()
+
+    def _refresh_bench_group_titles(self) -> None:
+        for list_id, title_id, _title, keys in BENCH_GROUPS:
+            widget = self.query_one(f"#{list_id}", SelectionList)
+            shown = widget.option_count
+            selected = len(self.selected_benchmarks & set(keys))
+            detail = f"{selected}/{len(keys)} selected"
+            if shown != len(keys):
+                detail = f"{detail} · {shown} shown"
+            self.query_one(f"#{title_id}", SectionTitle).set_detail(detail)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "start":
@@ -303,13 +335,28 @@ class SetupScreen(Screen[None]):
         widget = self._focused_list()
         target = (
             "#bench-filter"
-            if widget is not None and widget.id == "bench-list"
+            if widget is not None and widget.id in BENCH_LIST_IDS
             else "#model-filter"
         )
         self.query_one(target, Input).focus()
 
+    def _focused_bench_list(self) -> SelectionList:
+        """The benchmark list the user is on, falling back to the first one."""
+        widget = self._focused_list()
+        if widget is not None and widget.id in BENCH_LIST_IDS:
+            return widget
+        return self.query_one(f"#{BENCH_GROUPS[0][0]}", SelectionList)
+
+    def _first_populated_bench_list(self) -> SelectionList:
+        """The first benchmark list with rows, so filtering never dead-ends."""
+        for list_id, _title_id, _title, _keys in BENCH_GROUPS:
+            widget = self.query_one(f"#{list_id}", SelectionList)
+            if widget.option_count:
+                return widget
+        return self.query_one(f"#{BENCH_GROUPS[0][0]}", SelectionList)
+
     def action_set_limit(self) -> None:
-        widget = self.query_one("#bench-list", SelectionList)
+        widget = self._focused_bench_list()
         index = widget.highlighted
         if index is None:
             return
@@ -398,7 +445,7 @@ class SetupScreen(Screen[None]):
             return None
         if not benches:
             self.notify("Select at least one benchmark", severity="error", timeout=4)
-            self.query_one("#bench-list", SelectionList).focus()
+            self._focused_bench_list().focus()
             return None
 
         for key in benches:

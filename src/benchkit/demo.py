@@ -59,10 +59,145 @@ def _wrong_letter(answer: str) -> str:
     return random.choice(options) if options else "A"
 
 
+_FILLER_SENTENCES = (
+    "Here is a considered response to the request at hand.",
+    "The plan below keeps every stated requirement in view.",
+    "Each step is written plainly so nothing is left implicit.",
+    "A short pause for structure makes the result easier to follow.",
+    "The remaining detail fills out the picture without extra noise.",
+    "This closing thought ties the pieces back together.",
+)
+
+
+def _ifeval_body(sentences: int, words: int | None) -> str:
+    """Filler prose sized to the sentence and word budget of a task."""
+    text: list[str] = []
+    for index in range(max(sentences, 1)):
+        text.append(_FILLER_SENTENCES[index % len(_FILLER_SENTENCES)])
+
+    if words:
+        while len(" ".join(text).split()) < words:
+            text[-1] = text[-1].rstrip(".") + " and a little more detail follows."
+    return " ".join(text)
+
+
+def _ifeval_answer(task: Task) -> str:
+    """Compose a response that satisfies the simpler IFEval constraints.
+
+    Demo mode never calls a real model, so the strongest demo answer is one
+    built directly from the instruction metadata. Constraints that need real
+    language understanding (response language, letter frequency) are skipped,
+    which keeps demo scores below a perfect run.
+    """
+    args = {
+        instruction: dict(kwargs or {})
+        for instruction, kwargs in zip(
+            task.metadata["instruction_id_list"], task.metadata["kwargs"]
+        )
+    }
+
+    if "detectable_format:json_format" in args:
+        return '{"answer": "demo response", "complete": true}'
+    if "detectable_format:constrained_response" in args:
+        return "My answer is maybe."
+
+    sentence_spec = args.get("length_constraints:number_sentences")
+    sentences = 4
+    if sentence_spec:
+        target = int(sentence_spec["num_sentences"])
+        sentences = (
+            target
+            if sentence_spec["relation"] == "at least"
+            else max(target - 1, 1)
+        )
+
+    word_spec = args.get("length_constraints:number_words")
+    words = None
+    if word_spec and word_spec["relation"] == "at least":
+        words = int(word_spec["num_words"])
+    elif word_spec:
+        sentences = min(sentences, 2)
+
+    body = _ifeval_body(sentences, words)
+
+    keywords = args.get("keywords:existence", {}).get("keywords", [])
+    if keywords:
+        body += " Keywords in play: " + " ".join(keywords) + "."
+
+    frequency = args.get("keywords:frequency")
+    if frequency and frequency["relation"] == "at least":
+        repeats = [frequency["keyword"]] * int(frequency["frequency"])
+        body += " " + " ".join(repeats) + "."
+
+    placeholders = args.get("detectable_content:number_placeholders")
+    if placeholders:
+        count = int(placeholders["num_placeholders"])
+        body += " " + " ".join(f"[field {i + 1}]" for i in range(count))
+
+    highlights = args.get("detectable_format:number_highlighted_sections")
+    if highlights:
+        count = int(highlights["num_highlights"])
+        body += "\n" + "\n".join(f"*highlight {i + 1}*" for i in range(count))
+
+    bullets = args.get("detectable_format:number_bullet_lists")
+    if bullets:
+        count = int(bullets["num_bullets"])
+        body += "\n" + "\n".join(f"* point {i + 1}" for i in range(count))
+
+    sections = args.get("detectable_format:multiple_sections")
+    if sections:
+        spliter = sections["section_spliter"]
+        count = int(sections["num_sections"])
+        body = "\n".join(f"{spliter} {i + 1}\n{body}" for i in range(count))
+
+    paragraphs = args.get("length_constraints:number_paragraphs")
+    if paragraphs:
+        count = int(paragraphs["num_paragraphs"])
+        body = "\n***\n".join([body] * count)
+
+    if "detectable_format:title" in args:
+        body = f"<<Demo Response>>\n{body}"
+
+    if "combination:repeat_prompt" in args:
+        prompt = args["combination:repeat_prompt"].get("prompt_to_repeat", task.prompt)
+        body = f"{prompt}\n{body}"
+
+    if "combination:two_responses" in args:
+        body = f"{body}\n******\n{body}"
+
+    postscript = args.get("detectable_content:postscript")
+    if postscript:
+        body += f"\n\n{postscript['postscript_marker']} That is the whole answer."
+
+    end_phrase = args.get("startend:end_checker")
+    if end_phrase:
+        body += f" {end_phrase['end_phrase']}"
+
+    forbidden = args.get("keywords:forbidden_words", {}).get("forbidden_words", [])
+    for word in forbidden:
+        body = body.replace(word, "…").replace(word.capitalize(), "…")
+
+    if "punctuation:no_comma" in args:
+        body = body.replace(",", "")
+
+    if "change_case:english_capital" in args:
+        body = body.upper()
+    elif "change_case:english_lowercase" in args:
+        body = body.lower()
+
+    if "startend:quotation" in args:
+        body = f'"{body}"'
+
+    return body
+
+
 def _good_answer(task: Task, solution: str | None) -> str:
     metadata = task.metadata
     if solution is not None:
         return solution
+
+    if "instruction_id_list" in metadata:
+        return _ifeval_answer(task)
 
     answer = metadata.get("answer")
     if isinstance(answer, bool):
@@ -80,6 +215,9 @@ def _bad_answer(task: Task, has_solution: bool) -> str:
     metadata = task.metadata
     if has_solution or "test" in metadata:
         return "    raise NotImplementedError"
+
+    if "instruction_id_list" in metadata:
+        return "Sure, here is a quick answer that ignores the formatting rules."
 
     answer = metadata.get("answer")
     if isinstance(answer, bool):
