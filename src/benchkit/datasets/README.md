@@ -1,5 +1,17 @@
 # Dataset attribution
 
+## LiveCodeBench
+
+LiveCodeBench is not bundled here. BenchKit downloads the
+`code_generation_lite` release on demand and caches it outside the repository
+(`~/.cache/benchkit/livecodebench` by default, see `BENCHKIT_LCB_CACHE`),
+because a full release ships every problem's test cases.
+
+- Source: <https://github.com/livecodebench/livecodebench>
+- Dataset: <https://huggingface.co/datasets/livecodebench/code_generation_lite>
+- Paper: <https://arxiv.org/abs/2403.07974>
+- Dataset license: [Creative Commons Attribution 4.0 International][cc-by-4.0]
+
 ## GPQA Diamond
 
 `gpqa_diamond.jsonl` is a transformed copy of the 198-question GPQA Diamond

@@ -197,6 +197,7 @@ class TaskRecord:
     score: float = 0.0
     error: str = ""
     entry_point: str = ""
+    group: str = ""
     thinking: str = ""
     output_tokens: int = 0
     done_reason: str = ""
@@ -506,6 +507,40 @@ def _result_metadata(job: JobSpec) -> dict:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def group_breakdown(records: list[TaskRecord], order: tuple[str, ...] = ()) -> list[dict]:
+    """Per-group pass rates for a benchmark that labels its tasks.
+
+    A benchmark opts in by putting a ``group`` in each task's metadata (
+    LiveCodeBench uses the problem difficulty). The aggregate score alone hides
+    exactly the split that matters on small models, where medium and hard
+    collapse to zero while easy still separates them.
+    """
+    totals: dict[str, list[int]] = {}
+    for record in records:
+        if not record.group:
+            continue
+        bucket = totals.setdefault(record.group, [0, 0])
+        bucket[0] += int(record.passed)
+        bucket[1] += 1
+
+    if not totals:
+        return []
+
+    ranked = sorted(
+        totals,
+        key=lambda name: (order.index(name) if name in order else len(order), name),
+    )
+    return [
+        {
+            "name": name,
+            "passed": totals[name][0],
+            "total": totals[name][1],
+            "score": round(totals[name][0] / totals[name][1] * 100, 1),
+        }
+        for name in ranked
+    ]
+
+
 def _empty_result(job: JobSpec) -> dict:
     """Result shape for a job that finished without scoring a task."""
     return {
@@ -536,6 +571,8 @@ def _empty_result(job: JobSpec) -> dict:
         "trace_coverage": 0.0,
         "median_thinking_time": 0.0,
         "median_time_to_answer": 0.0,
+        "groups": [],
+        "note": "",
         "tasks": [],
         **_result_metadata(job),
     }
@@ -870,6 +907,12 @@ class Engine:
             "median_time_to_answer": round(median(answer_times), 1)
             if answer_times
             else 0.0,
+            # Optional, benchmark-provided context: a per-group breakdown and a
+            # one-line note describing how the suite was configured.
+            "groups": group_breakdown(
+                records, tuple(getattr(bench, "group_order", ()))
+            ),
+            "note": str(getattr(bench, "report_note", "") or ""),
             "loop_kill_enabled": self.loop_kill_enabled,
             "loop_kill_percent": self.loop_kill_percent,
             "loop_kill_seconds": self.loop_kill_seconds,
@@ -884,6 +927,7 @@ class Engine:
                     "response": record.response,
                     "error": record.error,
                     "entry_point": record.entry_point,
+                    "group": record.group,
                     "thinking": record.thinking,
                     "output_tokens": record.output_tokens,
                     "done_reason": record.done_reason,
@@ -1207,6 +1251,7 @@ class Engine:
             score=evaluation_score,
             error=error,
             entry_point=entry_point,
+            group=str(task.metadata.get("group", "")),
             thinking=gen.get("thinking", ""),
             output_tokens=int(gen.get("eval_count", 0)),
             done_reason=gen.get("done_reason", ""),

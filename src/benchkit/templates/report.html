@@ -631,10 +631,18 @@
       </table></div>
     </article>`;
 
+    // Suites that label their tasks (LiveCodeBench by difficulty) carry a
+    // breakdown and a note describing how the suite was configured.
+    const breakdown = row => [
+      (row.groups || []).map(group => `${escapeHtml(group.name)} ${number(group.score).toFixed(1)}% (${group.passed}/${group.total})`).join(" · "),
+      row.note ? escapeHtml(row.note) : "",
+    ].filter(Boolean).join(" — ");
+
     document.getElementById("details").innerHTML = rows
       .sort((a, b) => number(b.score) - number(a.score))
       .map(row => `<details>
         <summary><span class="detail-title">${escapeHtml(row.model)} / ${escapeHtml(benchmarkLabel(row))}</span><span class="detail-score">${row.passed}/${row.total} · ${number(row.score).toFixed(1)}% · ${aggregateSpeed(row).toFixed(1)} agg tok/s · ${streamSpeed(row).toFixed(1)} stream · ${effectiveConcurrency(row).toFixed(2)}x eff</span></summary>
+        ${breakdown(row) ? `<p class="section-note">${breakdown(row)}</p>` : ""}
         <div class="tasks">${(row.tasks || []).map(task => `<article class="task">
           <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} tokens</span><span><span class="status ${task.passed ? "pass" : number(task.score) > 0 ? "partial" : ""}">${task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.error ? "ERROR" : task.passed ? "PASS" : number(task.score) > 0 ? `PARTIAL ${number(task.score).toFixed(0)}%` : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(loopLabel(task))}</span></span></div>
           <div class="exchange">

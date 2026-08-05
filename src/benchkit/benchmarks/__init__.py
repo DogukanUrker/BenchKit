@@ -8,6 +8,7 @@ from benchkit.benchmarks.gsm8k import GSM8K
 from benchkit.benchmarks.hellaswag import HellaSwag
 from benchkit.benchmarks.humaneval import HumanEval
 from benchkit.benchmarks.ifeval import IFEval
+from benchkit.benchmarks.livecodebench import LiveCodeBench
 from benchkit.benchmarks.mbpp import MBPP
 from benchkit.benchmarks.mmlu import MMLU
 from benchkit.benchmarks.openbookqa import OpenBookQA
@@ -24,6 +25,7 @@ REGISTRY: dict[str, type] = {
     "humaneval-plus": HumanEvalPlus,
     "mbpp": MBPP,
     "mbpp-plus": MBPPPlus,
+    "livecodebench": LiveCodeBench,
     "gsm8k": GSM8K,
     "ifeval": IFEval,
     "ruler": RULER,
@@ -43,6 +45,9 @@ REGISTRY: dict[str, type] = {
 # `commonsense`, `instruction`, `retrieval`, `long-context`), how it is answered
 # (`generative`, `mcq`) and how much signal it carries on target models.
 #
+# `fresh` marks a suite whose problems are timestamped and scored inside a
+# date window, so memorization of the answers is structurally impossible.
+#
 # `saturated` means current models score near the ceiling, so the suite mostly
 # buys comparability with published numbers. `low-signal` is the wider bucket:
 # every saturated suite plus GPQA, which is the opposite case - small models sit
@@ -54,6 +59,7 @@ TAGS: dict[str, tuple[str, ...]] = {
     "humaneval-plus": ("code", "generative"),
     "mbpp": ("code", "generative"),
     "mbpp-plus": ("code", "generative"),
+    "livecodebench": ("code", "generative", "fresh"),
     "gsm8k": ("math", "generative"),
     "ifeval": ("instruction", "generative"),
     "ruler": ("long-context", "retrieval", "generative"),

@@ -35,6 +35,7 @@ DESCRIPTIONS = {
     "humaneval-plus": "HumanEval with 122k+ tougher EvalPlus test inputs",
     "mbpp": "short Python functions from natural-language specifications",
     "mbpp-plus": "sanitized MBPP tasks with 39k+ EvalPlus test inputs",
+    "livecodebench": "dated contest problems scored after a model's cutoff",
     "gsm8k": "multi-step grade-school math problems with exact numeric answers",
     "ifeval": "prompts with code-checkable instruction-following constraints",
     "ruler": "20 synthetic tasks per context at 4k–128k; very slow",
