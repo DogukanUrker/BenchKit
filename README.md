@@ -372,7 +372,7 @@ uv run ruff format .        # format
 uv run pytest               # tests
 ```
 
-CI runs lint, the test suite on Python 3.11-3.13, an offline `--demo` smoke run
+CI runs lint, the test suite on Python 3.14, an offline `--demo` smoke run
 and a package build on every pull request. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
