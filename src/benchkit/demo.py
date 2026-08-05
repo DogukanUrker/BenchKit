@@ -19,7 +19,7 @@ from benchkit.benchmarks.base import Task
 from benchkit.client import GenerationUpdate
 from benchkit.engine import benchmark, prompt_for, tasks_for
 
-LETTERS = "ABCD"
+LETTERS = "ABCDEFGHIJ"
 
 DEMO_MODELS = [
     {"name": "demo-nano:0.5b", "size": 0.4e9, "skill": 0.30, "speed": 240.0},
@@ -54,8 +54,16 @@ def _canonical_solutions(key: str) -> dict[str, str]:
     return solutions
 
 
-def _wrong_letter(answer: str) -> str:
-    options = [letter for letter in LETTERS if letter != answer]
+def _letters(task: Task) -> str:
+    """Option letters a multiple-choice task actually offers."""
+    choices = task.metadata.get("choices")
+    if isinstance(choices, (list, tuple)) and choices:
+        return LETTERS[: len(choices)]
+    return LETTERS[:4]
+
+
+def _wrong_letter(answer: str, letters: str) -> str:
+    options = [letter for letter in letters if letter != answer]
     return random.choice(options) if options else "A"
 
 
@@ -208,7 +216,7 @@ def _good_answer(task: Task, solution: str | None) -> str:
         return "Yes" if answer else "No"
     if isinstance(answer, str) and answer.lower() in {"yes", "no"}:
         return answer.capitalize()
-    if isinstance(answer, str) and answer.upper() in set(LETTERS):
+    if isinstance(answer, str) and answer.upper() in _letters(task):
         return f"The answer is {answer.upper()}."
     if answer is not None:
         return f"Working through it step by step.\n\n#### {answer}"
@@ -231,8 +239,8 @@ def _bad_answer(task: Task, has_solution: bool) -> str:
         return "No" if answer else "Yes"
     if isinstance(answer, str) and answer.lower() in {"yes", "no"}:
         return "No" if answer.lower() == "yes" else "Yes"
-    if isinstance(answer, str) and answer.upper() in set(LETTERS):
-        return f"The answer is {_wrong_letter(answer.upper())}."
+    if isinstance(answer, str) and answer.upper() in _letters(task):
+        return f"The answer is {_wrong_letter(answer.upper(), _letters(task))}."
     if answer is not None:
         return "Let me compute that.\n\n#### 42"
     return "B"

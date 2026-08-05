@@ -37,6 +37,23 @@ all 57 MMLU subjects. BenchKit evaluates it zero-shot.
 - Source: <https://github.com/hendrycks/test>
 - Dataset license: MIT; see `MMLU_LICENSE.txt`
 
+## MMLU-Pro
+
+`mmlu_pro.jsonl` is a transformed copy of the MMLU-Pro test split: ten-option
+questions across 14 categories, filtered by the authors for ones that require
+reasoning. Only the schema changed - `question_id` became a namespaced
+`task_id` and `options` became `choices`, with the `N/A` padding left by the
+authors' pruning pass dropped, which is why some questions carry fewer than ten
+choices. Regenerate it with `uv run --with datasets python
+scripts/build_mmlu_pro.py`. BenchKit evaluates it zero-shot, and `mmlu-pro`
+runs a seeded 100-per-category slice of the file while `mmlu-pro-full` runs all
+of it.
+
+- Source: <https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro>
+- Code: <https://github.com/TIGER-AI-Lab/MMLU-Pro>
+- Paper: <https://arxiv.org/abs/2406.01574>
+- Dataset license: MIT
+
 ## OpenBookQA
 
 `openbookqa.jsonl` is a transformed copy of the 500-question OpenBookQA test

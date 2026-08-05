@@ -40,6 +40,8 @@ DESCRIPTIONS = {
     "ruler": "20 synthetic tasks per context at 4k–128k; very slow",
     "arc": "challenging grade-school science questions with four choices",
     "gpqa": "expert-written graduate science questions designed to resist search",
+    "mmlu-pro": "harder MMLU successor: ten options and reasoning-heavy questions",
+    "mmlu-pro-full": "every MMLU-Pro question instead of the stratified slice",
     "mmlu": "zero-shot coverage of 57 academic and professional subjects",
     "openbookqa": "elementary science questions requiring facts plus reasoning",
     "winogrande": "commonsense pronoun resolution in ambiguous sentences",
