@@ -257,6 +257,7 @@ never duplicated.
 | HumanEval+ | `humaneval-plus` |    164 | code generative                    | HumanEval with more than 122,000 tougher EvalPlus test inputs       |
 | MBPP       | `mbpp`           |    500 | code generative                    | Short Python functions from natural-language specifications         |
 | MBPP+      | `mbpp-plus`      |    378 | code generative                    | Sanitized MBPP with more than 39,000 EvalPlus test inputs           |
+| LiveCodeBench | `livecodebench` | window | code generative fresh            | Dated contest problems, scored only after a model's training cutoff |
 | GSM8K      | `gsm8k`          |  1,319 | math generative                    | Multi-step grade-school math with exact numeric answers             |
 | IFEval     | `ifeval`         |    541 | instruction generative             | Instruction following under constraints a checker can verify        |
 | RULER      | `ruler`          | 20 × 6 | long-context retrieval generative  | Multi-key retrieval and variable tracking from 4K through 128K      |
@@ -272,6 +273,65 @@ never duplicated.
 
 More coming soon.
 
+### LiveCodeBench
+
+Every other code suite here is contaminated: HumanEval and MBPP predate the
+models being scored, so a high number cannot separate "can generate code from a
+spec" from "has seen the test set". LiveCodeBench timestamps its problems, so a
+run can be restricted to problems published *after* a model's training cutoff.
+That window is the benchmark - without it, this is just another set the model
+may have memorized.
+
+```bash
+uv run benchkit lcb-prepare                       # fetch and cache the dataset
+uv run benchkit --headless --models qwen3:8b \
+  --benchmarks livecodebench --lcb-after 2025-01  # score the fresh window only
+```
+
+The default window is `2024-08` onwards, which is past the cutoff of most 4-35B
+models. `--lcb-after all` scores the whole release, contamination included.
+`--lcb-before` closes the window at the top. Whichever window is in force is
+printed under the summary table and written into `results.md` and `results.json`,
+so a score is always self-documenting.
+
+Scores are reported per difficulty as well as in aggregate:
+
+```
+livecodebench · qwen3:8b · easy 41.7% (10/24) · medium 5.6% (1/18) · hard 0% (0/11)
+```
+
+The aggregate on its own is close to useless in this size band - medium and hard
+collapse toward zero and the total becomes a flat line. The easy tier is where
+models this size actually separate.
+
+BenchKit uses the `code_generation_lite` release (pruned test cases, scoring
+within about a point of the full release). It is not bundled: v6 is 1,055
+problems with their test cases attached, so it is downloaded once and cached
+under `~/.cache/benchkit/livecodebench`, the way the EvalPlus suites fetch their
+data. Hidden tests run in the same sandbox as the other code suites, with both
+call-a-function and stdin/stdout problems supported.
+
+| Variable | Purpose |
+| -------- | ------- |
+| `BENCHKIT_LCB_AFTER` / `BENCHKIT_LCB_BEFORE` | Window bounds, same as `--lcb-after` / `--lcb-before` (`YYYY-MM` or `YYYY-MM-DD`) |
+| `BENCHKIT_LCB_DATASET` | Use an already-downloaded copy: a directory of `test*.jsonl` shards, or one file |
+| `BENCHKIT_LCB_CACHE` | Where the raw and prepared dataset live |
+| `BENCHKIT_LCB_MAX_TESTS` | Test cases kept per problem, public ones first (default 25) |
+| `BENCHKIT_LCB_BASE_URL` | Alternative download location for the release shards |
+
+Known limits, worth reading before quoting a number:
+
+- Competitive-programming patterns dominate. A strong score predicts
+  algorithmic code generation, not software engineering: no multi-file code, no
+  long context, no debugging of existing code.
+- Solutions are long, and a truncated one scores as a failure. BenchKit sets no
+  token ceiling of its own, so the limit is whatever the server enforces - check
+  `n_predict` / `num_predict` on the server side, and give the run headroom on
+  `BENCHKIT_TIMEOUT` (300s by default) before reading a low score as ability.
+- Test cases are capped per problem (25 by default) to keep a full run and its
+  cache manageable; this is a deliberate, documented deviation from the official
+  harness.
+
 ### Tags
 
 Every benchmark carries tags for what it measures (`code`, `math`,
@@ -284,12 +344,14 @@ is answered (`generative`, `mcq`) and how much signal it still carries on the
 - `low-signal` - the wider bucket: every saturated suite plus GPQA, which is
   the opposite case, since small models sit near the 25% floor and are
   separated just as poorly.
+- `fresh` - problems are timestamped and scored inside a date window, so
+  memorization of the answers is structurally impossible.
 
 Filter by tag in the picker's filter box or from the CLI, with a leading `-`
 to exclude:
 
 ```bash
-uv run benchkit --list --tag code            # the five code suites
+uv run benchkit --list --tag code            # every code suite
 uv run benchkit --list --tag mcq,-saturated  # multiple choice that still moves
 uv run benchkit --headless --models qwen3:8b --tag -low-signal
 ```
@@ -361,6 +423,11 @@ class MyBenchmark:
 ```
 
 Then add it to `REGISTRY` in `benchmarks/__init__.py`. Done.
+
+Two optional extras are picked up automatically: put a `group` in a task's
+metadata and every report gains a per-group breakdown (LiveCodeBench uses the
+problem difficulty, ordered by a `group_order` attribute), and a `report_note`
+property is printed with the results to document how the suite was configured.
 
 ## Development
 

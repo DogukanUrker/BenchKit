@@ -7,7 +7,9 @@ scriptable path that prints to stdout instead.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from collections import Counter
 
 from dotenv import load_dotenv
 from rich import box
@@ -16,6 +18,14 @@ from rich.table import Table
 from rich.text import Text
 
 from benchkit.benchmarks import REGISTRY, all_tags, keys_for_tags, tags_for
+from benchkit.benchmarks.livecodebench import (
+    DEFAULT_AFTER,
+    DIFFICULTIES,
+    RELEASE,
+    LiveCodeBench,
+    prepare,
+    window,
+)
 from benchkit.client import InferenceClient
 from benchkit.engine import (
     JobSpec,
@@ -28,7 +38,7 @@ from benchkit.engine import (
 from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
 from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
 from benchkit.perf_report import save_profile
-from benchkit.report import save
+from benchkit.report import group_summary, save
 from benchkit.runner import run
 from benchkit.tui import run_tui
 
@@ -43,8 +53,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=("perf",),
-        help="Run a dedicated model performance profile",
+        choices=("perf", "lcb-prepare"),
+        help=(
+            "perf: run a dedicated model performance profile. "
+            "lcb-prepare: download and cache the LiveCodeBench dataset"
+        ),
     )
     parser.add_argument(
         "perf_model",
@@ -86,6 +99,22 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--list",
         action="store_true",
         help="Print the available benchmarks and exit",
+    )
+    parser.add_argument(
+        "--lcb-after",
+        default="",
+        metavar="YYYY-MM",
+        help=(
+            "LiveCodeBench: score only problems released on or after this "
+            f"contest date (default: {DEFAULT_AFTER}; 'all' scores the whole "
+            "release, contamination included)"
+        ),
+    )
+    parser.add_argument(
+        "--lcb-before",
+        default="",
+        metavar="YYYY-MM",
+        help="LiveCodeBench: score only problems released up to this date",
     )
     parser.add_argument(
         "-v",
@@ -150,6 +179,18 @@ def _outcome_counts(result: dict) -> tuple[int, int, int]:
     failed = sum(not task.get("passed") and not task.get("error") for task in tasks)
     errors = sum(not task.get("passed") and bool(task.get("error")) for task in tasks)
     return int(result["passed"]), failed, errors
+
+
+def _breakdown_lines(results: list[dict]) -> list[str]:
+    """Per-group scores and suite notes printed beneath the summary table."""
+    lines: list[str] = []
+    for result in results:
+        summary = group_summary(result)
+        if summary:
+            lines.append(f"{result['benchmark']} · {result['model']} · {summary}")
+    for note in sorted({result.get("note", "") for result in results} - {""}):
+        lines.append(note)
+    return lines
 
 
 def _split_tags(value: str) -> tuple[list[str], list[str]]:
@@ -255,8 +296,10 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
         try:
             total = slice_task_count(key)
         except Exception as exc:
-            console.print(f"[red]Could not load {key}:[/red] {exc}")
-            sys.exit(1)
+            # A suite that fetches its dataset on demand has no count until it
+            # runs. Keep the slice syntax check and let the run resolve the rest.
+            console.print(f"[yellow]{key}:[/yellow] [dim]{exc}[/dim]")
+            total = 0
         try:
             parse_slice(slice_spec, total)
         except SliceError as exc:
@@ -361,6 +404,9 @@ def _headless(args: argparse.Namespace) -> None:
 
     console.print()
     console.print(table)
+
+    for line in _breakdown_lines(results):
+        console.print(f"[dim]{line}[/dim]")
 
     out = save(results, provider=getattr(client, "label", ""), host=client.host)
     console.print(f"[dim]Saved:[/dim] [white]{out}[/white]")
@@ -553,12 +599,63 @@ def _perf(args: argparse.Namespace) -> None:
     )
 
 
+def _apply_livecodebench_window(args: argparse.Namespace) -> None:
+    """Publish the LiveCodeBench window so every front-end sees the same one."""
+    if args.lcb_after.strip():
+        os.environ["BENCHKIT_LCB_AFTER"] = args.lcb_after.strip()
+    if args.lcb_before.strip():
+        os.environ["BENCHKIT_LCB_BEFORE"] = args.lcb_before.strip()
+    try:
+        window()
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
+
+
+def _lcb_prepare() -> None:
+    """Fetch and normalize the LiveCodeBench dataset ahead of a run."""
+    active = window()
+    console.print(
+        "[bold]BenchKit[/bold] [dim]preparing LiveCodeBench "
+        f"{RELEASE} · window {active.label}[/dim]"
+    )
+    console.print("[dim]· downloading and decoding, this takes a while[/dim]")
+    try:
+        manifest = prepare()
+        counts = Counter(
+            str(task.metadata.get("difficulty", "unknown"))
+            for task in LiveCodeBench().load_tasks()
+        )
+    except (RuntimeError, ValueError, OSError) as exc:
+        console.print(f"[red]LiveCodeBench preparation failed:[/red] {exc}")
+        sys.exit(1)
+
+    console.print(
+        f"[dim]Cached:[/dim] {manifest['problems']:,} problems "
+        f"({manifest['first_contest_date']} to {manifest['last_contest_date']}) "
+        f"· up to {manifest['max_tests']} tests each"
+    )
+    in_window = sum(counts.values())
+    breakdown = " · ".join(
+        f"{name} {counts[name]}" for name in DIFFICULTIES if counts.get(name)
+    )
+    console.print(
+        f"[white]{in_window:,}[/white] problems in {active.label}"
+        + (f" [dim]({breakdown})[/dim]" if breakdown else "")
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     load_dotenv()
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    _apply_livecodebench_window(args)
 
     if args.list:
         _list_benchmarks(args.tag)
+        return
+
+    if args.command == "lcb-prepare":
+        _lcb_prepare()
         return
 
     if args.command == "perf":

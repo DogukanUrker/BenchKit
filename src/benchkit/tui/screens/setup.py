@@ -35,6 +35,7 @@ DESCRIPTIONS = {
     "humaneval-plus": "HumanEval with 122k+ tougher EvalPlus test inputs",
     "mbpp": "short Python functions from natural-language specifications",
     "mbpp-plus": "sanitized MBPP tasks with 39k+ EvalPlus test inputs",
+    "livecodebench": "dated contest problems scored after a model's cutoff",
     "gsm8k": "multi-step grade-school math problems with exact numeric answers",
     "ifeval": "prompts with code-checkable instruction-following constraints",
     "ruler": "20 synthetic tasks per context at 4k–128k; very slow",
@@ -119,6 +120,7 @@ class SetupScreen(Screen[None]):
         self.bench_order: list[str] = list(REGISTRY.keys())
         self.selected_benchmarks: set[str] = set()
         self.counts: dict[str, int] = {}
+        self.count_errors: dict[str, str] = {}
         self.limits: dict[str, str] = {}
         self.template_status: dict[str, str] = {}
         self.checking_templates = False
@@ -184,14 +186,23 @@ class SetupScreen(Screen[None]):
     @work(thread=True, exclusive=True, group="counts")
     def _count_tasks(self) -> None:
         for key in list(REGISTRY):
+            reason = ""
             try:
                 count = task_count(key)
-            except Exception:
+            except Exception as exc:
+                # A suite that fetches its dataset on demand has no count until
+                # it is cached. Carry the reason so the row can say what to do
+                # about it instead of only "unavailable".
                 count = -1
-            self.app.call_from_thread(self._count_ready, key, count)
+                reason = str(exc)
+            self.app.call_from_thread(self._count_ready, key, count, reason)
 
-    def _count_ready(self, key: str, count: int) -> None:
+    def _count_ready(self, key: str, count: int, reason: str = "") -> None:
         self.counts[key] = count
+        if reason:
+            self.count_errors[key] = reason
+        else:
+            self.count_errors.pop(key, None)
         self._rebuild_benchmarks()
         self._refresh_summary()
 
@@ -244,6 +255,8 @@ class SetupScreen(Screen[None]):
         if limit:
             accent = score_palette(self.app.current_theme.dark)["mid"]
             text.append(f"  {slice_label(limit)}", style=f"bold {accent}")
+        elif key in self.count_errors:
+            text.append(f"  {self.count_errors[key]}", style="yellow")
         else:
             text.append(f"  {DESCRIPTIONS.get(key, '')}", style="dim")
         return text

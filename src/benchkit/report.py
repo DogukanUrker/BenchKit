@@ -17,6 +17,14 @@ def _fmt_time(s: float) -> str:
     return f"{s}s"
 
 
+def group_summary(result: dict) -> str:
+    """One-line per-group breakdown, e.g. ``easy 62.5% (5/8) · hard 0% (0/6)``."""
+    return " · ".join(
+        f"{group['name']} {group['score']}% ({group['passed']}/{group['total']})"
+        for group in result.get("groups") or []
+    )
+
+
 def _safe_json(data: object) -> str:
     """Serialize data for an HTML script element without allowing tag breakout."""
     return (
@@ -67,8 +75,16 @@ def save(
     with open(out / "results.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    # Summary CSV (one row per model×benchmark, no tasks column)
-    summary = [{k: v for k, v in r.items() if k != "tasks"} for r in results]
+    # Summary CSV (one row per model×benchmark, no tasks column). The group
+    # breakdown collapses to one readable cell; results.json keeps it structured.
+    summary = [
+        {
+            key: group_summary(result) if key == "groups" else value
+            for key, value in result.items()
+            if key != "tasks"
+        }
+        for result in results
+    ]
     if summary:
         with open(out / "results.csv", "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=summary[0].keys())
@@ -106,6 +122,32 @@ def save(
             "wall time. Stream tok/s uses summed server decode time. Effective "
             "concurrency is summed request time divided by wall time.\n"
         )
+
+        # Suites that label their tasks (LiveCodeBench by difficulty) report the
+        # split as well: the aggregate hides where a small model actually fails.
+        graded = [result for result in results if result.get("groups")]
+        if graded:
+            f.write("\n## Breakdown\n\n")
+            for result in graded:
+                f.write(f"**{result['model']} / {result['benchmark']}**\n\n")
+                if result.get("note"):
+                    f.write(f"{result['note']}\n\n")
+                f.write("| Group | Score | Passed | Total |\n")
+                f.write("|-------|-------|--------|-------|\n")
+                for group in result["groups"]:
+                    f.write(
+                        f"| {group['name']} | {group['score']}% "
+                        f"| {group['passed']} | {group['total']} |\n"
+                    )
+                f.write("\n")
+
+        notes = {
+            result["note"]
+            for result in results
+            if result.get("note") and not result.get("groups")
+        }
+        for note in sorted(notes):
+            f.write(f"\n{note}\n")
 
         f.write("\n---\n\n")
         for result in results:
