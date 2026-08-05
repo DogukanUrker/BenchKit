@@ -185,4 +185,5 @@ tests/validate_gemini.py
 /tests/*
 !/tests/test_looping.py
 !/tests/test_runner.py
+!/tests/test_retry.py
 .DS_Store
