@@ -14,10 +14,11 @@ import os
 import random
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 import httpx
 
@@ -81,8 +82,8 @@ def retry_after_seconds(exc: Exception) -> float | None:
     if deadline is None:
         return None
     if deadline.tzinfo is None:
-        deadline = deadline.replace(tzinfo=timezone.utc)
-    return max(0.0, (deadline - datetime.now(timezone.utc)).total_seconds())
+        deadline = deadline.replace(tzinfo=UTC)
+    return max(0.0, (deadline - datetime.now(UTC)).total_seconds())
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,7 @@ class RetryPolicy:
     max_retry_after: float = 60.0
 
     @classmethod
-    def from_env(cls) -> "RetryPolicy":
+    def from_env(cls) -> RetryPolicy:
         return cls(
             attempts=max(1, _env_int("BENCHKIT_RETRIES", 3)),
             base_delay=max(0.0, _env_float("BENCHKIT_RETRY_BASE_DELAY", 0.5)),

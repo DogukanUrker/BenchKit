@@ -121,7 +121,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def _fmt_time(seconds: float) -> str:
-    seconds = int(round(seconds))
+    seconds = round(seconds)
     if seconds >= 60:
         return f"{seconds // 60}m {seconds % 60}s"
     return f"{seconds}s"
@@ -140,9 +140,7 @@ def _score_text(score: float) -> Text:
 def _outcome_counts(result: dict) -> tuple[int, int, int]:
     """Return pass, ordinary failure and error-task counts for a result."""
     tasks = result.get("tasks", [])
-    failed = sum(
-        not task.get("passed") and not task.get("error") for task in tasks
-    )
+    failed = sum(not task.get("passed") and not task.get("error") for task in tasks)
     errors = sum(not task.get("passed") and bool(task.get("error")) for task in tasks)
     return int(result["passed"]), failed, errors
 
@@ -252,9 +250,7 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
         specs.append((key, slice_spec))
 
     if not specs:
-        console.print(
-            "[red]--benchmarks or --tag is required with --headless[/red]"
-        )
+        console.print("[red]--benchmarks or --tag is required with --headless[/red]")
         sys.exit(1)
 
     return [JobSpec(model, key, spec) for model in models for key, spec in specs]

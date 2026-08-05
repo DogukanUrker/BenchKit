@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Literal
+from typing import Literal
 from urllib.parse import quote
 
 import httpx
@@ -127,11 +129,9 @@ def _trace_status(thinking: str, channel_seen: bool) -> str:
 
 def _close_response(response: httpx.Response) -> None:
     """Best-effort close for deadline and user-cancellation watchers."""
-    try:
+    # The stream may have completed at the same instant as a watcher.
+    with contextlib.suppress(Exception):
         response.close()
-    except Exception:
-        # The stream may have completed at the same instant as a watcher.
-        pass
 
 
 def _start_deadline(
@@ -245,7 +245,7 @@ class InferenceClient:
     _parallelism: dict[str, int] = field(default_factory=dict, init=False, repr=False)
 
     @classmethod
-    def from_env(cls) -> "InferenceClient":
+    def from_env(cls) -> InferenceClient:
         provider = os.environ.get("BENCHKIT_PROVIDER", "auto").lower()
         if provider not in {"auto", "openai", "ollama"}:
             raise ValueError("BENCHKIT_PROVIDER must be one of: auto, openai, ollama")
@@ -292,7 +292,7 @@ class InferenceClient:
 
     def _retry_stream(
         self,
-        stream: Callable[["_StreamState"], dict],
+        stream: Callable[[_StreamState], dict],
         cancel_event: threading.Event | None,
     ) -> dict:
         """Retry a generation only while nothing has been streamed to the caller.

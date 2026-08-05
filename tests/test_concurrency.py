@@ -321,9 +321,9 @@ class ConcurrentEngineTests(unittest.TestCase):
 
 class ConcurrentTUITests(unittest.IsolatedAsyncioTestCase):
     async def test_run_screen_accepts_interleaved_task_events(self) -> None:
-        import benchkit.tui.app as tui_app_module
         from textual.widgets import Static
 
+        import benchkit.tui.app as tui_app_module
         from benchkit.tui.app import BenchKitApp
         from benchkit.tui.screens.run import RunScreen
         from benchkit.tui.widgets import StatCard

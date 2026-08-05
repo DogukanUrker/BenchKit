@@ -41,7 +41,7 @@ def extract_choice(response: str, choices: list[str] | None = None) -> str | Non
 
     if choices:
         lowered = text.lower()
-        for letter, choice in zip("ABCD", choices):
+        for letter, choice in zip("ABCD", choices, strict=False):
             if choice and choice.lower() in lowered:
                 return letter
 

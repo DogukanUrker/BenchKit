@@ -17,10 +17,10 @@ BLOCKED_MODULES = {
     "multiprocessing",
 }
 
-SANDBOX_HEADER = """
+SANDBOX_HEADER = f"""
 import builtins as _b
 _orig = _b.__import__
-_blocked = {blocked}
+_blocked = {BLOCKED_MODULES!r}
 
 def _safe(name, *a, **kw):
     if name.split(".")[0] in _blocked:
@@ -28,7 +28,7 @@ def _safe(name, *a, **kw):
     return _orig(name, *a, **kw)
 
 _b.__import__ = _safe
-""".format(blocked=repr(BLOCKED_MODULES))
+"""
 
 
 def execute(code: str, timeout: int = 10) -> bool:

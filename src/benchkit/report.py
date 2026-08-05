@@ -11,7 +11,7 @@ from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_
 
 
 def _fmt_time(s: float) -> str:
-    s = int(round(s))
+    s = round(s)
     if s >= 60:
         return f"{s // 60}m {s % 60}s"
     return f"{s}s"

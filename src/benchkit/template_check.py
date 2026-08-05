@@ -113,9 +113,7 @@ class _NativeAPI:
             if response.status_code in {404, 405}:
                 if self.route is None:
                     continue
-                raise NativeEndpointUnavailable(
-                    f"{path} is not exposed by this server"
-                )
+                raise NativeEndpointUnavailable(f"{path} is not exposed by this server")
             response.raise_for_status()
             data = response.json()
             if not isinstance(data, dict):

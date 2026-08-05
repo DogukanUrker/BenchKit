@@ -13,7 +13,9 @@ SYSTEM = "Complete the following sentence. Reply with ONLY the letter (A, B, C, 
 
 
 def _format_choices(choices: list[str]) -> str:
-    return "\n".join(f"{letter}) {choice}" for letter, choice in zip("ABCD", choices))
+    return "\n".join(
+        f"{letter}) {choice}" for letter, choice in zip("ABCD", choices, strict=False)
+    )
 
 
 class HellaSwag:

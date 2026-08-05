@@ -8,8 +8,8 @@ from benchkit.benchmarks.gsm8k import GSM8K
 from benchkit.benchmarks.hellaswag import HellaSwag
 from benchkit.benchmarks.humaneval import HumanEval
 from benchkit.benchmarks.ifeval import IFEval
-from benchkit.benchmarks.mmlu import MMLU
 from benchkit.benchmarks.mbpp import MBPP
+from benchkit.benchmarks.mmlu import MMLU
 from benchkit.benchmarks.openbookqa import OpenBookQA
 from benchkit.benchmarks.piqa import PIQA
 from benchkit.benchmarks.quickbench import QuickBench
