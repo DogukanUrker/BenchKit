@@ -6,7 +6,7 @@ import unittest
 
 from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.mcq import extract_choice
-from benchkit.benchmarks.mmlu_pro import LETTERS, MMLUPro, _stratified
+from benchkit.benchmarks.mmlu_pro import LETTERS, MMLUPro
 
 
 class ExtractChoiceTest(unittest.TestCase):
@@ -92,28 +92,6 @@ class MMLUProTest(unittest.TestCase):
         benchmark = MMLUPro()
         self.assertTrue(benchmark.evaluate(task, "Working through it, the answer is D"))
         self.assertFalse(benchmark.evaluate(task, "The answer is (J)."))
-
-    def test_stratified_is_balanced_deterministic_and_ordered(self) -> None:
-        tasks = [
-            _task(index, category)
-            for category in ("math", "law", "health")
-            for index in range(30)
-        ]
-        picked = _stratified(tasks, 10)
-        self.assertEqual(len(picked), 30)
-        for category in ("math", "law", "health"):
-            found = [t for t in picked if t.metadata["category"] == category]
-            self.assertEqual(len(found), 10)
-
-        self.assertEqual(
-            [task.id for task in picked], [task.id for task in _stratified(tasks, 10)]
-        )
-        order = [tasks.index(task) for task in picked]
-        self.assertEqual(order, sorted(order))
-
-    def test_stratified_keeps_small_categories_whole(self) -> None:
-        tasks = [_task(index, "other") for index in range(4)]
-        self.assertEqual(len(_stratified(tasks, 10)), 4)
 
 
 if __name__ == "__main__":

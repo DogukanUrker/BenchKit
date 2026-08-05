@@ -10,7 +10,7 @@ from benchkit.benchmarks.humaneval import HumanEval
 from benchkit.benchmarks.ifeval import IFEval
 from benchkit.benchmarks.mbpp import MBPP
 from benchkit.benchmarks.mmlu import MMLU
-from benchkit.benchmarks.mmlu_pro import MMLUPro, MMLUProFull
+from benchkit.benchmarks.mmlu_pro import MMLUPro
 from benchkit.benchmarks.openbookqa import OpenBookQA
 from benchkit.benchmarks.piqa import PIQA
 from benchkit.benchmarks.quickbench import QuickBench
@@ -30,7 +30,6 @@ REGISTRY: dict[str, type] = {
     "ruler": RULER,
     "gpqa": GPQA,
     "mmlu-pro": MMLUPro,
-    "mmlu-pro-full": MMLUProFull,
     # Classic suites - kept for comparability, largely saturated.
     "mmlu": MMLU,
     "arc": ARC,
@@ -62,7 +61,6 @@ TAGS: dict[str, tuple[str, ...]] = {
     "ruler": ("long-context", "retrieval", "generative"),
     "gpqa": ("knowledge", "mcq", "low-signal"),
     "mmlu-pro": ("knowledge", "mcq"),
-    "mmlu-pro-full": ("knowledge", "mcq"),
     "mmlu": ("knowledge", "mcq", "saturated", "low-signal"),
     "arc": ("knowledge", "mcq", "saturated", "low-signal"),
     "openbookqa": ("knowledge", "mcq", "saturated", "low-signal"),

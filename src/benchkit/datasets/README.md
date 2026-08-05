@@ -45,9 +45,7 @@ reasoning. Only the schema changed - `question_id` became a namespaced
 `task_id` and `options` became `choices`, with the `N/A` padding left by the
 authors' pruning pass dropped, which is why some questions carry fewer than ten
 choices. Regenerate it with `uv run --with datasets python
-scripts/build_mmlu_pro.py`. BenchKit evaluates it zero-shot, and `mmlu-pro`
-runs a seeded 100-per-category slice of the file while `mmlu-pro-full` runs all
-of it.
+scripts/build_mmlu_pro.py`. BenchKit evaluates it zero-shot.
 
 - Source: <https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro>
 - Code: <https://github.com/TIGER-AI-Lab/MMLU-Pro>
