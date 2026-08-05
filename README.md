@@ -10,7 +10,7 @@ Not vibes. Actual scores.
 
 <img src="https://img.shields.io/badge/Python-3.11%2B-2563EB?style=flat-square&logo=python&logoColor=white&labelColor=0b0b0b" alt="Python 3.11+">
 <img src="https://img.shields.io/badge/TUI-Textual-60A5FA?style=flat-square&labelColor=0b0b0b" alt="Built with Textual">
-<img src="https://img.shields.io/badge/Suites-15-34D399?style=flat-square&labelColor=0b0b0b" alt="15 benchmark suites">
+<img src="https://img.shields.io/badge/Suites-16-34D399?style=flat-square&labelColor=0b0b0b" alt="16 benchmark suites">
 <img src="https://img.shields.io/badge/License-Apache%202.0-6B7280?style=flat-square&labelColor=0b0b0b" alt="Apache 2.0">
 
 </div>
@@ -122,7 +122,9 @@ For CI and scripts, skip the TUI entirely:
 ```bash
 uv run benchkit --headless --models qwen3:8b,gemma3:12b --benchmarks humaneval:20,gsm8k
 uv run benchkit --headless --models all --benchmarks quickbench --verbose
+uv run benchkit --headless --models qwen3:8b --tag code
 uv run benchkit --list
+uv run benchkit --list --tag mcq,-saturated
 ```
 
 `--verbose` prints every prompt, available reasoning trace and response. Reports
@@ -201,38 +203,54 @@ never duplicated.
 
 ## Benchmarks
 
-Benchmarks are grouped into the suites current models still separate on, and
-the classic suites that most current models saturate. Both groups run exactly
-the same way; the split only decides how they are listed in the app and in
-`--list`.
-
-### Current
-
-| Benchmark  | Key              |  Tasks | What it tests                                                       |
-| ---------- | ---------------- | -----: | ------------------------------------------------------------------- |
-| QuickBench | `quickbench`     |     20 | Tiny Python tasks for a fast end-to-end sanity check                |
-| HumanEval  | `humaneval`      |    164 | Python function completion with the original unit tests             |
-| HumanEval+ | `humaneval-plus` |    164 | HumanEval with more than 122,000 tougher EvalPlus test inputs       |
-| MBPP       | `mbpp`           |    500 | Short Python functions from natural-language specifications         |
-| MBPP+      | `mbpp-plus`      |    378 | Sanitized MBPP with more than 39,000 EvalPlus test inputs           |
-| GSM8K      | `gsm8k`          |  1,319 | Multi-step grade-school math with exact numeric answers             |
-| IFEval     | `ifeval`         |    541 | Instruction following under constraints a checker can verify        |
-| GPQA       | `gpqa`           |    198 | Expert-written graduate science questions designed to resist search |
-| MMLU       | `mmlu`           | 14,042 | Zero-shot coverage of 57 academic and professional subjects         |
-
-### Classic
-
-| Benchmark  | Key              |  Tasks | What it tests                                                       |
-| ---------- | ---------------- | -----: | ------------------------------------------------------------------- |
-| ARC        | `arc`            |  1,172 | Challenging grade-school science multiple choice                    |
-| OpenBookQA | `openbookqa`     |    500 | Elementary science requiring factual knowledge and reasoning        |
-| WinoGrande | `winogrande`     |  1,267 | Commonsense pronoun resolution in ambiguous sentences               |
-| PIQA       | `piqa`           |  1,838 | Physical plausibility of solutions to everyday tasks                |
-| BoolQ      | `boolq`          |  3,270 | Yes/no questions answered from evidence in a passage                |
-| TruthfulQA | `truthfulqa`     |    817 | Resistance to common misconceptions and false beliefs               |
-| HellaSwag  | `hellaswag`      |  1,000 | Plausible continuations of real-world scenarios                     |
+| Benchmark  | Key              |  Tasks | Tags                               | What it tests                                                       |
+| ---------- | ---------------- | -----: | ---------------------------------- | ------------------------------------------------------------------- |
+| QuickBench | `quickbench`     |     20 | code generative smoke              | Tiny Python tasks for a fast end-to-end sanity check                |
+| HumanEval  | `humaneval`      |    164 | code generative                    | Python function completion with the original unit tests             |
+| HumanEval+ | `humaneval-plus` |    164 | code generative                    | HumanEval with more than 122,000 tougher EvalPlus test inputs       |
+| MBPP       | `mbpp`           |    500 | code generative                    | Short Python functions from natural-language specifications         |
+| MBPP+      | `mbpp-plus`      |    378 | code generative                    | Sanitized MBPP with more than 39,000 EvalPlus test inputs           |
+| GSM8K      | `gsm8k`          |  1,319 | math generative                    | Multi-step grade-school math with exact numeric answers             |
+| IFEval     | `ifeval`         |    541 | instruction generative             | Instruction following under constraints a checker can verify        |
+| GPQA       | `gpqa`           |    198 | knowledge mcq low-signal           | Expert-written graduate science questions designed to resist search |
+| MMLU       | `mmlu`           | 14,042 | knowledge mcq saturated low-signal | Zero-shot coverage of 57 academic and professional subjects         |
+| ARC        | `arc`            |  1,172 | knowledge mcq saturated low-signal | Challenging grade-school science multiple choice                    |
+| OpenBookQA | `openbookqa`     |    500 | knowledge mcq saturated low-signal | Elementary science requiring factual knowledge and reasoning        |
+| WinoGrande | `winogrande`     |  1,267 | commonsense mcq saturated low-signal | Commonsense pronoun resolution in ambiguous sentences             |
+| PIQA       | `piqa`           |  1,838 | commonsense mcq saturated low-signal | Physical plausibility of solutions to everyday tasks              |
+| BoolQ      | `boolq`          |  3,270 | knowledge mcq saturated low-signal | Yes/no questions answered from evidence in a passage                |
+| TruthfulQA | `truthfulqa`     |    817 | knowledge mcq saturated low-signal | Resistance to common misconceptions and false beliefs               |
+| HellaSwag  | `hellaswag`      |  1,000 | commonsense mcq saturated low-signal | Plausible continuations of real-world scenarios                   |
 
 More coming soon.
+
+### Tags
+
+Every benchmark carries tags for what it measures (`code`, `math`,
+`knowledge`, `commonsense`, `instruction`), how it is answered (`generative`,
+`mcq`) and how much signal it still carries on the 4-35B models BenchKit
+targets:
+
+- `saturated` - current models sit near the ceiling, so the suite mostly buys
+  comparability with published numbers.
+- `low-signal` - the wider bucket: every saturated suite plus GPQA, which is
+  the opposite case, since small models sit near the 25% floor and are
+  separated just as poorly.
+
+Filter by tag in the picker's filter box or from the CLI, with a leading `-`
+to exclude:
+
+```bash
+uv run benchkit --list --tag code            # the five code suites
+uv run benchkit --list --tag mcq,-saturated  # multiple choice that still moves
+uv run benchkit --headless --models qwen3:8b --tag -low-signal
+```
+
+In the filter box the same query language applies (`mcq -saturated`), and a
+term that is a tag matches tags only, so `code` does not also catch IFEval for
+the "code-checkable" in its description. Anything that is not a tag is a plain
+text search over keys and descriptions. `--tag` composes with `--benchmarks`,
+so `--tag code --benchmarks gsm8k:20` runs both.
 
 IFEval scores strict prompt-level accuracy: a prompt counts as passed only when
 every verifiable instruction attached to it is followed. The checkers are a

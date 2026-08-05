@@ -174,18 +174,16 @@ DataTable > .datatable--cursor {
     width: 7fr;
 }
 
-#bench-pane .group-title {
-    color: $text-muted;
-    padding: 0 0 0 1;
+#bench-tags {
+    height: auto;
+    padding: 0 0 1 1;
+    text-wrap: wrap;
 }
 
+/* Sized to the rows it holds, so a filtered list does not leave a tall gap. */
 #bench-list {
-    height: 9fr;
-}
-
-#bench-legacy-list {
-    height: 7fr;
-    margin: 1 0 0 0;
+    height: auto;
+    max-height: 1fr;
 }
 
 #setup-options {

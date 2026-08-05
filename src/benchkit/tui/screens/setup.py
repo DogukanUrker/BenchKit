@@ -12,7 +12,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, Label, SelectionList, Static
 from textual.widgets.selection_list import Selection
 
-from benchkit.benchmarks import CURRENT_BENCHMARKS, LEGACY_BENCHMARKS, REGISTRY
+from benchkit.benchmarks import REGISTRY, all_tags, signal_tag, tags_for
 from benchkit.demo import DemoClient
 from benchkit.engine import JobSpec, SliceError, parse_slice, slice_label, task_count
 from benchkit.template_check import TemplateReport, check_template
@@ -22,16 +22,16 @@ from benchkit.tui.theme import score_palette
 from benchkit.tui.widgets import SectionTitle
 
 DESCRIPTIONS = {
-    "quickbench": "20 tiny Python tasks for a fast end-to-end sanity check",
-    "humaneval": "164 Python function completions with the original unit tests",
+    "quickbench": "tiny Python tasks for a fast end-to-end sanity check",
+    "humaneval": "Python function completions with the original unit tests",
     "humaneval-plus": "HumanEval with 122k+ tougher EvalPlus test inputs",
-    "mbpp": "500 short Python functions from natural-language specifications",
-    "mbpp-plus": "378 sanitized MBPP tasks with 39k+ EvalPlus test inputs",
+    "mbpp": "short Python functions from natural-language specifications",
+    "mbpp-plus": "sanitized MBPP tasks with 39k+ EvalPlus test inputs",
     "gsm8k": "multi-step grade-school math problems with exact numeric answers",
-    "ifeval": "541 prompts with code-checkable instruction-following constraints",
+    "ifeval": "prompts with code-checkable instruction-following constraints",
     "arc": "challenging grade-school science questions with four choices",
     "gpqa": "expert-written graduate science questions designed to resist search",
-    "mmlu": "57 academic and professional subjects, evaluated zero-shot",
+    "mmlu": "zero-shot coverage of 57 academic and professional subjects",
     "openbookqa": "elementary science questions requiring facts plus reasoning",
     "winogrande": "commonsense pronoun resolution in ambiguous sentences",
     "piqa": "choose the most physically plausible solution to everyday tasks",
@@ -44,13 +44,47 @@ MODEL_NAME_WIDTH = 40
 BENCHMARK_NAME_WIDTH = 15
 BENCHMARK_COUNT_WIDTH = 13
 
-# The benchmark pane shows two lists: the suites worth reaching for today and
-# the older ones that most current models saturate.
-BENCH_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
-    ("bench-list", "bench-current-title", "Current", CURRENT_BENCHMARKS),
-    ("bench-legacy-list", "bench-legacy-title", "Classic", LEGACY_BENCHMARKS),
-]
-BENCH_LIST_IDS = {list_id for list_id, _, _, _ in BENCH_GROUPS}
+
+def parse_filter(needle: str) -> tuple[list[str], list[str]]:
+    """Split a filter box query into required and excluded terms.
+
+    Terms are whitespace separated and a leading `-` excludes, so
+    `mcq -saturated` reads as "multiple choice, minus the saturated ones".
+    """
+    include: list[str] = []
+    exclude: list[str] = []
+    for term in needle.lower().split():
+        if term.startswith("-") and len(term) > 1:
+            exclude.append(term[1:])
+        elif not term.startswith("-"):
+            include.append(term)
+    return include, exclude
+
+
+def benchmark_matches(key: str, include: list[str], exclude: list[str]) -> bool:
+    """Match a benchmark against filter terms by key, tag or description.
+
+    A term that is itself a tag matches tags only, so typing `code` selects the
+    same benchmarks as `--tag code` rather than also catching IFEval for the
+    "code-checkable" in its description. Anything else is a free-text search
+    over the key, the description and tag prefixes.
+    """
+    tags = set(tags_for(key))
+    description = DESCRIPTIONS.get(key, "").lower()
+    known_tags = set(all_tags())
+
+    def hit(term: str) -> bool:
+        if term in known_tags:
+            return term in tags
+        return (
+            term in key.lower()
+            or term in description
+            or any(tag.startswith(term) for tag in tags)
+        )
+
+    if any(hit(term) for term in exclude):
+        return False
+    return all(hit(term) for term in include)
 
 
 class SetupScreen(Screen[None]):
@@ -92,13 +126,16 @@ class SetupScreen(Screen[None]):
             with Vertical(classes="pane", id="bench-pane"):
                 yield SectionTitle("Benchmarks", id="bench-title")
                 yield Input(
-                    placeholder="Filter benchmarks…",
+                    placeholder="Filter benchmarks or tags…",
                     id="bench-filter",
                     classes="filter",
                 )
-                for list_id, title_id, title, _keys in BENCH_GROUPS:
-                    yield SectionTitle(title, id=title_id, classes="group-title")
-                    yield SelectionList(id=list_id)
+                yield Static(
+                    "tags: " + " · ".join(all_tags()) + "   [dim](-tag excludes)[/dim]",
+                    id="bench-tags",
+                    classes="hint",
+                )
+                yield SelectionList(id="bench-list")
         with Horizontal(id="setup-options"):
             yield Label("Tasks per benchmark", classes="field-label wide")
             yield Input(placeholder="all", id="global-limit", classes="limit-input")
@@ -191,6 +228,10 @@ class SetupScreen(Screen[None]):
         text = Text()
         text.append(_clip(key, BENCHMARK_NAME_WIDTH).ljust(BENCHMARK_NAME_WIDTH))
         text.append(count_text.rjust(BENCHMARK_COUNT_WIDTH), style="dim")
+        signal = signal_tag(key)
+        if signal:
+            text.append(f"  {signal}", style="dim italic")
+
         limit = self.limits.get(key)
         if limit:
             accent = score_palette(self.app.current_theme.dark)["mid"]
@@ -218,38 +259,34 @@ class SetupScreen(Screen[None]):
         )
 
     def _rebuild_benchmarks(self) -> None:
-        needle = self.query_one("#bench-filter", Input).value.strip().lower()
-
-        for list_id, _title_id, _title, keys in BENCH_GROUPS:
-            widget = self.query_one(f"#{list_id}", SelectionList)
-            visible = [
-                key
-                for key in self.bench_order
-                if key in keys
-                and (
-                    needle in key.lower()
-                    or needle in DESCRIPTIONS.get(key, "").lower()
-                )
-            ]
-            highlighted = widget.highlighted
-            widget.clear_options()
-            widget.add_options(
-                [
-                    Selection(
-                        self._bench_prompt(key), key, key in self.selected_benchmarks
-                    )
-                    for key in visible
-                ]
-            )
-            if visible:
-                widget.highlighted = min(highlighted or 0, len(visible) - 1)
-        self._refresh_bench_group_titles()
-        self._refresh_bench_title()
-
-    def _refresh_bench_title(self) -> None:
-        self.query_one("#bench-title", SectionTitle).set_detail(
-            f"{len(self.selected_benchmarks)}/{len(self.bench_order)} selected"
+        widget = self.query_one("#bench-list", SelectionList)
+        include, exclude = parse_filter(
+            self.query_one("#bench-filter", Input).value.strip()
         )
+        visible = [
+            key
+            for key in self.bench_order
+            if benchmark_matches(key, include, exclude)
+        ]
+        highlighted = widget.highlighted
+        widget.clear_options()
+        widget.add_options(
+            [
+                Selection(self._bench_prompt(key), key, key in self.selected_benchmarks)
+                for key in visible
+            ]
+        )
+        if visible:
+            widget.highlighted = min(highlighted or 0, len(visible) - 1)
+        self._refresh_bench_title(len(visible))
+
+    def _refresh_bench_title(self, shown: int | None = None) -> None:
+        detail = f"{len(self.selected_benchmarks)}/{len(self.bench_order)} selected"
+        if shown is None:
+            shown = self.query_one("#bench-list", SelectionList).option_count
+        if shown != len(self.bench_order):
+            detail = f"{detail} · {shown} shown"
+        self.query_one("#bench-title", SectionTitle).set_detail(detail)
 
     # Events -----------------------------------------------------------
 
@@ -263,10 +300,10 @@ class SetupScreen(Screen[None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id in {"model-filter", "bench-filter"}:
-            if event.input.id == "model-filter":
-                self.query_one("#model-list", SelectionList).focus()
-            else:
-                self._first_populated_bench_list().focus()
+            target = (
+                "#model-list" if event.input.id == "model-filter" else "#bench-list"
+            )
+            self.query_one(target, SelectionList).focus()
         elif event.input.id == "global-limit":
             self.action_start()
 
@@ -286,19 +323,8 @@ class SetupScreen(Screen[None]):
             )
         else:
             self.selected_benchmarks = (self.selected_benchmarks - visible) | chosen
-            self._refresh_bench_group_titles()
             self._refresh_bench_title()
         self._refresh_summary()
-
-    def _refresh_bench_group_titles(self) -> None:
-        for list_id, title_id, _title, keys in BENCH_GROUPS:
-            widget = self.query_one(f"#{list_id}", SelectionList)
-            shown = widget.option_count
-            selected = len(self.selected_benchmarks & set(keys))
-            detail = f"{selected}/{len(keys)} selected"
-            if shown != len(keys):
-                detail = f"{detail} · {shown} shown"
-            self.query_one(f"#{title_id}", SectionTitle).set_detail(detail)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "start":
@@ -335,28 +361,13 @@ class SetupScreen(Screen[None]):
         widget = self._focused_list()
         target = (
             "#bench-filter"
-            if widget is not None and widget.id in BENCH_LIST_IDS
+            if widget is not None and widget.id == "bench-list"
             else "#model-filter"
         )
         self.query_one(target, Input).focus()
 
-    def _focused_bench_list(self) -> SelectionList:
-        """The benchmark list the user is on, falling back to the first one."""
-        widget = self._focused_list()
-        if widget is not None and widget.id in BENCH_LIST_IDS:
-            return widget
-        return self.query_one(f"#{BENCH_GROUPS[0][0]}", SelectionList)
-
-    def _first_populated_bench_list(self) -> SelectionList:
-        """The first benchmark list with rows, so filtering never dead-ends."""
-        for list_id, _title_id, _title, _keys in BENCH_GROUPS:
-            widget = self.query_one(f"#{list_id}", SelectionList)
-            if widget.option_count:
-                return widget
-        return self.query_one(f"#{BENCH_GROUPS[0][0]}", SelectionList)
-
     def action_set_limit(self) -> None:
-        widget = self._focused_bench_list()
+        widget = self.query_one("#bench-list", SelectionList)
         index = widget.highlighted
         if index is None:
             return
@@ -445,7 +456,7 @@ class SetupScreen(Screen[None]):
             return None
         if not benches:
             self.notify("Select at least one benchmark", severity="error", timeout=4)
-            self._focused_bench_list().focus()
+            self.query_one("#bench-list", SelectionList).focus()
             return None
 
         for key in benches:
