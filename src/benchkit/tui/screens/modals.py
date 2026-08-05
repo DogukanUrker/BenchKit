@@ -151,7 +151,7 @@ class TaskDetailScreen(ModalScreen[None]):
         trace = self.task_data.get("trace_status", "unavailable")
         pieces = [
             fmt_duration(self.task_data.get("response_time_s", 0)),
-            f"{self.task_data.get('tok_s', 0)} tok/s",
+            f"{self.task_data.get('tok_s', 0)} stream tok/s",
             f"trace {trace}",
             f"loop {loop_label} ({loop_score:.0%})",
         ]

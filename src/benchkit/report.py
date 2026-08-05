@@ -7,6 +7,8 @@ from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 
+from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
+
 
 def _fmt_time(s: float) -> str:
     s = int(round(s))
@@ -78,21 +80,31 @@ def save(
         f.write("# BenchKit Results\n\n")
         f.write(f"**Date:** {ts}\n\n")
         f.write(
-            "| Model | Benchmark | Score | Passed | Total | Loops | Killed | Trace | tok/s | Avg Resp | Total Time |\n"
+            "| Model | Benchmark | Parallel | Score | Passed | Total | Loops | Killed | Trace | Agg tok/s | Stream tok/s | Effective | Avg Resp | Wall Time |\n"
         )
         f.write(
-            "|-------|-----------|-------|--------|-------|-------|--------|-------|-------|----------|------------|\n"
+            "|-------|-----------|----------|-------|--------|-------|-------|--------|-------|-----------|--------------|-----------|----------|-----------|\n"
         )
         for result in results:
             f.write(
                 f"| {result['model']} | {result['benchmark']} "
-                f"| {result['score']}% | {result['passed']} "
+                f"| {result.get('concurrency', 1)} | {result['score']}% "
+                f"| {result['passed']} "
                 f"| {result['total']} | {result.get('loop_rate', 0)}% "
                 f"| {result.get('loop_kills', 0)} "
-                f"| {result.get('trace_coverage', 0)}% | {result['tok_s']} "
+                f"| {result.get('trace_coverage', 0)}% "
+                f"| {aggregate_tok_s(result):.1f} "
+                f"| {stream_tok_s(result):.1f} "
+                f"| {effective_concurrency(result):.2f}x "
                 f"| {result['avg_response_time']}s "
                 f"| {_fmt_time(result['total_time'])} |\n"
             )
+
+        f.write(
+            "\n**Throughput:** Agg tok/s is total output tokens divided by job "
+            "wall time. Stream tok/s uses summed server decode time. Effective "
+            "concurrency is summed request time divided by wall time.\n"
+        )
 
         f.write("\n---\n\n")
         for result in results:
@@ -126,6 +138,7 @@ def save(
                 f.write(f"### {label} — {status} · {loop}\n\n")
                 f.write(
                     f"**Generation:** {task.get('output_tokens', 0)} tokens · "
+                    f"{task.get('tok_s', 0)} stream tok/s · "
                     f"{task.get('response_time_s', 0)}s · "
                     f"trace {task.get('trace_status', 'unavailable')} · "
                     f"loop score {task.get('loop_score', 0):.1%}\n\n"

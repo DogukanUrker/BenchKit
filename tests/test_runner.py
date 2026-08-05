@@ -8,11 +8,25 @@ import unittest
 from rich.console import Console
 
 from benchkit.cli import _outcome_counts
-from benchkit.engine import JobSpec, TaskCompleted, TaskRecord
+from benchkit.engine import (
+    GenerationProgress,
+    JobSpec,
+    JobStarted,
+    RunStarted,
+    TaskCompleted,
+    TaskPhase,
+    TaskRecord,
+)
 from benchkit.runner import _bar, _counters, _Glyphs, _LiveStats, _Reporter, _spread
 
 
-def _record(*, passed: bool = False, error: str = "", loop: bool = False) -> TaskRecord:
+def _record(
+    *,
+    passed: bool = False,
+    error: str = "",
+    loop: bool = False,
+    response: str = "response",
+) -> TaskRecord:
     return TaskRecord(
         index=0,
         task_id="task",
@@ -20,7 +34,7 @@ def _record(*, passed: bool = False, error: str = "", loop: bool = False) -> Tas
         tok_s=0.0,
         response_time_s=0.0,
         prompt="prompt",
-        response="response",
+        response=response,
         error=error,
         loop_state="looping" if loop else "clear",
     )
@@ -125,6 +139,68 @@ class PlainReporterTests(unittest.TestCase):
         self.assertIn("ERROR", output)
         self.assertIn("boom", output)
         self.assertEqual(reporter.state.overall_done, 2)
+
+    def test_concurrent_activity_aggregates_streams_without_task_name_flicker(
+        self,
+    ) -> None:
+        console = _console(record=True)
+        reporter = _Reporter(console, verbose=False)
+        job = JobSpec("model", "quickbench", None)
+        reporter(RunStarted([job], 2))
+        reporter(JobStarted(0, job, 2, 2, concurrency=2))
+
+        for position, task_id in ((1, "question-a"), (2, "question-b")):
+            reporter(
+                TaskPhase(
+                    0,
+                    job,
+                    position,
+                    2,
+                    task_id,
+                    "",
+                    "generating",
+                    "waiting for model",
+                )
+            )
+        for position, task_id, chars in (
+            (1, "question-a", 100),
+            (2, "question-b", 20),
+        ):
+            reporter(
+                GenerationProgress(
+                    0,
+                    job,
+                    position,
+                    2,
+                    task_id,
+                    "",
+                    "answering",
+                    1.0,
+                    0,
+                    chars,
+                    "unavailable",
+                    "clear",
+                    0.0,
+                    "none",
+                    None,
+                    "prompt",
+                    "",
+                    "x" * chars,
+                )
+            )
+
+        view = reporter.state.current
+        assert view is not None
+        activity = str(view.activity)
+        self.assertIn("2 active requests", activity)
+        self.assertIn("120 chars generated", activity)
+        self.assertNotIn("question-a", activity)
+        self.assertNotIn("question-b", activity)
+
+        reporter(TaskCompleted(0, job, _record(response="x" * 100), 1, 1))
+        self.assertEqual(view.generated_chars, 120)
+        self.assertIn("1 active request", str(view.activity))
+        self.assertIn("120 chars generated", str(view.activity))
 
 
 if __name__ == "__main__":

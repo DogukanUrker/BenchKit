@@ -131,6 +131,45 @@ uv run benchkit --list --tag mcq,-saturated
 are saved exactly as they are from the TUI, and a run that fails part-way still
 keeps what finished.
 
+### Automatic request concurrency
+
+BenchKit automatically uses every request slot exposed by the active model; no
+BenchKit concurrency flag is required. A llama.cpp model started with
+`--parallel 4` runs up to four benchmark generations at once, while another
+model started with `--parallel 6` uses six when its job runs. The task count is
+always the upper bound, so a three-task slice never starts more than three
+requests.
+
+Capacity is detected lazily from llama.cpp's `/slots` endpoint. Router mode is
+queried with the selected model, and llama-swap is supported through its
+per-model `/upstream/<model>/slots` route. Explicit concurrency metadata is
+also honored as a cap. Servers that expose neither slots nor a positive
+metadata hint safely remain serial, as do Ollama and demo mode. Model jobs
+still run one after another so their benchmark numbers do not interfere with
+each other; concurrency is applied to the tasks inside the active job.
+
+Pause stops new requests after the active group drains. Skip, stop and Ctrl+C
+cancel every request currently in flight. The detected width is shown in the
+headless dashboard, TUI run title, CSV/JSON output and Markdown report.
+
+Parallel runs report throughput in three separate forms:
+
+- **Aggregate tok/s** is total output tokens divided by job wall time. This is
+  the number to use when comparing how quickly a benchmark workload finishes.
+- **Stream tok/s** is total output tokens divided by summed server-reported
+  decode time. It describes the speed of an individual generation stream and
+  commonly falls as more streams share the same hardware.
+- **Effective concurrency** is summed request duration divided by job wall
+  time. For example, a value near `6.0x` with `--parallel 7` means roughly six
+  request slots stayed occupied on average.
+
+The TUI leaderboard and aggregate-throughput report charts use aggregate
+tok/s. JSON and CSV expose these values as `tok_s_aggregate`,
+`tok_s_per_stream` and `concurrency_eff`. The legacy `tok_s` field remains as
+an alias for `tok_s_per_stream` so existing report consumers keep working.
+The raw denominators are also retained as `total_output_tokens`,
+`sum_generation_time`, `sum_request_time` and `total_time`.
+
 ## Performance profiles
 
 Profile a model served by llama.cpp or llama-swap through its OpenAI-compatible

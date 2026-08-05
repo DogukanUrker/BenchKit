@@ -236,6 +236,7 @@ class DemoClient:
 
     host = "demo://offline"
     label = "Demo mode"
+    simulated_timing = True
     provider = "demo"
     timeout = 0.0
 
@@ -264,6 +265,10 @@ class DemoClient:
             {"name": model["name"], "size": model["size"], "status": "demo"}
             for model in DEMO_MODELS
         ]
+
+    def max_parallel_requests(self, model: str) -> int:
+        """Keep the deterministic offline simulation single-threaded."""
+        return 1
 
     def unload_model(self, model: str) -> None:
         time.sleep(0.05 / self.speed)

@@ -131,7 +131,7 @@
 
     .summary {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(6, 1fr);
       margin: 28px 0 64px;
       background: var(--card);
       border: 1px solid var(--line);
@@ -393,6 +393,20 @@
     const rows = [...report.results];
     const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
     const number = value => Number(value) || 0;
+    const streamSpeed = row => number(row.tok_s_per_stream ?? row.tok_s);
+    const effectiveConcurrency = row => row.concurrency_eff != null
+      ? number(row.concurrency_eff)
+      : number(row.total_time) > 0
+        ? number(row.avg_response_time) * number(row.total) / number(row.total_time)
+        : 0;
+    const aggregateSpeed = row => {
+      if (row.tok_s_aggregate != null) return number(row.tok_s_aggregate);
+      const tasksWithUsage = (row.tasks || []).filter(task => task.output_tokens != null);
+      if (tasksWithUsage.length && number(row.total_time) > 0) {
+        return tasksWithUsage.reduce((sum, task) => sum + number(task.output_tokens), 0) / number(row.total_time);
+      }
+      return streamSpeed(row) * effectiveConcurrency(row);
+    };
     const loopLabel = task => task.recovered_cycle
       ? "RECOVERED"
       : task.loop_state === "clear" && task.loop_source === "answer" && task.trace_status === "unavailable"
@@ -415,19 +429,37 @@
 
     const grouped = new Map();
     rows.forEach(row => {
-      const item = grouped.get(row.model) || { model: row.model, passed: 0, total: 0, loops: 0, speedTotal: 0, runtime: 0 };
+      const item = grouped.get(row.model) || { model: row.model, passed: 0, total: 0, loops: 0, outputTokens: 0, generationTime: 0, requestTime: 0, runtime: 0 };
+      const knownOutputTokens = row.total_output_tokens != null
+        ? number(row.total_output_tokens)
+        : 0;
+      const reportedRuntime = number(row.total_time);
+      const runtime = reportedRuntime > 0
+        ? reportedRuntime
+        : knownOutputTokens > 0 && aggregateSpeed(row) > 0
+          ? knownOutputTokens / aggregateSpeed(row)
+          : 0;
+      const outputTokens = knownOutputTokens || aggregateSpeed(row) * runtime;
       item.passed += number(row.passed);
       item.total += number(row.total);
       item.loops += number(row.loops);
-      item.speedTotal += number(row.tok_s) * number(row.total);
-      item.runtime += number(row.total_time);
+      item.outputTokens += outputTokens;
+      item.generationTime += row.sum_generation_time != null
+        ? number(row.sum_generation_time)
+        : streamSpeed(row) > 0 ? outputTokens / streamSpeed(row) : 0;
+      item.requestTime += row.sum_request_time != null
+        ? number(row.sum_request_time)
+        : effectiveConcurrency(row) * runtime;
+      item.runtime += runtime;
       grouped.set(row.model, item);
     });
     const models = [...grouped.values()].map(item => ({
       ...item,
       score: item.total ? item.passed / item.total * 100 : 0,
       loopRate: item.total ? item.loops / item.total * 100 : 0,
-      speed: item.total ? item.speedTotal / item.total : 0,
+      speed: item.runtime ? item.outputTokens / item.runtime : 0,
+      streamSpeed: item.generationTime ? item.outputTokens / item.generationTime : 0,
+      effective: item.runtime ? item.requestTime / item.runtime : 0,
     })).sort((a, b) => b.score - a.score || b.speed - a.speed);
     const best = models[0] || { model: "No results", score: 0, passed: 0, total: 0, speed: 0 };
 
@@ -464,7 +496,7 @@
     const speedItems = models.map(model => ({ ...model, value: model.speed }));
     const benchmarkItems = benchmark => rows
       .filter(row => row.benchmark === benchmark)
-      .map(row => ({ model: row.model, value: number(row.score), passed: row.passed, total: row.total, speed: number(row.tok_s) }));
+      .map(row => ({ model: row.model, value: number(row.score), passed: row.passed, total: row.total, speed: aggregateSpeed(row) }));
 
     const chartConfigs = new Map();
     chartConfigs.set("overall", {
@@ -472,8 +504,8 @@
       meta: item => `${item.passed}/${item.total} passed`,
     });
     chartConfigs.set("speed", {
-      title: "Generation speed", subtitle: "tok/s", items: speedItems, scale: "max", suffix: "",
-      meta: item => `${item.speed.toFixed(1)} tok/s`,
+      title: "Aggregate throughput", subtitle: "output tok/s · wall clock", items: speedItems, scale: "max", suffix: "",
+      meta: item => `${item.speed.toFixed(1)} tok/s · ${item.streamSpeed.toFixed(1)} stream · ${item.effective.toFixed(2)}x eff`,
     });
     benchmarks.forEach((benchmark, index) => chartConfigs.set(`benchmark-${index}`, {
       title: benchmark, subtitle: "pass@1", items: benchmarkItems(benchmark),
@@ -487,6 +519,7 @@
       ["Benchmarks", benchmarks.length],
       ["Tasks scored", totalTasks],
       ["Loops detected", `${totalLoops} · ${totalTasks ? (totalLoops / totalTasks * 100).toFixed(1) : "0.0"}%`],
+      ["Peak throughput", `${Math.max(0, ...models.map(model => model.speed)).toFixed(1)} tok/s`],
       ["Runtime", formatTime(totalRuntime)],
     ].map(([label, value]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`).join("");
     document.getElementById("overallChart").innerHTML = chart(chartConfigs.get("overall"));
@@ -530,9 +563,9 @@
       const maxSpeed = Math.max(1, ...models.map(model => model.speed));
       const x = value => pad.left + Math.log10(number(value) + 1) / Math.log10(maxSpeed + 1) * plotWidth;
       const y = value => pad.top + (1 - clamp(value) / 100) * plotHeight;
-      return `<svg class="scatter" viewBox="0 0 ${width} ${height}" role="img" aria-label="Accuracy versus generation speed">
+      return `<svg class="scatter" viewBox="0 0 ${width} ${height}" role="img" aria-label="Accuracy versus aggregate throughput">
         ${[0, 25, 50, 75, 100].map(tick => `<line class="grid-line" x1="${pad.left}" x2="${pad.left + plotWidth}" y1="${y(tick)}" y2="${y(tick)}"></line><text class="axis-label" x="${pad.left - 10}" y="${y(tick) + 3}" text-anchor="end">${tick}%</text>`).join("")}
-        <text class="axis-label" x="${pad.left + plotWidth / 2}" y="${height - 8}" text-anchor="middle">GENERATED TOKENS / SECOND →</text>
+        <text class="axis-label" x="${pad.left + plotWidth / 2}" y="${height - 8}" text-anchor="middle">AGGREGATE OUTPUT TOKENS / SECOND →</text>
         ${models.slice(0, 8).map((model, index) => {
           const cx = x(model.speed);
           const cy = y(model.score);
@@ -541,7 +574,7 @@
       </svg>`;
     };
     document.getElementById("efficiencyChart").innerHTML = `<article class="chart-shell">
-      <div class="chart-header"><h3 class="chart-title">Accuracy × speed</h3><span class="chart-subtitle">· upper right wins</span></div>
+      <div class="chart-header"><h3 class="chart-title">Accuracy × throughput</h3><span class="chart-subtitle">· aggregate tok/s · upper right wins</span></div>
       ${scatterSvg()}
     </article>`;
     document.getElementById("speedChart").innerHTML = chart(chartConfigs.get("speed"));
@@ -575,7 +608,7 @@
     document.getElementById("matrix").innerHTML = `<article class="chart-shell matrix-card">
       <div class="chart-header"><h3 class="chart-title">Score matrix</h3><span class="chart-subtitle">· full suite</span></div>
       <div class="matrix-wrap"><table>
-      <thead><tr><th>Model</th><th>Overall</th>${benchmarks.map(item => `<th>${escapeHtml(item)}</th>`).join("")}<th>Loops</th><th>tok/s</th></tr></thead>
+      <thead><tr><th>Model</th><th>Overall</th>${benchmarks.map(item => `<th>${escapeHtml(item)}</th>`).join("")}<th>Loops</th><th>Agg tok/s</th><th>Stream</th><th>Eff.</th></tr></thead>
       <tbody>${models.slice(0, 8).map(model => `<tr>
         <td>${escapeHtml(model.model)}</td><td class="score-cell" style="background:${heat(model.score)}">${number(model.score).toFixed(1)}%</td>
         ${benchmarks.map(benchmark => {
@@ -583,7 +616,7 @@
           return row
             ? `<td style="background:${heat(row.score)}">${number(row.score).toFixed(1)}%</td>`
             : "<td>—</td>";
-        }).join("")}<td>${model.loopRate.toFixed(1)}%</td><td>${model.speed.toFixed(1)}</td>
+        }).join("")}<td>${model.loopRate.toFixed(1)}%</td><td>${model.speed.toFixed(1)}</td><td>${model.streamSpeed.toFixed(1)}</td><td>${model.effective.toFixed(2)}x</td>
       </tr>`).join("")}</tbody>
       </table></div>
     </article>`;
@@ -591,7 +624,7 @@
     document.getElementById("details").innerHTML = rows
       .sort((a, b) => number(b.score) - number(a.score))
       .map(row => `<details>
-        <summary><span class="detail-title">${escapeHtml(row.model)} / ${escapeHtml(row.benchmark)}</span><span class="detail-score">${row.passed}/${row.total} · ${number(row.score).toFixed(1)}%</span></summary>
+        <summary><span class="detail-title">${escapeHtml(row.model)} / ${escapeHtml(row.benchmark)}</span><span class="detail-score">${row.passed}/${row.total} · ${number(row.score).toFixed(1)}% · ${aggregateSpeed(row).toFixed(1)} agg tok/s · ${streamSpeed(row).toFixed(1)} stream · ${effectiveConcurrency(row).toFixed(2)}x eff</span></summary>
         <div class="tasks">${(row.tasks || []).map(task => `<article class="task">
           <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} tokens</span><span><span class="status ${task.passed ? "pass" : ""}">${task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.error ? "ERROR" : task.passed ? "PASS" : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(loopLabel(task))}</span></span></div>
           <div class="exchange">

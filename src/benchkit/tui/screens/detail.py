@@ -11,6 +11,7 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Input
 
 from benchkit.engine import slice_label
+from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
 from benchkit.tui.formatting import (
     fmt_count,
     fmt_duration,
@@ -44,7 +45,7 @@ class JobDetailScreen(Screen[None]):
                 yield StatCard("Score", "--", id="stat-score")
                 yield StatCard("Passed", "--", id="stat-passed")
                 yield StatCard("Loop rate", "--", id="stat-loops")
-                yield StatCard("Speed", "--", id="stat-speed")
+                yield StatCard("Throughput", "--", id="stat-speed")
                 yield StatCard("Avg latency", "--", id="stat-latency")
                 yield StatCard("Duration", "--", id="stat-duration")
             with Vertical(classes="pane", id="detail-pane"):
@@ -65,7 +66,7 @@ class JobDetailScreen(Screen[None]):
         table.add_column("Loop", key="loop", width=9)
         table.add_column("Think", key="thinking", width=8)
         table.add_column("Latency", key="latency", width=9)
-        table.add_column("tok/s", key="tok_s", width=8)
+        table.add_column("Stream tok/s", key="tok_s", width=12)
 
         score = result["score"]
         self.query_one("#stat-score", StatCard).set_state(
@@ -83,7 +84,9 @@ class JobDetailScreen(Screen[None]):
             f"{result.get('loop_kills', 0)} killed",
         )
         self.query_one("#stat-speed", StatCard).set_state(
-            f"{result['tok_s']:.1f} tok/s"
+            f"{aggregate_tok_s(result):.1f} tok/s",
+            f"aggregate · {stream_tok_s(result):.1f} stream · "
+            f"{effective_concurrency(result):.2f}x effective",
         )
         self.query_one("#stat-latency", StatCard).set_state(
             f"{result['avg_response_time']}s"

@@ -18,6 +18,7 @@ from rich.text import Text
 from benchkit.benchmarks import REGISTRY, all_tags, keys_for_tags, tags_for
 from benchkit.client import InferenceClient
 from benchkit.engine import JobSpec, SliceError, parse_slice, task_count
+from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
 from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
 from benchkit.perf_report import save_profile
 from benchkit.report import save
@@ -294,22 +295,28 @@ def _headless(args: argparse.Namespace) -> None:
     # summary is the part of a headless run people copy into a report.
     table.add_column("Model", overflow="fold")
     table.add_column("Benchmark", overflow="fold")
+    table.add_column("Parallel", justify="right", style="dim")
     table.add_column("Score", justify="right")
     table.add_column("P/F/E", justify="right")
     table.add_column("Loops/Killed", justify="right")
-    table.add_column("tok/s", justify="right", style="dim")
+    table.add_column("Agg tok/s", justify="right")
+    table.add_column("Stream tok/s", justify="right", style="dim")
+    table.add_column("Eff", justify="right", style="dim")
     table.add_column("Avg Time", justify="right", style="dim")
-    table.add_column("Total", justify="right", style="dim")
+    table.add_column("Wall", justify="right", style="dim")
 
     for result in results:
         passed, failed, errors = _outcome_counts(result)
         table.add_row(
             result["model"],
             result["benchmark"],
+            str(result.get("concurrency", 1)),
             _score_text(result["score"]),
             f"{passed}/{failed}/{errors}",
             f"{result.get('loops', 0)}/{result.get('loop_kills', 0)}",
-            str(result["tok_s"]),
+            f"{aggregate_tok_s(result):.1f}",
+            f"{stream_tok_s(result):.1f}",
+            f"{effective_concurrency(result):.2f}x",
             f"{result['avg_response_time']}s",
             _fmt_time(result["total_time"]),
         )

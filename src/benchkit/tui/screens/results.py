@@ -12,6 +12,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
+from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
 from benchkit.tui.formatting import bar, fmt_count, fmt_duration, score_color
 from benchkit.tui.screens.detail import JobDetailScreen
 from benchkit.tui.widgets import SectionTitle, StatCard, apply_compact
@@ -23,7 +24,10 @@ SORT_KEYS = {
     "passed": lambda r: -r["passed"],
     "errors": lambda r: -r.get("errors", 0),
     "loops": lambda r: -r.get("loop_rate", 0),
-    "tok_s": lambda r: -r["tok_s"],
+    "parallel": lambda r: -r.get("concurrency", 1),
+    "aggregate": lambda r: -aggregate_tok_s(r),
+    "stream": lambda r: -stream_tok_s(r),
+    "effective": lambda r: -effective_concurrency(r),
     "avg": lambda r: r["avg_response_time"],
     "time": lambda r: r["total_time"],
 }
@@ -55,7 +59,7 @@ class ResultsScreen(Screen[None]):
                 yield StatCard("Runs", "0", id="stat-runs")
                 yield StatCard("Tasks", "0", id="stat-tasks")
                 yield StatCard("Loops", "0", id="stat-loops")
-                yield StatCard("Fastest", "--", id="stat-fastest")
+                yield StatCard("Peak throughput", "--", id="stat-fastest")
                 yield StatCard("Total time", "--", id="stat-time")
             with Vertical(classes="pane", id="results-pane"):
                 yield SectionTitle(
@@ -77,9 +81,12 @@ class ResultsScreen(Screen[None]):
         table.add_column("Passed", key="passed", width=10)
         table.add_column("Loops", key="loops", width=8)
         table.add_column("Errors", key="errors", width=7)
-        table.add_column("tok/s", key="tok_s", width=8)
+        table.add_column("Parallel", key="parallel", width=8)
+        table.add_column("Agg tok/s", key="aggregate", width=10)
+        table.add_column("Stream", key="stream", width=8)
+        table.add_column("Eff", key="effective", width=7)
         table.add_column("Avg", key="avg", width=8)
-        table.add_column("Time", key="time", width=9)
+        table.add_column("Wall", key="time", width=9)
 
         self._fill_table()
         self._fill_stats()
@@ -129,7 +136,10 @@ class ResultsScreen(Screen[None]):
                     else "—"
                 ),
                 str(result.get("errors", 0)) if result.get("errors") else "—",
-                f"{result['tok_s']:.1f}",
+                str(result.get("concurrency", 1)),
+                f"{aggregate_tok_s(result):.1f}",
+                f"{stream_tok_s(result):.1f}",
+                f"{effective_concurrency(result):.2f}x",
                 f"{result['avg_response_time']}s",
                 fmt_duration(result["total_time"]),
                 key=str(index),
@@ -139,7 +149,7 @@ class ResultsScreen(Screen[None]):
         if not self.results:
             return
         best = max(self.results, key=lambda r: r["score"])
-        fastest = max(self.results, key=lambda r: r["tok_s"])
+        fastest = max(self.results, key=aggregate_tok_s)
         tasks = sum(r["total"] for r in self.results)
         total_time = sum(r["total_time"] for r in self.results)
         loops = sum(r.get("loops", 0) for r in self.results)
@@ -155,7 +165,9 @@ class ResultsScreen(Screen[None]):
             (f"{loops / tasks * 100:.1f}% · {loop_kills} killed" if tasks else ""),
         )
         self.query_one("#stat-fastest", StatCard).set_state(
-            f"{fastest['tok_s']:.0f} tok/s", fastest["model"]
+            f"{aggregate_tok_s(fastest):.0f} tok/s",
+            f"{fastest['model']} · {stream_tok_s(fastest):.0f} stream · "
+            f"{effective_concurrency(fastest):.2f}x effective",
         )
         self.query_one("#stat-time", StatCard).set_state(fmt_duration(total_time))
 

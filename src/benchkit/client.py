@@ -8,6 +8,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Literal
+from urllib.parse import quote
 
 import httpx
 
@@ -18,6 +19,18 @@ Provider = Literal["auto", "openai", "ollama"]
 ProgressCallback = Callable[["GenerationUpdate"], None]
 
 DEFAULT_HOST = "http://localhost:11434"
+MAX_DISCOVERED_CONCURRENCY = 256
+
+_PARALLELISM_KEYS = {
+    "concurrency",
+    "concurrencylimit",
+    "maxconcurrency",
+    "maxparallelrequests",
+    "nparallel",
+    "parallel",
+    "parallelism",
+}
+_PARALLELISM_CONTAINERS = {"limits", "llamaswap", "meta", "metadata"}
 
 
 def _without_v1(url: str) -> str:
@@ -28,6 +41,57 @@ def _without_v1(url: str) -> str:
 def _openai_base(url: str) -> str:
     url = url.rstrip("/")
     return url if url.endswith("/v1") else f"{url}/v1"
+
+
+def _positive_int(value: object) -> int | None:
+    """Return a positive integer without accepting booleans or fractions."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float):
+        return int(value) if value > 0 and value.is_integer() else None
+    if isinstance(value, str):
+        try:
+            parsed = int(value.strip())
+        except ValueError:
+            return None
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _parallelism_hint(value: object) -> int | None:
+    """Read explicit concurrency hints from common model metadata shapes."""
+    if not isinstance(value, dict):
+        return None
+
+    hints: list[int] = []
+    for key, candidate in value.items():
+        normalized = str(key).lower().replace("_", "").replace("-", "")
+        if normalized in _PARALLELISM_KEYS:
+            parsed = _positive_int(candidate)
+            if parsed is not None:
+                hints.append(parsed)
+        elif normalized in _PARALLELISM_CONTAINERS:
+            nested = _parallelism_hint(candidate)
+            if nested is not None:
+                hints.append(nested)
+    return min(hints) if hints else None
+
+
+def _capacity_from_payload(payload: object) -> int | None:
+    """Normalize llama.cpp slot and health responses into a worker count."""
+    if isinstance(payload, list):
+        return len(payload) or None
+    if not isinstance(payload, dict):
+        return None
+    slots = payload.get("slots")
+    if isinstance(slots, list) and slots:
+        return len(slots)
+    idle = _positive_int(payload.get("slots_idle")) or 0
+    processing = _positive_int(payload.get("slots_processing")) or 0
+    total = idle + processing
+    return total or None
 
 
 def _content_text(content: object) -> str:
@@ -175,6 +239,10 @@ class InferenceClient:
     timeout: float = 300.0
     retries: RetryPolicy = field(default_factory=RetryPolicy)
     provider: Literal["openai", "ollama"] | None = field(default=None, init=False)
+    _models_by_name: dict[str, dict] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _parallelism: dict[str, int] = field(default_factory=dict, init=False, repr=False)
 
     @classmethod
     def from_env(cls) -> "InferenceClient":
@@ -261,6 +329,8 @@ class InferenceClient:
                 else:
                     models = self._list_ollama_models()
                 self.provider = provider
+                self._models_by_name = {model["name"]: model for model in models}
+                self._parallelism.clear()
                 return models
             except (httpx.HTTPError, ValueError, TypeError) as exc:
                 errors.append(f"{provider}: {exc}")
@@ -303,6 +373,7 @@ class InferenceClient:
                         else None
                     ),
                     "meta": model.get("meta") or {},
+                    "parallelism": _parallelism_hint(model),
                 }
             )
         return sorted(normalized, key=lambda model: model["name"].lower())
@@ -350,6 +421,68 @@ class InferenceClient:
                 model["loaded"] = loaded
                 model["status"] = "loaded" if loaded else "unloaded"
         return sorted(models, key=lambda model: model.get("size", 0))
+
+    def max_parallel_requests(self, model: str) -> int:
+        """Return the model's automatically discovered request capacity.
+
+        llama.cpp exposes one object per server slot from ``GET /slots``. Its
+        router mode accepts the model as a query parameter, while llama-swap
+        exposes the same endpoint below ``/upstream/<model>/``. Other server
+        types stay at one request unless their model metadata contains an
+        explicit positive concurrency value.
+        """
+        if model in self._parallelism:
+            return self._parallelism[model]
+
+        info = self._models_by_name.get(model, {})
+        hint = _positive_int(info.get("parallelism"))
+        discovered = self._discover_slot_capacity(model, info)
+        candidates = [value for value in (hint, discovered) if value is not None]
+        capacity = min(candidates) if candidates else 1
+        capacity = min(MAX_DISCOVERED_CONCURRENCY, max(1, capacity))
+        self._parallelism[model] = capacity
+        return capacity
+
+    def _discover_slot_capacity(self, model: str, info: dict) -> int | None:
+        """Probe optional llama.cpp monitoring routes without breaking peers."""
+        if self.provider != "openai":
+            return None
+
+        root = _without_v1(self.host)
+        attempts: list[tuple[str, dict[str, str] | None]] = [
+            (f"{root}/slots", {"model": model}),
+            (f"{root}/health", {"model": model}),
+        ]
+
+        owner = str(info.get("owned_by") or "").strip().lower()
+        meta = info.get("meta") or {}
+        is_llama_swap = owner in {"llama-swap", "llamaswap"} or (
+            isinstance(meta, dict) and "llamaswap" in meta
+        )
+        if is_llama_swap:
+            upstream = f"{root}/upstream/{quote(model, safe='/')}"
+            attempts.extend(
+                [
+                    (f"{upstream}/slots", None),
+                    (f"{upstream}/health", None),
+                ]
+            )
+
+        for url, params in attempts:
+            try:
+                response = self._request(
+                    "GET",
+                    url,
+                    headers=self._headers(),
+                    params=params,
+                    timeout=self.timeout,
+                )
+                capacity = _capacity_from_payload(response.json())
+                if capacity is not None:
+                    return capacity
+            except (httpx.HTTPError, RuntimeError, ValueError, TypeError):
+                continue
+        return None
 
     def generate(
         self,

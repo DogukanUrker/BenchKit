@@ -12,6 +12,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from statistics import median
 from typing import Literal
@@ -22,6 +23,7 @@ from benchkit.benchmarks import REGISTRY
 from benchkit.benchmarks.base import Task
 from benchkit.client import GenerationUpdate, InferenceClient
 from benchkit.looping import LoopAnalyzer
+from benchkit.metrics import throughput_metrics
 
 
 class SliceError(ValueError):
@@ -215,6 +217,7 @@ class JobStarted:
     job: JobSpec
     total: int
     overall_total: int
+    concurrency: int = 1
 
 
 @dataclass(frozen=True)
@@ -325,7 +328,7 @@ class RunControls:
 
     @property
     def cancel_event(self) -> threading.Event:
-        """Event passed to clients to kill the active model request."""
+        """Event passed to clients to kill every active model request."""
         return self._cancel_request
 
     @property
@@ -345,6 +348,10 @@ class RunControls:
         self._skip.set()
         self._cancel_request.set()
         self._running.set()
+
+    @property
+    def skip_requested(self) -> bool:
+        return self._skip.is_set()
 
     def pause(self) -> None:
         self._running.clear()
@@ -368,6 +375,11 @@ class RunControls:
             return True
         return False
 
+    def cancel_active(self) -> None:
+        """Cancel in-flight requests while unwinding an internal job failure."""
+        self._cancel_request.set()
+        self._running.set()
+
     def wait_while_paused(self) -> None:
         self._running.wait()
 
@@ -387,6 +399,32 @@ ERROR_GENERATION = {
 }
 
 
+@dataclass
+class _GeneratedTask:
+    """Generation state handed from a request worker to serial evaluation."""
+
+    position: int
+    task: Task
+    prompt: str
+    gen: dict
+    error: str
+    errors: int
+    analyzer: LoopAnalyzer
+    first_answer_at: float | None
+    loop_detected_at: float | None
+
+
+@dataclass
+class _TaskOutcome:
+    """One finalized task plus the raw metrics used by its job aggregate."""
+
+    record: TaskRecord
+    errors: int
+    eval_count: int
+    eval_duration_ns: int
+    response_time_s: float
+
+
 def plan_total_tasks(jobs: list[JobSpec]) -> int:
     return sum(job.planned_total() for job in jobs)
 
@@ -400,9 +438,16 @@ def _empty_result(job: JobSpec) -> dict:
         "passed": 0,
         "total": 0,
         "tok_s": 0.0,
+        "tok_s_per_stream": 0.0,
+        "tok_s_aggregate": 0.0,
+        "concurrency_eff": 0.0,
+        "total_output_tokens": 0,
+        "sum_generation_time": 0.0,
+        "sum_request_time": 0.0,
         "avg_response_time": 0.0,
         "total_time": 0.0,
         "slice": job.slice_spec,
+        "concurrency": 1,
         "errors": 0,
         "timeouts": 0,
         "loop_kills": 0,
@@ -434,6 +479,9 @@ class Engine:
         default_factory=lambda: _env_float("BENCHKIT_LOOP_KILL_SECONDS", 10.0)
     )
     failure: str | None = field(default=None, init=False)
+    _emit_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self.loop_kill_percent = min(100.0, max(0.0, self.loop_kill_percent))
@@ -441,7 +489,11 @@ class Engine:
 
     def emit(self, event: EngineEvent) -> None:
         if self.sink is not None:
-            self.sink(event)
+            # Generation progress originates from multiple request workers.
+            # Keep every sink callback atomic so front-ends can stay ordinary,
+            # single-threaded state machines.
+            with self._emit_lock:
+                self.sink(event)
 
     def run(self) -> list[dict]:
         """Run every job and return the results, including a partial run.
@@ -471,11 +523,12 @@ class Engine:
                 results.append(result)
             self._maybe_unload(index, job)
 
-        self.emit(
-            RunCompleted(
-                results, self.controls.stopped, round(time.time() - started, 1)
-            )
+        elapsed = (
+            round(sum(result["total_time"] for result in results), 1)
+            if getattr(self.client, "simulated_timing", False)
+            else round(time.time() - started, 1)
         )
+        self.emit(RunCompleted(results, self.controls.stopped, elapsed))
         return results
 
     def _maybe_unload(self, index: int, job: JobSpec) -> None:
@@ -490,6 +543,23 @@ class Engine:
         except Exception:
             pass
 
+    def _max_parallel_requests(self, model: str, total: int) -> int:
+        """Resolve a safe worker count, keeping unknown clients serial."""
+        if total <= 1:
+            return 1
+        discover = getattr(self.client, "max_parallel_requests", None)
+        if not callable(discover):
+            return 1
+        try:
+            capacity = discover(model)
+            if isinstance(capacity, bool):
+                return 1
+            return min(total, max(1, int(capacity)))
+        except Exception:
+            # Capacity discovery is an optional optimization. A missing or
+            # non-standard monitoring endpoint must never block a benchmark.
+            return 1
+
     def _run_job(
         self, index: int, job: JobSpec, overall_total: int
     ) -> tuple[dict | None, bool]:
@@ -503,347 +573,165 @@ class Engine:
             start, end, slice_spec = 0, len(all_tasks), None
         tasks = all_tasks[start:end]
 
-        self.emit(JobStarted(index, job, len(tasks), overall_total))
+        concurrency = self._max_parallel_requests(job.model, len(tasks))
+        wall_start = time.perf_counter()
+        self.emit(
+            JobStarted(
+                index,
+                job,
+                len(tasks),
+                overall_total,
+                concurrency=concurrency,
+            )
+        )
+
+        if not tasks:
+            return None, False
 
         passed = 0
         errors = 0
         total_tokens = 0
         total_eval_ns = 0
         total_response_time = 0.0
-        records: list[TaskRecord] = []
+        records_by_position: dict[int, TaskRecord] = {}
         skipped = False
-        wall_start = time.time()
         paused_time = 0.0
+        next_position = 0
+        futures: set[Future[_GeneratedTask]] = set()
 
-        for position, task in enumerate(tasks):
-            if self.controls.paused:
-                pause_started = time.time()
-                self.controls.wait_while_paused()
-                paused_time += time.time() - pause_started
-            if self.controls.stopped:
-                break
-            if self.controls.take_skip():
-                skipped = True
-                break
+        with ThreadPoolExecutor(
+            max_workers=concurrency,
+            thread_name_prefix=f"benchkit-{index}",
+        ) as pool:
 
-            prompt = bench.build_prompt(task)
-            error = ""
-            phase = TaskPhase(
-                index=index,
-                job=job,
-                position=position + 1,
-                total=len(tasks),
-                task_id=task.id,
-                entry_point=str(task.metadata.get("entry_point", "")),
-                phase="generating",
-                activity="waiting for model",
-            )
-            self.emit(phase)
-            analyzer = LoopAnalyzer()
-            last_progress_emit = 0.0
-            last_progress_state = ""
-            reasoning_channel_seen = False
-            first_answer_at: float | None = None
-            loop_detected_at: float | None = None
-            loop_above_since: float | None = None
-            loop_killed_at_s: float | None = None
-            loop_kill_score = 0.0
-
-            def on_progress(update: GenerationUpdate) -> None:
-                nonlocal first_answer_at
-                nonlocal last_progress_emit
-                nonlocal last_progress_state
-                nonlocal loop_above_since
-                nonlocal loop_detected_at
-                nonlocal loop_killed_at_s
-                nonlocal loop_kill_score
-                nonlocal reasoning_channel_seen
-
-                # Raising here unwinds the HTTP stream on the same thread
-                # currently reading it. This is more reliable than waiting
-                # for another thread to close a blocked response.
-                if self.controls.cancel_requested:
-                    raise _GenerationCancelled
-
-                analyzer.add(thinking=update.thinking, answer=update.response)
-                reasoning_channel_seen = (
-                    reasoning_channel_seen or update.reasoning_channel_seen
-                )
-                if update.response and first_answer_at is None:
-                    first_answer_at = update.elapsed_s
-
-                if analyzer.answer_chars:
-                    live_phase = "answering"
-                elif analyzer.thinking_chars:
-                    live_phase = "thinking"
-                else:
-                    live_phase = "waiting"
-
-                trace_status = (
-                    "observed"
-                    if analyzer.thinking_chars
-                    else "available_empty"
-                    if reasoning_channel_seen
-                    else "unavailable"
-                )
-                state_key = f"{live_phase}:{trace_status}"
-                now = time.monotonic()
-                if (
-                    not update.done
-                    and state_key == last_progress_state
-                    and now - last_progress_emit < 0.25
+            def fill_workers() -> None:
+                nonlocal next_position
+                while (
+                    len(futures) < concurrency
+                    and next_position < len(tasks)
+                    and not self.controls.paused
+                    and not self.controls.stopped
+                    and not self.controls.skip_requested
                 ):
-                    return
-                snapshot = analyzer.snapshot()
-                if snapshot.state == "looping" and loop_detected_at is None:
-                    loop_detected_at = update.elapsed_s
-                threshold = self.loop_kill_percent / 100
-                if not self.loop_kill_enabled:
-                    loop_above_since = None
-                    remaining = None
-                elif snapshot.confirmed_cycle and snapshot.score >= threshold:
-                    if loop_above_since is None:
-                        loop_above_since = now
-                    above_for = now - loop_above_since
-                    remaining = max(0.0, self.loop_kill_seconds - above_for)
-                    if above_for >= self.loop_kill_seconds and not update.done:
-                        loop_killed_at_s = update.elapsed_s
-                        loop_kill_score = snapshot.score
-                        raise _DoomLoopKilled
-                else:
-                    loop_above_since = None
-                    remaining = None
-                last_progress_emit = now
-                last_progress_state = state_key
-                self.emit(
-                    GenerationProgress(
-                        index=index,
-                        job=job,
-                        position=position + 1,
-                        total=len(tasks),
-                        task_id=task.id,
-                        entry_point=str(task.metadata.get("entry_point", "")),
-                        phase=live_phase,
-                        elapsed_s=round(update.elapsed_s, 2),
-                        thinking_chars=analyzer.thinking_chars,
-                        response_chars=analyzer.answer_chars,
-                        trace_status=trace_status,
-                        loop_state=snapshot.state,
-                        loop_score=snapshot.score,
-                        loop_source=snapshot.source,
-                        loop_kill_remaining_s=(
-                            round(remaining, 2) if remaining is not None else None
-                        ),
-                        prompt=prompt,
-                        thinking=analyzer.thinking,
-                        response=analyzer.answer,
+                    position = next_position
+                    next_position += 1
+                    future = pool.submit(
+                        self._generate_task,
+                        index,
+                        job,
+                        position,
+                        len(tasks),
+                        tasks[position],
+                        bench,
                     )
-                )
+                    futures.add(future)
 
+            fill_workers()
             try:
-                gen = self.client.generate(
-                    job.model,
-                    prompt,
-                    on_progress=on_progress,
-                    cancel_event=self.controls.cancel_event,
-                )
-            except _GenerationCancelled:
-                gen = dict(ERROR_GENERATION)
-                gen.update(done_reason="cancelled", cancelled=True)
-            except _DoomLoopKilled:
-                elapsed_s = loop_killed_at_s or 0.0
-                thinking = analyzer.thinking
-                response = analyzer.answer
-                gen = dict(ERROR_GENERATION)
-                gen.update(
-                    thinking=thinking,
-                    response=response,
-                    response_time_s=elapsed_s,
-                    done_reason="loop_killed",
-                    loop_killed=True,
-                    loop_kill_score=loop_kill_score,
-                    loop_killed_at_s=elapsed_s,
-                    trace_status=(
-                        "observed"
-                        if thinking
-                        else "available_empty"
-                        if reasoning_channel_seen
-                        else "unavailable"
-                    ),
-                )
-            except Exception as exc:
-                gen = dict(ERROR_GENERATION)
-                if self.controls.cancel_requested:
-                    gen.update(done_reason="cancelled", cancelled=True)
-                elif isinstance(exc, (TimeoutError, httpx.TimeoutException)):
-                    error = f"generation timed out after {self.client.timeout:g}s"
-                    gen.update(
-                        done_reason="timeout",
-                        timed_out=True,
-                        response_time_s=self.client.timeout,
+                while futures or next_position < len(tasks):
+                    if not futures:
+                        if self.controls.stopped or self.controls.skip_requested:
+                            break
+                        if self.controls.paused:
+                            pause_started = time.perf_counter()
+                            self.controls.wait_while_paused()
+                            paused_time += time.perf_counter() - pause_started
+                            if self.controls.stopped or self.controls.skip_requested:
+                                break
+                        fill_workers()
+                        if not futures:
+                            continue
+
+                    done, _ = wait(
+                        tuple(futures),
+                        timeout=0.05,
+                        return_when=FIRST_COMPLETED,
                     )
-                else:
-                    error = f"{type(exc).__name__}: {exc}"
-                if not gen.get("cancelled"):
-                    errors += 1
+                    if not done:
+                        continue
 
-            # Stop/skip abandon the partial task without evaluating it. Skip
-            # consumes and resets the request-cancel signal for the next job.
-            if self.controls.stopped:
-                break
-            if self.controls.take_skip():
-                skipped = True
-                break
-            if gen.get("cancelled"):
-                break
+                    generated_batch: list[_GeneratedTask] = []
+                    for future in done:
+                        futures.discard(future)
+                        generated_batch.append(future.result())
 
-            # Preserve confirmed/recovered live evidence when the provider's
-            # final payload agrees with its stream. If a custom client returns
-            # different content, rebuild from that authoritative payload.
-            final_analyzer = analyzer
-            final_thinking = gen.get("thinking", "") or ""
-            final_answer = gen.get("response", "") or ""
-            if not final_analyzer.reconcile(
-                thinking=final_thinking,
-                answer=final_answer,
-            ):
-                final_analyzer = LoopAnalyzer()
-                final_analyzer.add(
-                    thinking=final_thinking,
-                    answer=final_answer,
-                )
-            loop = final_analyzer.snapshot(final=True)
-            if loop.state == "looping" and loop_detected_at is None:
-                loop_detected_at = gen.get("response_time_s", 0.0)
-            if first_answer_at is None and gen.get("response"):
-                first_answer_at = gen.get("response_time_s", 0.0)
+                    # Refill request slots before evaluation so the next
+                    # generations can overlap local benchmark scoring.
+                    fill_workers()
 
-            timed_out = bool(gen.get("timed_out"))
-            loop_killed = bool(gen.get("loop_killed"))
-            if loop_killed:
-                ok = False
-                error = (
-                    "doom loop killed after a confirmed active cycle stayed at or above "
-                    f"{self.loop_kill_percent:g}% for "
-                    f"{self.loop_kill_seconds:g}s"
-                )
-                errors += 1
-                self.emit(
-                    TaskPhase(
-                        index=phase.index,
-                        job=phase.job,
-                        position=phase.position,
-                        total=phase.total,
-                        task_id=phase.task_id,
-                        entry_point=phase.entry_point,
-                        phase="loop_killed",
-                        activity="doom loop killed — skipping task",
-                    )
-                )
-            elif timed_out:
-                ok = False
-                if not error:
-                    error = f"generation timed out after {self.client.timeout:g}s"
-                    errors += 1
-                self.emit(
-                    TaskPhase(
-                        index=phase.index,
-                        job=phase.job,
-                        position=phase.position,
-                        total=phase.total,
-                        task_id=phase.task_id,
-                        entry_point=phase.entry_point,
-                        phase="timed_out",
-                        activity="timed out — skipping task",
-                    )
-                )
-            else:
-                self.emit(
-                    TaskPhase(
-                        index=phase.index,
-                        job=phase.job,
-                        position=phase.position,
-                        total=phase.total,
-                        task_id=phase.task_id,
-                        entry_point=phase.entry_point,
-                        phase="evaluating",
-                        activity=getattr(
-                            bench, "evaluation_activity", "evaluating response"
-                        ),
-                    )
-                )
-                try:
-                    ok = bool(bench.evaluate(task, gen["response"]))
-                except Exception as exc:
-                    ok = False
-                    if not error:
-                        error = f"evaluation failed: {type(exc).__name__}: {exc}"
-                        errors += 1
+                    if self.controls.stopped or self.controls.skip_requested:
+                        continue
 
-            if ok:
-                passed += 1
+                    for generated in sorted(
+                        generated_batch, key=lambda item: item.position
+                    ):
+                        outcome = self._finalize_task(
+                            index,
+                            job,
+                            len(tasks),
+                            bench,
+                            generated,
+                        )
+                        if outcome is None:
+                            continue
+                        record = outcome.record
+                        records_by_position[record.index] = record
+                        passed += int(record.passed)
+                        errors += outcome.errors
+                        total_tokens += outcome.eval_count
+                        total_eval_ns += outcome.eval_duration_ns
+                        total_response_time += outcome.response_time_s
+                        completed = len(records_by_position)
+                        self.emit(
+                            TaskCompleted(
+                                index,
+                                job,
+                                record,
+                                passed,
+                                completed,
+                            )
+                        )
+            except Exception:
+                self.controls.cancel_active()
+                for future in futures:
+                    future.cancel()
+                raise
 
-            total_tokens += gen["eval_count"]
-            total_eval_ns += gen["eval_duration_ns"]
-            total_response_time += gen["response_time_s"]
+        if self.controls.skip_requested:
+            skipped = self.controls.take_skip()
 
-            record = TaskRecord(
-                index=position,
-                task_id=task.id,
-                passed=ok,
-                tok_s=round(gen["tok_s"], 1),
-                response_time_s=round(gen["response_time_s"], 2),
-                prompt=prompt,
-                response=gen["response"],
-                error=error,
-                entry_point=str(task.metadata.get("entry_point", "")),
-                thinking=gen.get("thinking", ""),
-                output_tokens=int(gen.get("eval_count", 0)),
-                done_reason=gen.get("done_reason", ""),
-                timed_out=timed_out,
-                loop_killed=loop_killed,
-                loop_kill_score=float(gen.get("loop_kill_score", 0.0)),
-                loop_killed_at_s=gen.get("loop_killed_at_s"),
-                trace_status=gen.get("trace_status", "unavailable"),
-                thinking_time_s=round(
-                    (
-                        first_answer_at
-                        if first_answer_at is not None
-                        else gen.get("response_time_s", 0.0)
-                    )
-                    if gen.get("thinking")
-                    else 0.0,
-                    2,
-                ),
-                time_to_first_answer_s=(
-                    round(first_answer_at, 2) if first_answer_at is not None else None
-                ),
-                loop_state=loop.state,
-                loop_score=loop.score,
-                loop_source=loop.source,
-                loop_detected_at_s=(
-                    round(loop_detected_at, 2) if loop_detected_at is not None else None
-                ),
-                repeated_ngram_coverage=loop.repeated_ngram_coverage,
-                max_window_similarity=loop.max_window_similarity,
-                low_novelty_windows=loop.low_novelty_windows,
-                max_repeated_block=loop.max_repeated_block,
-                loop_evidence=loop.evidence,
-                active_cycle=loop.active_cycle,
-                recovered_cycle=loop.recovered_cycle,
-                cycle_period_tokens=loop.cycle_period_tokens,
-                cycle_repetitions=loop.cycle_repetitions,
-                repeated_suffix_tokens=loop.repeated_suffix_tokens,
-            )
-            records.append(record)
-            self.emit(TaskCompleted(index, job, record, passed, position + 1))
-
-        if not records:
+        if not records_by_position:
             return None, skipped
 
-        total_time = round(time.time() - wall_start - paused_time, 1)
+        records = [
+            records_by_position[position] for position in sorted(records_by_position)
+        ]
+        measured_wall_time_s = max(
+            0.0, time.perf_counter() - wall_start - paused_time
+        )
+        # Demo mode deliberately accelerates its fake generations. Use their
+        # simulated request durations so its reports still demonstrate
+        # internally consistent throughput rather than thousands of tok/s.
+        wall_time_s = (
+            total_response_time / concurrency
+            if getattr(self.client, "simulated_timing", False)
+            and total_response_time > 0
+            else measured_wall_time_s
+        )
+        total_time = round(wall_time_s, 1)
         completed = len(records)
-        tok_s = total_tokens / (total_eval_ns / 1e9) if total_eval_ns > 0 else 0.0
+        throughput = throughput_metrics(
+            output_tokens=total_tokens,
+            generation_time_s=total_eval_ns / 1e9,
+            request_time_s=total_response_time,
+            wall_time_s=wall_time_s,
+        )
+        tok_s_per_stream = round(throughput["tok_s_per_stream"], 1)
+        tok_s_aggregate = round(throughput["tok_s_aggregate"], 1)
+        concurrency_eff = round(
+            min(float(concurrency), throughput["concurrency_eff"]),
+            2,
+        )
         score = passed / completed * 100 if completed else 0.0
         loops = sum(record.loop_state == "looping" for record in records)
         suspected = sum(
@@ -869,10 +757,19 @@ class Engine:
             "score": round(score, 1),
             "passed": passed,
             "total": completed,
-            "tok_s": round(tok_s, 1),
+            # Keep ``tok_s`` as a compatibility alias for consumers of older
+            # BenchKit JSON. New displays use the explicitly named metrics.
+            "tok_s": tok_s_per_stream,
+            "tok_s_per_stream": tok_s_per_stream,
+            "tok_s_aggregate": tok_s_aggregate,
+            "concurrency_eff": concurrency_eff,
+            "total_output_tokens": total_tokens,
+            "sum_generation_time": round(total_eval_ns / 1e9, 3),
+            "sum_request_time": round(total_response_time, 3),
             "avg_response_time": round(total_response_time / completed, 1),
             "total_time": total_time,
             "slice": slice_spec,
+            "concurrency": concurrency,
             "errors": errors,
             "timeouts": timeouts,
             "loop_kills": loop_kills,
@@ -929,3 +826,328 @@ class Engine:
             ],
         }
         return result, skipped
+
+    def _generate_task(
+        self,
+        index: int,
+        job: JobSpec,
+        position: int,
+        total: int,
+        task: Task,
+        bench: object,
+    ) -> _GeneratedTask:
+        """Generate one answer in a request worker, including live analysis."""
+        prompt = bench.build_prompt(task)
+        error = ""
+        errors = 0
+        entry_point = str(task.metadata.get("entry_point", ""))
+        self.emit(
+            TaskPhase(
+                index=index,
+                job=job,
+                position=position + 1,
+                total=total,
+                task_id=task.id,
+                entry_point=entry_point,
+                phase="generating",
+                activity="waiting for model",
+            )
+        )
+        analyzer = LoopAnalyzer()
+        last_progress_emit = 0.0
+        last_progress_state = ""
+        reasoning_channel_seen = False
+        first_answer_at: float | None = None
+        loop_detected_at: float | None = None
+        loop_above_since: float | None = None
+        loop_killed_at_s: float | None = None
+        loop_kill_score = 0.0
+
+        def on_progress(update: GenerationUpdate) -> None:
+            nonlocal first_answer_at
+            nonlocal last_progress_emit
+            nonlocal last_progress_state
+            nonlocal loop_above_since
+            nonlocal loop_detected_at
+            nonlocal loop_killed_at_s
+            nonlocal loop_kill_score
+            nonlocal reasoning_channel_seen
+
+            if self.controls.cancel_requested:
+                raise _GenerationCancelled
+
+            analyzer.add(thinking=update.thinking, answer=update.response)
+            reasoning_channel_seen = (
+                reasoning_channel_seen or update.reasoning_channel_seen
+            )
+            if update.response and first_answer_at is None:
+                first_answer_at = update.elapsed_s
+
+            if analyzer.answer_chars:
+                live_phase = "answering"
+            elif analyzer.thinking_chars:
+                live_phase = "thinking"
+            else:
+                live_phase = "waiting"
+
+            trace_status = (
+                "observed"
+                if analyzer.thinking_chars
+                else "available_empty"
+                if reasoning_channel_seen
+                else "unavailable"
+            )
+            state_key = f"{live_phase}:{trace_status}"
+            now = time.monotonic()
+            if (
+                not update.done
+                and state_key == last_progress_state
+                and now - last_progress_emit < 0.25
+            ):
+                return
+            snapshot = analyzer.snapshot()
+            if snapshot.state == "looping" and loop_detected_at is None:
+                loop_detected_at = update.elapsed_s
+            threshold = self.loop_kill_percent / 100
+            if not self.loop_kill_enabled:
+                loop_above_since = None
+                remaining = None
+            elif snapshot.confirmed_cycle and snapshot.score >= threshold:
+                if loop_above_since is None:
+                    loop_above_since = now
+                above_for = now - loop_above_since
+                remaining = max(0.0, self.loop_kill_seconds - above_for)
+                if above_for >= self.loop_kill_seconds and not update.done:
+                    loop_killed_at_s = update.elapsed_s
+                    loop_kill_score = snapshot.score
+                    raise _DoomLoopKilled
+            else:
+                loop_above_since = None
+                remaining = None
+            last_progress_emit = now
+            last_progress_state = state_key
+            self.emit(
+                GenerationProgress(
+                    index=index,
+                    job=job,
+                    position=position + 1,
+                    total=total,
+                    task_id=task.id,
+                    entry_point=entry_point,
+                    phase=live_phase,
+                    elapsed_s=round(update.elapsed_s, 2),
+                    thinking_chars=analyzer.thinking_chars,
+                    response_chars=analyzer.answer_chars,
+                    trace_status=trace_status,
+                    loop_state=snapshot.state,
+                    loop_score=snapshot.score,
+                    loop_source=snapshot.source,
+                    loop_kill_remaining_s=(
+                        round(remaining, 2) if remaining is not None else None
+                    ),
+                    prompt=prompt,
+                    thinking=analyzer.thinking,
+                    response=analyzer.answer,
+                )
+            )
+
+        try:
+            gen = self.client.generate(
+                job.model,
+                prompt,
+                on_progress=on_progress,
+                cancel_event=self.controls.cancel_event,
+            )
+        except _GenerationCancelled:
+            gen = dict(ERROR_GENERATION)
+            gen.update(done_reason="cancelled", cancelled=True)
+        except _DoomLoopKilled:
+            elapsed_s = loop_killed_at_s or 0.0
+            thinking = analyzer.thinking
+            response = analyzer.answer
+            gen = dict(ERROR_GENERATION)
+            gen.update(
+                thinking=thinking,
+                response=response,
+                response_time_s=elapsed_s,
+                done_reason="loop_killed",
+                loop_killed=True,
+                loop_kill_score=loop_kill_score,
+                loop_killed_at_s=elapsed_s,
+                trace_status=(
+                    "observed"
+                    if thinking
+                    else "available_empty"
+                    if reasoning_channel_seen
+                    else "unavailable"
+                ),
+            )
+        except Exception as exc:
+            gen = dict(ERROR_GENERATION)
+            if self.controls.cancel_requested:
+                gen.update(done_reason="cancelled", cancelled=True)
+            elif isinstance(exc, (TimeoutError, httpx.TimeoutException)):
+                error = f"generation timed out after {self.client.timeout:g}s"
+                gen.update(
+                    done_reason="timeout",
+                    timed_out=True,
+                    response_time_s=self.client.timeout,
+                )
+            else:
+                error = f"{type(exc).__name__}: {exc}"
+            if not gen.get("cancelled"):
+                errors += 1
+
+        return _GeneratedTask(
+            position=position,
+            task=task,
+            prompt=prompt,
+            gen=gen,
+            error=error,
+            errors=errors,
+            analyzer=analyzer,
+            first_answer_at=first_answer_at,
+            loop_detected_at=loop_detected_at,
+        )
+
+    def _finalize_task(
+        self,
+        index: int,
+        job: JobSpec,
+        total: int,
+        bench: object,
+        generated: _GeneratedTask,
+    ) -> _TaskOutcome | None:
+        """Evaluate a generated answer and build its deterministic task record."""
+        gen = generated.gen
+        if (
+            self.controls.stopped
+            or self.controls.skip_requested
+            or gen.get("cancelled")
+        ):
+            return None
+
+        position = generated.position
+        task = generated.task
+        prompt = generated.prompt
+        error = generated.error
+        errors = generated.errors
+        entry_point = str(task.metadata.get("entry_point", ""))
+
+        final_analyzer = generated.analyzer
+        final_thinking = gen.get("thinking", "") or ""
+        final_answer = gen.get("response", "") or ""
+        if not final_analyzer.reconcile(
+            thinking=final_thinking,
+            answer=final_answer,
+        ):
+            final_analyzer = LoopAnalyzer()
+            final_analyzer.add(
+                thinking=final_thinking,
+                answer=final_answer,
+            )
+        loop = final_analyzer.snapshot(final=True)
+        loop_detected_at = generated.loop_detected_at
+        if loop.state == "looping" and loop_detected_at is None:
+            loop_detected_at = gen.get("response_time_s", 0.0)
+        first_answer_at = generated.first_answer_at
+        if first_answer_at is None and gen.get("response"):
+            first_answer_at = gen.get("response_time_s", 0.0)
+
+        timed_out = bool(gen.get("timed_out"))
+        loop_killed = bool(gen.get("loop_killed"))
+        if loop_killed:
+            ok = False
+            error = (
+                "doom loop killed after a confirmed active cycle stayed at or above "
+                f"{self.loop_kill_percent:g}% for "
+                f"{self.loop_kill_seconds:g}s"
+            )
+            errors += 1
+            phase = "loop_killed"
+            activity = "doom loop killed — skipping task"
+        elif timed_out:
+            ok = False
+            if not error:
+                error = f"generation timed out after {self.client.timeout:g}s"
+                errors += 1
+            phase = "timed_out"
+            activity = "timed out — skipping task"
+        else:
+            phase = "evaluating"
+            activity = getattr(bench, "evaluation_activity", "evaluating response")
+
+        self.emit(
+            TaskPhase(
+                index=index,
+                job=job,
+                position=position + 1,
+                total=total,
+                task_id=task.id,
+                entry_point=entry_point,
+                phase=phase,
+                activity=activity,
+            )
+        )
+
+        if not loop_killed and not timed_out:
+            try:
+                ok = bool(bench.evaluate(task, gen["response"]))
+            except Exception as exc:
+                ok = False
+                if not error:
+                    error = f"evaluation failed: {type(exc).__name__}: {exc}"
+                    errors += 1
+
+        response_time_s = float(gen.get("response_time_s", 0.0))
+        record = TaskRecord(
+            index=position,
+            task_id=task.id,
+            passed=ok,
+            tok_s=round(float(gen.get("tok_s", 0.0)), 1),
+            response_time_s=round(response_time_s, 2),
+            prompt=prompt,
+            response=gen.get("response", ""),
+            error=error,
+            entry_point=entry_point,
+            thinking=gen.get("thinking", ""),
+            output_tokens=int(gen.get("eval_count", 0)),
+            done_reason=gen.get("done_reason", ""),
+            timed_out=timed_out,
+            loop_killed=loop_killed,
+            loop_kill_score=float(gen.get("loop_kill_score", 0.0)),
+            loop_killed_at_s=gen.get("loop_killed_at_s"),
+            trace_status=gen.get("trace_status", "unavailable"),
+            thinking_time_s=round(
+                (first_answer_at if first_answer_at is not None else response_time_s)
+                if gen.get("thinking")
+                else 0.0,
+                2,
+            ),
+            time_to_first_answer_s=(
+                round(first_answer_at, 2) if first_answer_at is not None else None
+            ),
+            loop_state=loop.state,
+            loop_score=loop.score,
+            loop_source=loop.source,
+            loop_detected_at_s=(
+                round(loop_detected_at, 2) if loop_detected_at is not None else None
+            ),
+            repeated_ngram_coverage=loop.repeated_ngram_coverage,
+            max_window_similarity=loop.max_window_similarity,
+            low_novelty_windows=loop.low_novelty_windows,
+            max_repeated_block=loop.max_repeated_block,
+            loop_evidence=loop.evidence,
+            active_cycle=loop.active_cycle,
+            recovered_cycle=loop.recovered_cycle,
+            cycle_period_tokens=loop.cycle_period_tokens,
+            cycle_repetitions=loop.cycle_repetitions,
+            repeated_suffix_tokens=loop.repeated_suffix_tokens,
+        )
+        return _TaskOutcome(
+            record=record,
+            errors=errors,
+            eval_count=int(gen.get("eval_count", 0)),
+            eval_duration_ns=int(gen.get("eval_duration_ns", 0)),
+            response_time_s=response_time_s,
+        )
