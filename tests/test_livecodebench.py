@@ -171,9 +171,7 @@ class DatasetTests(unittest.TestCase):
     def test_tasks_carry_difficulty_and_run_oldest_first(self) -> None:
         tasks = self.bench.load_tasks()
         self.assertEqual([task.id for task in tasks], ["stdin-1", "func-1"])
-        self.assertEqual(
-            [task.metadata["group"] for task in tasks], ["hard", "easy"]
-        )
+        self.assertEqual([task.metadata["group"] for task in tasks], ["hard", "easy"])
         self.assertEqual(self.bench.task_count, 2)
 
     def test_window_filters_by_contest_date(self) -> None:
@@ -192,9 +190,7 @@ class DatasetTests(unittest.TestCase):
         self.assertIn("2025-01-01 onwards", note)
 
     def _task(self, task_id: str):
-        return next(
-            task for task in self.bench.load_tasks() if task.id == task_id
-        )
+        return next(task for task in self.bench.load_tasks() if task.id == task_id)
 
     def test_correct_functional_solution_passes_hidden_tests(self) -> None:
         response = (

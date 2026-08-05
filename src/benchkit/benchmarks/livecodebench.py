@@ -20,10 +20,10 @@ import json
 import os
 import pickle
 import zlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Iterator
 
 import httpx
 
@@ -42,8 +42,7 @@ SHARDS = (
     "test6.jsonl",
 )
 DEFAULT_BASE_URL = (
-    "https://huggingface.co/datasets/livecodebench/code_generation_lite/"
-    "resolve/main"
+    "https://huggingface.co/datasets/livecodebench/code_generation_lite/resolve/main"
 )
 
 # Problems released from August 2024 onwards. Most of the 4-35B models BenchKit
@@ -138,9 +137,7 @@ class Window:
             return False
         if self.after is not None and day < self.after:
             return False
-        if self.before is not None and day > self.before:
-            return False
-        return True
+        return not (self.before is not None and day > self.before)
 
     @property
     def label(self) -> str:
@@ -169,9 +166,7 @@ def window() -> Window:
         if after_raw.lower() in {"all", "none", "-"}
         else _parse_day(after_raw, end_of_month=False)
     )
-    before = (
-        _parse_day(before_raw, end_of_month=True) if before_raw else None
-    )
+    before = _parse_day(before_raw, end_of_month=True) if before_raw else None
     if after is not None and before is not None and before < after:
         raise ValueError(
             f"Empty LiveCodeBench window: {after.isoformat()} is after "
@@ -191,7 +186,7 @@ class _NoGlobalsUnpickler(pickle.Unpickler):
     keeps a downloaded file from executing code while it is decoded.
     """
 
-    def find_class(self, module: str, name: str):  # noqa: D102 - see class doc
+    def find_class(self, module: str, name: str):
         raise pickle.UnpicklingError(
             f"refusing to load {module}.{name} from LiveCodeBench test data"
         )
@@ -446,7 +441,7 @@ def extract_code(response: str) -> str:
 
 # Sandbox harness -------------------------------------------------------
 
-_HARNESS = '''
+_HARNESS = """
 import io
 import json
 import sys
@@ -549,7 +544,7 @@ if _FUNC:
     _run_functional()
 else:
     _run_stdin()
-'''
+"""
 
 
 def _harness(solution: str, tests: list[dict], func_name: str, budget: int) -> str:
@@ -567,6 +562,7 @@ def _harness(solution: str, tests: list[dict], func_name: str, budget: int) -> s
 class LiveCodeBench:
     name = "livecodebench"
     evaluation_activity = "executing code and running hidden tests"
+    list_note = "downloads on first use · benchkit lcb-prepare"
     group_order = DIFFICULTIES
 
     def __init__(self) -> None:
@@ -619,10 +615,7 @@ class LiveCodeBench:
         an unknown count; the run itself fetches what it needs.
         """
         if not is_prepared():
-            raise DatasetUnavailable(
-                "The LiveCodeBench dataset is not cached yet. Fetch it with: "
-                "benchkit lcb-prepare"
-            )
+            raise DatasetUnavailable("not cached yet — run: benchkit lcb-prepare")
         return len(self.load_tasks())
 
     @property

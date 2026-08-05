@@ -507,7 +507,9 @@ def _result_metadata(job: JobSpec) -> dict:
     return dict(value) if isinstance(value, dict) else {}
 
 
-def group_breakdown(records: list[TaskRecord], order: tuple[str, ...] = ()) -> list[dict]:
+def group_breakdown(
+    records: list[TaskRecord], order: tuple[str, ...] = ()
+) -> list[dict]:
     """Per-group pass rates for a benchmark that labels its tasks.
 
     A benchmark opts in by putting a ``group`` in each task's metadata (
