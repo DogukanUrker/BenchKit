@@ -17,6 +17,7 @@ from benchkit.tui.formatting import (
     fmt_duration,
     result_color,
     score_color,
+    throughput_stat,
 )
 from benchkit.tui.screens.modals import TaskDetailScreen
 from benchkit.tui.widgets import SectionTitle, StatCard, apply_compact
@@ -56,7 +57,8 @@ class JobDetailScreen(Screen[None]):
 
     def on_mount(self) -> None:
         result = self.result
-        self.title = f"{result['benchmark']} · {result['model']}"
+        benchmark_label = result.get("benchmark_label", result["benchmark"])
+        self.title = f"{benchmark_label} · {result['model']}"
         self.sub_title = f"{result['passed']}/{result['total']} passed"
 
         table = self.query_one("#task-table", DataTable)
@@ -83,10 +85,14 @@ class JobDetailScreen(Screen[None]):
             f"{result.get('recovered_loops', 0)} recovered · "
             f"{result.get('loop_kills', 0)} killed",
         )
-        self.query_one("#stat-speed", StatCard).set_state(
-            f"{aggregate_tok_s(result):.1f} tok/s",
-            f"aggregate · {stream_tok_s(result):.1f} stream · "
-            f"{effective_concurrency(result):.2f}x effective",
+        speed = self.query_one("#stat-speed", StatCard)
+        speed.set_state(
+            *throughput_stat(
+                concurrency=result.get("concurrency", 1),
+                aggregate=aggregate_tok_s(result),
+                stream=stream_tok_s(result),
+                effective=effective_concurrency(result),
+            )
         )
         self.query_one("#stat-latency", StatCard).set_state(
             f"{result['avg_response_time']}s"
@@ -168,7 +174,8 @@ class JobDetailScreen(Screen[None]):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         index = int(str(event.row_key.value))
         task = self.result["tasks"][index]
-        title = f"{self.result['benchmark']} · {self.result['model']}"
+        benchmark_label = self.result.get("benchmark_label", self.result["benchmark"])
+        title = f"{benchmark_label} · {self.result['model']}"
         self.app.push_screen(TaskDetailScreen(title, task))
 
     # Actions ----------------------------------------------------------
@@ -196,9 +203,16 @@ def _result_cell(task: dict, dark: bool = True) -> Text:
         if error
         else "PASS"
         if passed
+        else f"{float(task.get('score', 0)):.0f}%"
+        if float(task.get("score", 0)) > 0
         else "FAIL"
     )
-    return Text(label, style=f"bold {result_color(passed, error, dark)}")
+    color = (
+        score_color(float(task.get("score", 0)), dark)
+        if not passed and float(task.get("score", 0)) > 0 and not error
+        else result_color(passed, error, dark)
+    )
+    return Text(label, style=f"bold {color}")
 
 
 def _loop_cell(task: dict) -> Text:

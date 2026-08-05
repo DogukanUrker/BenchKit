@@ -17,7 +17,7 @@ from collections.abc import Callable
 
 from benchkit.benchmarks.base import Task
 from benchkit.client import GenerationUpdate
-from benchkit.engine import benchmark, tasks_for
+from benchkit.engine import benchmark, prompt_for, tasks_for
 
 LETTERS = "ABCD"
 
@@ -199,6 +199,10 @@ def _good_answer(task: Task, solution: str | None) -> str:
     if "instruction_id_list" in metadata:
         return _ifeval_answer(task)
 
+    answers = metadata.get("answers")
+    if isinstance(answers, (list, tuple)):
+        return ", ".join(str(answer) for answer in answers)
+
     answer = metadata.get("answer")
     if isinstance(answer, bool):
         return "Yes" if answer else "No"
@@ -218,6 +222,9 @@ def _bad_answer(task: Task, has_solution: bool) -> str:
 
     if "instruction_id_list" in metadata:
         return "Sure, here is a quick answer that ignores the formatting rules."
+
+    if isinstance(metadata.get("answers"), (list, tuple)):
+        return "NOT_FOUND"
 
     answer = metadata.get("answer")
     if isinstance(answer, bool):
@@ -252,8 +259,17 @@ class DemoClient:
                 continue
             bench = benchmark(key)
             solutions = _canonical_solutions(key)
-            for task in tasks_for(key):
-                prompt = bench.build_prompt(task)
+            selected_tasks = tasks_for(key)
+            variants = getattr(bench, "variants", None)
+            select = getattr(bench, "tasks_for_variant", None)
+            if callable(variants) and callable(select):
+                selected_tasks = [
+                    task
+                    for variant in variants(self, DEMO_MODELS[0]["name"])
+                    for task in select(selected_tasks, variant)
+                ]
+            for task in selected_tasks:
+                prompt = prompt_for(bench, task, self, DEMO_MODELS[0]["name"])
                 solution = solutions.get(task.id) or task.metadata.get(
                     "canonical_solution"
                 )
@@ -262,13 +278,22 @@ class DemoClient:
 
     def list_models(self) -> list[dict]:
         return [
-            {"name": model["name"], "size": model["size"], "status": "demo"}
+            {
+                "name": model["name"],
+                "size": model["size"],
+                "status": "demo",
+                "context_length": self.context_length(model["name"]),
+            }
             for model in DEMO_MODELS
         ]
 
     def max_parallel_requests(self, model: str) -> int:
         """Keep the deterministic offline simulation single-threaded."""
         return 1
+
+    def context_length(self, _model: str) -> int:
+        """Keep the offline demo representative without building huge prompts."""
+        return 8192
 
     def unload_model(self, model: str) -> None:
         time.sleep(0.05 / self.speed)

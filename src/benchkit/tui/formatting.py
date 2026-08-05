@@ -33,6 +33,23 @@ def fmt_count(value: int) -> str:
     return f"{value:,}"
 
 
+def throughput_stat(
+    *,
+    concurrency: int,
+    aggregate: float,
+    stream: float,
+    effective: float,
+    precision: int = 1,
+) -> tuple[str, str]:
+    """Format throughput, reserving aggregate metrics for parallel runs."""
+    if concurrency > 1:
+        return (
+            f"{aggregate:.{precision}f} tok/s",
+            f"aggregate · {stream:.{precision}f} stream · {effective:.2f}x effective",
+        )
+    return f"{stream:.{precision}f} tok/s", "single stream"
+
+
 def score_class(score: float) -> str:
     """CSS class name matching a score band."""
     if score >= 80:

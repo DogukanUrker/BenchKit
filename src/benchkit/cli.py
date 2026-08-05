@@ -17,7 +17,14 @@ from rich.text import Text
 
 from benchkit.benchmarks import REGISTRY, all_tags, keys_for_tags, tags_for
 from benchkit.client import InferenceClient
-from benchkit.engine import JobSpec, SliceError, parse_slice, task_count
+from benchkit.engine import (
+    JobSpec,
+    SliceError,
+    expand_jobs,
+    parse_slice,
+    slice_task_count,
+    task_count,
+)
 from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
 from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
 from benchkit.perf_report import save_profile
@@ -183,12 +190,20 @@ def _list_benchmarks(tag: str = "") -> None:
     table.add_column("Benchmark")
     table.add_column("Tasks", justify="right")
     table.add_column("Tags")
+    table.add_column("Notes")
     for key in keys:
         try:
-            count = f"{task_count(key):,}"
+            declared_label = getattr(REGISTRY[key], "list_task_count", "")
+            count = declared_label or f"{task_count(key):,}"
         except Exception:
             count = "?"
-        table.add_row(key, count, f"[dim]{' '.join(tags_for(key))}[/dim]")
+        note = getattr(REGISTRY[key], "list_note", "")
+        table.add_row(
+            key,
+            count,
+            f"[dim]{' '.join(tags_for(key))}[/dim]",
+            f"[yellow]{note}[/yellow]" if note else "",
+        )
     console.print(table)
 
 
@@ -238,7 +253,7 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
             console.print(f"[dim]Available: {', '.join(REGISTRY)}[/dim]")
             sys.exit(1)
         try:
-            total = task_count(key)
+            total = slice_task_count(key)
         except Exception as exc:
             console.print(f"[red]Could not load {key}:[/red] {exc}")
             sys.exit(1)
@@ -271,7 +286,15 @@ def _headless(args: argparse.Namespace) -> None:
         console.print(f"[red]Connection failed:[/red] {exc}")
         sys.exit(1)
 
-    jobs = _headless_jobs(args, [model["name"] for model in models])
+    jobs = expand_jobs(
+        _headless_jobs(args, [model["name"] for model in models]),
+        client,
+    )
+    if not jobs:
+        console.print(
+            "[red]No supported RULER context bucket fits the selected model(s).[/red]"
+        )
+        sys.exit(1)
     if args.demo:
         client.prime(sorted({job.benchmark for job in jobs}))
 
@@ -291,30 +314,49 @@ def _headless(args: argparse.Namespace) -> None:
     # summary is the part of a headless run people copy into a report.
     table.add_column("Model", overflow="fold")
     table.add_column("Benchmark", overflow="fold")
-    table.add_column("Parallel", justify="right", style="dim")
     table.add_column("Score", justify="right")
     table.add_column("P/F/E", justify="right")
     table.add_column("Loops/Killed", justify="right")
-    table.add_column("Agg tok/s", justify="right")
-    table.add_column("Stream tok/s", justify="right", style="dim")
-    table.add_column("Eff", justify="right", style="dim")
+    has_parallel = any(result.get("concurrency", 1) > 1 for result in results)
+    if has_parallel:
+        table.add_column("Parallel", justify="right", style="dim")
+        table.add_column("Agg tok/s", justify="right")
+        table.add_column("Stream tok/s", justify="right", style="dim")
+        table.add_column("Eff", justify="right", style="dim")
+    else:
+        table.add_column("Tok/s", justify="right")
     table.add_column("Avg Time", justify="right", style="dim")
     table.add_column("Wall", justify="right", style="dim")
 
     for result in results:
         passed, failed, errors = _outcome_counts(result)
-        table.add_row(
+        parallel = result.get("concurrency", 1) > 1
+        row = [
             result["model"],
-            result["benchmark"],
-            str(result.get("concurrency", 1)),
+            result.get("benchmark_label", result["benchmark"]),
             _score_text(result["score"]),
             f"{passed}/{failed}/{errors}",
             f"{result.get('loops', 0)}/{result.get('loop_kills', 0)}",
-            f"{aggregate_tok_s(result):.1f}",
-            f"{stream_tok_s(result):.1f}",
-            f"{effective_concurrency(result):.2f}x",
-            f"{result['avg_response_time']}s",
-            _fmt_time(result["total_time"]),
+        ]
+        if has_parallel:
+            row.extend(
+                [
+                    str(result.get("concurrency", 1)),
+                    f"{aggregate_tok_s(result):.1f}" if parallel else "—",
+                    f"{stream_tok_s(result):.1f}",
+                    f"{effective_concurrency(result):.2f}x" if parallel else "—",
+                ]
+            )
+        else:
+            row.append(f"{stream_tok_s(result):.1f}")
+        row.extend(
+            [
+                f"{result['avg_response_time']}s",
+                _fmt_time(result["total_time"]),
+            ]
+        )
+        table.add_row(
+            *row,
         )
 
     console.print()
@@ -504,6 +546,10 @@ def _perf(args: argparse.Namespace) -> None:
     console.print(
         f"[dim]Saved:[/dim] [white]{output}[/white] "
         "[dim]· perf.json · csv · md · html[/dim]"
+    )
+    console.print(
+        "[dim]Tip: Run the ruler benchmark to verify how much of the configured "
+        "context window is actually usable.[/dim]"
     )
 
 

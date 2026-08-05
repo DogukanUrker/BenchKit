@@ -86,8 +86,9 @@ def save(
             "|-------|-----------|----------|-------|--------|-------|-------|--------|-------|-----------|--------------|-----------|----------|-----------|\n"
         )
         for result in results:
+            benchmark_label = result.get("benchmark_label", result["benchmark"])
             f.write(
-                f"| {result['model']} | {result['benchmark']} "
+                f"| {result['model']} | {benchmark_label} "
                 f"| {result.get('concurrency', 1)} | {result['score']}% "
                 f"| {result['passed']} "
                 f"| {result['total']} | {result.get('loop_rate', 0)}% "
@@ -108,7 +109,8 @@ def save(
 
         f.write("\n---\n\n")
         for result in results:
-            f.write(f"## {result['model']} / {result['benchmark']}\n\n")
+            benchmark_label = result.get("benchmark_label", result["benchmark"])
+            f.write(f"## {result['model']} / {benchmark_label}\n\n")
             for task in result["tasks"]:
                 task_id = task["task_id"]
                 entry = task.get("entry_point")
@@ -122,6 +124,8 @@ def save(
                     if task.get("error")
                     else "✅ PASS"
                     if task["passed"]
+                    else f"🟨 PARTIAL ({task.get('score', 0):.1f}%)"
+                    if task.get("score", 0) > 0
                     else "❌ FAIL"
                 )
                 loop = (

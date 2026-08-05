@@ -10,7 +10,7 @@ Not vibes. Actual scores.
 
 <img src="https://img.shields.io/badge/Python-3.11%2B-2563EB?style=flat-square&logo=python&logoColor=white&labelColor=0b0b0b" alt="Python 3.11+">
 <img src="https://img.shields.io/badge/TUI-Textual-60A5FA?style=flat-square&labelColor=0b0b0b" alt="Built with Textual">
-<img src="https://img.shields.io/badge/Suites-16-34D399?style=flat-square&labelColor=0b0b0b" alt="16 benchmark suites">
+<img src="https://img.shields.io/badge/Suites-17-34D399?style=flat-square&labelColor=0b0b0b" alt="17 benchmark suites">
 <img src="https://img.shields.io/badge/License-Apache%202.0-6B7280?style=flat-square&labelColor=0b0b0b" alt="Apache 2.0">
 
 </div>
@@ -123,6 +123,7 @@ For CI and scripts, skip the TUI entirely:
 uv run benchkit --headless --models qwen3:8b,gemma3:12b --benchmarks humaneval:20,gsm8k
 uv run benchkit --headless --models all --benchmarks quickbench --verbose
 uv run benchkit --headless --models qwen3:8b --tag code
+uv run benchkit --headless --models qwen3:8b --benchmarks ruler:5
 uv run benchkit --list
 uv run benchkit --list --tag mcq,-saturated
 ```
@@ -200,6 +201,10 @@ configuration line with `BENCHKIT_PERF_CONFIG` in `.env` or `--config-note`;
 `BENCHKIT_HARDWARE` is used as a fallback. The first context is measured again
 at the end of the sweep to flag GPU warmup or performance drift.
 
+Performance profiles remain throughput-only. Their output includes a reminder
+to run `ruler` separately when you also need to know whether the model can use
+its configured context effectively; the two result types are not combined.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and edit:
@@ -254,6 +259,7 @@ never duplicated.
 | MBPP+      | `mbpp-plus`      |    378 | code generative                    | Sanitized MBPP with more than 39,000 EvalPlus test inputs           |
 | GSM8K      | `gsm8k`          |  1,319 | math generative                    | Multi-step grade-school math with exact numeric answers             |
 | IFEval     | `ifeval`         |    541 | instruction generative             | Instruction following under constraints a checker can verify        |
+| RULER      | `ruler`          | 20 × 6 | long-context retrieval generative  | Multi-key retrieval and variable tracking from 4K through 128K      |
 | GPQA       | `gpqa`           |    198 | knowledge mcq low-signal           | Expert-written graduate science questions designed to resist search |
 | MMLU       | `mmlu`           | 14,042 | knowledge mcq saturated low-signal | Zero-shot coverage of 57 academic and professional subjects         |
 | ARC        | `arc`            |  1,172 | knowledge mcq saturated low-signal | Challenging grade-school science multiple choice                    |
@@ -269,9 +275,9 @@ More coming soon.
 ### Tags
 
 Every benchmark carries tags for what it measures (`code`, `math`,
-`knowledge`, `commonsense`, `instruction`), how it is answered (`generative`,
-`mcq`) and how much signal it still carries on the 4-35B models BenchKit
-targets:
+`knowledge`, `commonsense`, `instruction`, `retrieval`, `long-context`), how it
+is answered (`generative`, `mcq`) and how much signal it still carries on the
+4-35B models BenchKit targets:
 
 - `saturated` - current models sit near the ceiling, so the suite mostly buys
   comparability with published numbers.
@@ -298,6 +304,21 @@ IFEval scores strict prompt-level accuracy: a prompt counts as passed only when
 every verifiable instruction attached to it is followed. The checkers are a
 dependency-free port of the reference implementation, with NLTK tokenization
 and `langdetect` replaced by built-in equivalents.
+
+RULER is generated deterministically at runtime—there is no bundled dataset.
+Its compact default subset runs ten multi-key retrieval and ten variable-
+tracking samples independently at 4K, 8K, 16K, 32K, 64K and 128K. BenchKit
+omits buckets above a context limit exposed by the active server; when the
+server exposes no limit, all six are offered. Each bucket is a separate job and
+report row, and RULER is excluded from overall-score averaging so the
+degradation curve stays visible. A slice is applied per bucket: `ruler:5` runs
+five samples at every supported length. Long buckets are dominated by prompt
+processing and can be very slow on consumer hardware; `benchkit --list` marks
+the suite accordingly. The task design follows [NVIDIA RULER][ruler-source]
+and its [paper][ruler-paper].
+
+[ruler-source]: https://github.com/NVIDIA/RULER
+[ruler-paper]: https://arxiv.org/abs/2404.06654
 
 HumanEval+ and MBPP+ use the complete official EvalPlus datasets and both the
 base and expanded test inputs. The upstream datasets are downloaded and cached

@@ -132,6 +132,9 @@ class TaskDetailScreen(ModalScreen[None]):
             status, style = "ERROR", "b yellow"
         elif passed:
             status, style = "PASS", "b green"
+        elif float(self.task_data.get("score", 0)) > 0:
+            status = f"PARTIAL {float(self.task_data['score']):.0f}%"
+            style = "b yellow"
         else:
             status, style = "FAIL", "b red"
         return Content.from_markup(
@@ -155,6 +158,10 @@ class TaskDetailScreen(ModalScreen[None]):
             f"trace {trace}",
             f"loop {loop_label} ({loop_score:.0%})",
         ]
+        if float(self.task_data.get("score", 0)) > 0 and not self.task_data.get(
+            "passed"
+        ):
+            pieces.insert(0, f"{float(self.task_data['score']):.0f}% task score")
         if self.task_data.get("error"):
             pieces.append(self.task_data["error"])
         elif self.task_data.get("loop_kill_remaining_s") is not None:

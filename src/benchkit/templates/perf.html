@@ -384,7 +384,7 @@
     const calibrated = cases.filter(item => item.depth_method === "calibrated");
     const inaccurate = cases.filter(item => !item.depth_within_tolerance);
     const estimated = cases.filter(item => item.depth_method === "estimated");
-    const notices = [];
+    const notices = ["Tip: Run the ruler benchmark to verify how much of the configured context window is actually usable."];
     if (calibrated.length) notices.push("Depth method: calibrated · the server does not expose its native tokenizer route, so server-reported input tokens were used.");
     if (inaccurate.length) notices.push(`⚠ Outside ±1% depth tolerance: ${inaccurate.map(item => item.depth_label).join(", ")}. Use Actual input.`);
     if (estimated.length) notices.push(`⚠ Token-depth calibration unavailable: ${estimated.map(item => item.depth_label).join(", ")}. Use Actual input.`);

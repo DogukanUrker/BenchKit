@@ -305,6 +305,7 @@
     .task-head { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 10px; font: 9px/1 var(--mono); }
     .status { color: var(--red); font-weight: 900; }
     .status.pass { color: var(--green); }
+    .status.partial { color: var(--amber); }
     .loop-status { margin-left: 10px; color: var(--muted); font-weight: 900; }
     .loop-status.looping { color: var(--red); }
     .loop-status.suspected { color: var(--amber); }
@@ -393,6 +394,7 @@
     const rows = [...report.results];
     const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
     const number = value => Number(value) || 0;
+    const benchmarkLabel = row => row.benchmark_label || row.benchmark;
     const streamSpeed = row => number(row.tok_s_per_stream ?? row.tok_s);
     const effectiveConcurrency = row => row.concurrency_eff != null
       ? number(row.concurrency_eff)
@@ -412,7 +414,7 @@
       : task.loop_state === "clear" && task.loop_source === "answer" && task.trace_status === "unavailable"
         ? "NO TRACE"
         : (task.loop_state || "unavailable").toUpperCase();
-    const formatScore = value => `${number(value).toFixed(1)}<small>%</small>`;
+    const formatScore = value => value == null ? "—" : `${number(value).toFixed(1)}<small>%</small>`;
     const clamp = value => Math.max(0, Math.min(100, number(value)));
     const formatTime = value => {
       const seconds = Math.round(number(value));
@@ -421,7 +423,7 @@
       return `${seconds}s`;
     };
     const date = report.generated_at.replace("_", " · ").replaceAll("-", ".");
-    const benchmarks = [...new Set(rows.map(row => row.benchmark))];
+    const benchmarks = [...new Set(rows.map(benchmarkLabel))];
     const totalTasks = rows.reduce((sum, row) => sum + number(row.total), 0);
     const totalLoops = rows.reduce((sum, row) => sum + number(row.loops), 0);
     const totalRuntime = rows.reduce((sum, row) => sum + number(row.total_time), 0);
@@ -429,7 +431,7 @@
 
     const grouped = new Map();
     rows.forEach(row => {
-      const item = grouped.get(row.model) || { model: row.model, passed: 0, total: 0, loops: 0, outputTokens: 0, generationTime: 0, requestTime: 0, runtime: 0 };
+      const item = grouped.get(row.model) || { model: row.model, passed: 0, total: 0, taskTotal: 0, loops: 0, outputTokens: 0, generationTime: 0, requestTime: 0, runtime: 0 };
       const knownOutputTokens = row.total_output_tokens != null
         ? number(row.total_output_tokens)
         : 0;
@@ -440,8 +442,11 @@
           ? knownOutputTokens / aggregateSpeed(row)
           : 0;
       const outputTokens = knownOutputTokens || aggregateSpeed(row) * runtime;
-      item.passed += number(row.passed);
-      item.total += number(row.total);
+      if (row.include_in_overall !== false) {
+        item.passed += number(row.passed);
+        item.total += number(row.total);
+      }
+      item.taskTotal += number(row.total);
       item.loops += number(row.loops);
       item.outputTokens += outputTokens;
       item.generationTime += row.sum_generation_time != null
@@ -455,13 +460,14 @@
     });
     const models = [...grouped.values()].map(item => ({
       ...item,
-      score: item.total ? item.passed / item.total * 100 : 0,
-      loopRate: item.total ? item.loops / item.total * 100 : 0,
+      score: item.total ? item.passed / item.total * 100 : null,
+      loopRate: item.taskTotal ? item.loops / item.taskTotal * 100 : 0,
       speed: item.runtime ? item.outputTokens / item.runtime : 0,
       streamSpeed: item.generationTime ? item.outputTokens / item.generationTime : 0,
       effective: item.runtime ? item.requestTime / item.runtime : 0,
-    })).sort((a, b) => b.score - a.score || b.speed - a.speed);
-    const best = models[0] || { model: "No results", score: 0, passed: 0, total: 0, speed: 0 };
+    })).sort((a, b) => number(b.score) - number(a.score) || b.speed - a.speed);
+    const scoredModels = models.filter(model => model.score != null);
+    const best = scoredModels[0] || null;
 
     const chartItems = items => [...items].sort((a, b) => b.value - a.value).slice(0, 7).sort((a, b) => a.value - b.value);
     const shades = [1, 2, 3, 4, 5, 6, 7].map(step => `var(--shade-${step})`);
@@ -492,10 +498,10 @@
       </article>`;
     };
 
-    const overallItems = models.map(model => ({ ...model, value: model.score }));
+    const overallItems = scoredModels.map(model => ({ ...model, value: model.score }));
     const speedItems = models.map(model => ({ ...model, value: model.speed }));
     const benchmarkItems = benchmark => rows
-      .filter(row => row.benchmark === benchmark)
+      .filter(row => benchmarkLabel(row) === benchmark)
       .map(row => ({ model: row.model, value: number(row.score), passed: row.passed, total: row.total, speed: aggregateSpeed(row) }));
 
     const chartConfigs = new Map();
@@ -513,7 +519,9 @@
     }));
 
     document.getElementById("reportMeta").textContent = [date, environment, report.host].filter(Boolean).join(" · ");
-    document.getElementById("best").innerHTML = `<div class="best-score">${formatScore(best.score)}</div><div class="best-model">${escapeHtml(best.model)} · best overall</div>`;
+    document.getElementById("best").innerHTML = best
+      ? `<div class="best-score">${formatScore(best.score)}</div><div class="best-model">${escapeHtml(best.model)} · best overall</div>`
+      : `<div class="best-score">—</div><div class="best-model">Per-context scores · no RULER average</div>`;
     document.getElementById("summary").innerHTML = [
       ["Models", models.length],
       ["Benchmarks", benchmarks.length],
@@ -522,7 +530,9 @@
       ["Peak throughput", `${Math.max(0, ...models.map(model => model.speed)).toFixed(1)} tok/s`],
       ["Runtime", formatTime(totalRuntime)],
     ].map(([label, value]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`).join("");
-    document.getElementById("overallChart").innerHTML = chart(chartConfigs.get("overall"));
+    document.getElementById("overallChart").innerHTML = scoredModels.length
+      ? chart(chartConfigs.get("overall"))
+      : `<article class="chart-shell"><div class="chart-header"><h3 class="chart-title">Overall</h3><span class="chart-subtitle">· not applicable</span></div><p class="section-note">RULER is reported independently at each context length.</p></article>`;
     const maxLoopRate = Math.max(1, ...models.map(model => model.loopRate));
     document.getElementById("loopChart").innerHTML = `<article class="chart-shell">
       <div class="chart-header"><h3 class="chart-title">Generation loops</h3><span class="chart-subtitle">· lower is better</span></div>
@@ -537,7 +547,7 @@
     const visibleModels = models.slice(0, 5);
     const seriesShades = [1, 2, 3, 4, 5].map(step => `var(--series-${step})`);
     const rowLookupForBenchmark = benchmark => new Map(
-      rows.filter(row => row.benchmark === benchmark).map(row => [row.model, row])
+      rows.filter(row => benchmarkLabel(row) === benchmark).map(row => [row.model, row])
     );
     document.getElementById("suiteChart").innerHTML = `<article class="chart-shell">
       <div class="chart-header"><h3 class="chart-title">Capability overview</h3><span class="chart-subtitle">· pass@1</span></div>
@@ -566,7 +576,7 @@
       return `<svg class="scatter" viewBox="0 0 ${width} ${height}" role="img" aria-label="Accuracy versus aggregate throughput">
         ${[0, 25, 50, 75, 100].map(tick => `<line class="grid-line" x1="${pad.left}" x2="${pad.left + plotWidth}" y1="${y(tick)}" y2="${y(tick)}"></line><text class="axis-label" x="${pad.left - 10}" y="${y(tick) + 3}" text-anchor="end">${tick}%</text>`).join("")}
         <text class="axis-label" x="${pad.left + plotWidth / 2}" y="${height - 8}" text-anchor="middle">AGGREGATE OUTPUT TOKENS / SECOND →</text>
-        ${models.slice(0, 8).map((model, index) => {
+        ${scoredModels.slice(0, 8).map((model, index) => {
           const cx = x(model.speed);
           const cy = y(model.score);
           return `<circle class="scatter-dot ${index === 0 ? "winner" : ""}" cx="${cx}" cy="${cy}" r="9"></circle><text class="scatter-label" x="${cx + 14}" y="${cy + (index % 2 ? 18 : -12)}">${escapeHtml(model.model)} · ${model.speed.toFixed(1)}</text>`;
@@ -581,7 +591,7 @@
 
     document.getElementById("compositionChart").innerHTML = `<article class="chart-shell">
       <div class="chart-header"><h3 class="chart-title">Passed tasks</h3><span class="chart-subtitle">· full suite</span></div>
-      <div class="stack-list">${models.slice(0, 7).map(model => `<div class="stack-row">
+      <div class="stack-list">${scoredModels.slice(0, 7).map(model => `<div class="stack-row">
         <div class="stack-name" title="${escapeHtml(model.model)}">${escapeHtml(model.model)}</div>
         <div class="stack-track"><div class="stack-pass" style="--value:${clamp(model.score)}"></div></div>
         <div class="stack-score">${number(model.score).toFixed(1)}%</div>
@@ -603,14 +613,14 @@
     const rowLookup = new Map();
     rows.forEach(row => {
       if (!rowLookup.has(row.model)) rowLookup.set(row.model, new Map());
-      rowLookup.get(row.model).set(row.benchmark, row);
+      rowLookup.get(row.model).set(benchmarkLabel(row), row);
     });
     document.getElementById("matrix").innerHTML = `<article class="chart-shell matrix-card">
       <div class="chart-header"><h3 class="chart-title">Score matrix</h3><span class="chart-subtitle">· full suite</span></div>
       <div class="matrix-wrap"><table>
       <thead><tr><th>Model</th><th>Overall</th>${benchmarks.map(item => `<th>${escapeHtml(item)}</th>`).join("")}<th>Loops</th><th>Agg tok/s</th><th>Stream</th><th>Eff.</th></tr></thead>
       <tbody>${models.slice(0, 8).map(model => `<tr>
-        <td>${escapeHtml(model.model)}</td><td class="score-cell" style="background:${heat(model.score)}">${number(model.score).toFixed(1)}%</td>
+        <td>${escapeHtml(model.model)}</td><td class="score-cell" style="background:${model.score == null ? "transparent" : heat(model.score)}">${model.score == null ? "—" : `${number(model.score).toFixed(1)}%`}</td>
         ${benchmarks.map(benchmark => {
           const row = rowLookup.get(model.model)?.get(benchmark);
           return row
@@ -624,9 +634,9 @@
     document.getElementById("details").innerHTML = rows
       .sort((a, b) => number(b.score) - number(a.score))
       .map(row => `<details>
-        <summary><span class="detail-title">${escapeHtml(row.model)} / ${escapeHtml(row.benchmark)}</span><span class="detail-score">${row.passed}/${row.total} · ${number(row.score).toFixed(1)}% · ${aggregateSpeed(row).toFixed(1)} agg tok/s · ${streamSpeed(row).toFixed(1)} stream · ${effectiveConcurrency(row).toFixed(2)}x eff</span></summary>
+        <summary><span class="detail-title">${escapeHtml(row.model)} / ${escapeHtml(benchmarkLabel(row))}</span><span class="detail-score">${row.passed}/${row.total} · ${number(row.score).toFixed(1)}% · ${aggregateSpeed(row).toFixed(1)} agg tok/s · ${streamSpeed(row).toFixed(1)} stream · ${effectiveConcurrency(row).toFixed(2)}x eff</span></summary>
         <div class="tasks">${(row.tasks || []).map(task => `<article class="task">
-          <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} tokens</span><span><span class="status ${task.passed ? "pass" : ""}">${task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.error ? "ERROR" : task.passed ? "PASS" : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(loopLabel(task))}</span></span></div>
+          <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} tokens</span><span><span class="status ${task.passed ? "pass" : number(task.score) > 0 ? "partial" : ""}">${task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.error ? "ERROR" : task.passed ? "PASS" : number(task.score) > 0 ? `PARTIAL ${number(task.score).toFixed(0)}%` : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(loopLabel(task))}</span></span></div>
           <div class="exchange">
             ${task.error ? `<div class="code"><div class="code-label">Error</div><pre>${escapeHtml(task.error)}</pre></div>` : ""}
             ${task.thinking ? `<div class="code thinking-code"><div class="code-label">Thinking · ${number(task.thinking_time_s).toFixed(1)}s · loop score ${(number(task.loop_score) * 100).toFixed(0)}%</div><pre>${escapeHtml(task.thinking)}</pre></div>` : ""}

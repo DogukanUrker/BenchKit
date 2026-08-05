@@ -152,6 +152,7 @@ class _LiveStats:
     failed: int = 0
     errors: int = 0
     loops: int = 0
+    points: float = 0.0
 
     def add(self, record: TaskRecord) -> None:
         if record.passed:
@@ -160,6 +161,7 @@ class _LiveStats:
             self.errors += 1
         else:
             self.failed += 1
+        self.points += record.score if record.score > 0 or not record.passed else 1.0
         self.loops += int(record.loop_state == "looping")
 
     def fields(self, *, live_looping: bool = False) -> dict[str, int]:
@@ -176,7 +178,7 @@ class _LiveStats:
 
     @property
     def score(self) -> float | None:
-        return self.passed / self.completed * 100 if self.completed else None
+        return self.points / self.completed * 100 if self.completed else None
 
 
 def _score_text(score: float | None, width: int = 6) -> Text:
@@ -279,7 +281,7 @@ class _Dashboard:
     def _job_lines(self, view: _JobView, width: int) -> RenderResult:
         glyphs = self.glyphs
         title = Text()
-        title.append(view.job.benchmark, style="bold")
+        title.append(view.job.benchmark_label, style="bold")
         title.append(f" {glyphs.dot} ", style="dim")
         title.append(view.job.model)
         meta = Text(
@@ -421,7 +423,7 @@ class _Reporter:
             self.log(
                 Text(
                     f"[{self._stamp()}] job {event.index + 1}/{len(self.state.jobs)}"
-                    f" {event.job.benchmark} on {event.job.model}"
+                    f" {event.job.benchmark_label} on {event.job.model}"
                     f" {self.glyphs.dot} {event.total} tasks"
                     f" {self.glyphs.dot} {event.concurrency} concurrent"
                     f" {self.glyphs.dot} {slice_label(event.job.slice_spec)}",
@@ -507,6 +509,8 @@ class _Reporter:
         glyphs = self.glyphs
         if record.passed:
             mark, style, word = glyphs.passed, "green", "PASS"
+        elif record.score > 0:
+            mark, style, word = glyphs.failed, "yellow", f"PARTIAL {record.score:.0%}"
         elif record.loop_killed:
             mark, style, word = glyphs.error, "magenta", "LOOP KILLED"
         elif record.timed_out:
@@ -611,7 +615,7 @@ class _Reporter:
         line.append(
             f"{stamp}{glyphs.error if partial else glyphs.passed} ", style="dim"
         )
-        line.append(result["benchmark"], style="bold")
+        line.append(result.get("benchmark_label", result["benchmark"]), style="bold")
         line.append(f" {glyphs.dot} ", style="dim")
         line.append(result["model"])
         line.append("  ")

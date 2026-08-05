@@ -27,6 +27,7 @@ from benchkit.engine import (
     TaskCompleted,
     TaskPhase,
     TaskRecord,
+    benchmark,
     plan_total_tasks,
 )
 from benchkit.report import save
@@ -36,6 +37,7 @@ from benchkit.tui.formatting import (
     fmt_duration,
     result_color,
     score_color,
+    throughput_stat,
 )
 from benchkit.tui.screens.modals import TaskDetailScreen
 from benchkit.tui.widgets import SectionTitle, StatCard, apply_compact
@@ -47,6 +49,29 @@ class EngineMessage(Message):
     def __init__(self, event: object) -> None:
         super().__init__()
         self.event = event
+
+
+def _variant_cap_note(jobs: list[JobSpec]) -> str:
+    """Describe context variants omitted by served-context discovery."""
+    groups: dict[tuple[str, str], list[str]] = {}
+    for job in jobs:
+        if job.variant is not None:
+            groups.setdefault((job.model, job.benchmark), []).append(job.variant)
+
+    notes: list[str] = []
+    for (model, benchmark_key), variants in groups.items():
+        expected = tuple(
+            str(value)
+            for value in getattr(benchmark(benchmark_key), "variant_labels", ())
+        )
+        if not expected or set(expected).issubset(variants):
+            continue
+        highest = next(
+            (value for value in reversed(expected) if value in variants),
+            "none",
+        )
+        notes.append(f"{model} {benchmark_key.upper()} ≤{highest}")
+    return ", ".join(notes)
 
 
 class RunScreen(Screen[None]):
@@ -69,6 +94,7 @@ class RunScreen(Screen[None]):
         self.current_index = -1
         self.current_total = 0
         self.current_passed = 0
+        self.current_score_points = 0.0
         self.current_completed = 0
         self.latency_sum = 0.0
         self.tok_s_sum = 0.0
@@ -76,7 +102,8 @@ class RunScreen(Screen[None]):
         self.job_started_at = time.monotonic()
         self.overall_total = 0
         self.overall_completed = 0
-        self.overall_passed = 0
+        self.overall_score_points = 0.0
+        self.overall_scored_tasks = 0
         self.started_at = time.monotonic()
         self.only_failures = False
         self.follow = True
@@ -123,9 +150,10 @@ class RunScreen(Screen[None]):
 
     def on_mount(self) -> None:
         self.overall_total = plan_total_tasks(self.jobs)
-        self.sub_title = (
-            f"{len(self.jobs)} run(s) · {fmt_count(self.overall_total)} tasks"
-        )
+        subtitle = f"{len(self.jobs)} run(s) · {fmt_count(self.overall_total)} tasks"
+        if cap_note := _variant_cap_note(self.jobs):
+            subtitle += f" · served cap: {cap_note}"
+        self.sub_title = subtitle
 
         queue = self.query_one("#queue", DataTable)
         queue.add_column("#", key="index", width=3)
@@ -138,7 +166,7 @@ class RunScreen(Screen[None]):
             queue.add_row(
                 str(index + 1),
                 job.model,
-                job.benchmark,
+                job.benchmark_label,
                 Text("—", style="dim"),
                 Text("—", style="dim"),
                 Text("queued", style="dim"),
@@ -225,6 +253,7 @@ class RunScreen(Screen[None]):
         self.current_index = event.index
         self.current_total = event.total
         self.current_passed = 0
+        self.current_score_points = 0.0
         self.current_completed = 0
         self.latency_sum = 0.0
         self.tok_s_sum = 0.0
@@ -244,7 +273,7 @@ class RunScreen(Screen[None]):
         job = event.job
         title = Content.from_markup(
             "[b]$bench[/b]  [dim]on[/dim]  $model[dim]$slice$parallel[/dim]",
-            bench=job.benchmark,
+            bench=job.benchmark_label,
             model=job.model,
             slice=f"   slice {job.slice_spec}" if job.slice_spec else "",
             parallel=f"   · {event.concurrency} concurrent",
@@ -454,9 +483,17 @@ class RunScreen(Screen[None]):
         self.records.setdefault(event.index, []).append(record)
         self.current_completed = event.completed
         self.current_passed = event.passed
+        self.current_score_points = (
+            event.score_points
+            if event.score_points is not None
+            else float(event.passed)
+        )
         self.overall_completed += 1
-        if record.passed:
-            self.overall_passed += 1
+        if getattr(benchmark(event.job.benchmark), "include_in_overall", True):
+            self.overall_score_points += (
+                record.score if record.score > 0 or not record.passed else 1.0
+            )
+            self.overall_scored_tasks += 1
         self.latency_sum += record.response_time_s
         self.tok_s_sum += record.tok_s
         self.output_tokens_sum += record.output_tokens
@@ -505,7 +542,7 @@ class RunScreen(Screen[None]):
             progress=self.overall_completed
         )
         self._update_live_state()
-        score = self.current_passed / self.current_completed * 100
+        score = self.current_score_points / self.current_completed * 100
         self._update_queue_row(
             event.index,
             progress=bar(event.completed / max(self.current_total, 1), 10),
@@ -670,20 +707,37 @@ class RunScreen(Screen[None]):
             and self.latency_sum > 0
             else measured_elapsed
         )
-        score = self.current_passed / completed * 100
+        score = self.current_score_points / completed * 100
         failed = self.current_completed - self.current_passed
         accuracy = self.query_one("#stat-accuracy", StatCard)
-        accuracy.set_state(
-            f"{score:.1f}%",
-            f"{self.overall_passed}/{self.overall_completed} overall",
+        include_current = getattr(
+            benchmark(self.jobs[self.current_index].benchmark),
+            "include_in_overall",
+            True,
         )
+        if not include_current:
+            overall_hint = "per-context · not averaged"
+        elif self.overall_scored_tasks:
+            overall = self.overall_score_points / self.overall_scored_tasks * 100
+            overall_hint = f"{overall:.1f}% overall"
+        else:
+            overall_hint = "— overall"
+        accuracy.set_state(f"{score:.1f}%", overall_hint)
         self.query_one("#stat-passed", StatCard).set_state(str(self.current_passed))
         self.query_one("#stat-failed", StatCard).set_state(str(failed))
-        self.query_one("#stat-speed", StatCard).set_state(
-            f"{self.output_tokens_sum / elapsed:.0f} tok/s",
-            f"aggregate · {self.tok_s_sum / completed:.0f} stream · "
-            f"{min(self.current_concurrency, self.latency_sum / elapsed):.2f}x "
-            "effective",
+        speed = self.query_one("#stat-speed", StatCard)
+        stream_speed = self.tok_s_sum / completed
+        speed.set_state(
+            *throughput_stat(
+                concurrency=self.current_concurrency,
+                aggregate=self.output_tokens_sum / elapsed,
+                stream=stream_speed,
+                effective=min(
+                    self.current_concurrency,
+                    self.latency_sum / elapsed,
+                ),
+                precision=0,
+            )
         )
 
     def _tick(self) -> None:
@@ -774,9 +828,15 @@ def _result_cell(record: TaskRecord, dark: bool = True) -> Text:
         if record.error
         else "PASS"
         if record.passed
+        else f"{record.score:.0%}"
+        if record.score > 0
         else "FAIL"
     )
-    color = result_color(record.passed, bool(record.error), dark)
+    color = (
+        score_color(record.score * 100, dark)
+        if not record.passed and record.score > 0 and not record.error
+        else result_color(record.passed, bool(record.error), dark)
+    )
     return Text(label, style=f"bold {color}")
 
 
@@ -833,6 +893,7 @@ def _record_task_data(record: TaskRecord) -> dict:
     return {
         "task_id": record.label,
         "passed": record.passed,
+        "score": record.score * 100,
         "prompt": record.prompt,
         "thinking": record.thinking,
         "response": record.response,

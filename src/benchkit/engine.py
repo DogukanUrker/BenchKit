@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
+from numbers import Real
 from statistics import median
 from typing import Literal
 
@@ -136,6 +137,14 @@ def task_count(key: str) -> int:
     return len(tasks_for(key))
 
 
+def slice_task_count(key: str) -> int:
+    """Return the task count to which a user-provided slice is applied."""
+    per_variant = getattr(benchmark(key), "tasks_per_variant", None)
+    if isinstance(per_variant, int):
+        return per_variant
+    return task_count(key)
+
+
 @dataclass(frozen=True)
 class JobSpec:
     """One model run against one benchmark, optionally sliced."""
@@ -143,22 +152,35 @@ class JobSpec:
     model: str
     benchmark: str
     slice_spec: str | None = None
+    variant: str | None = None
 
     @property
     def key(self) -> str:
-        return f"{self.model}|{self.benchmark}|{self.slice_spec or ''}"
+        return (
+            f"{self.model}|{self.benchmark}|{self.variant or ''}|"
+            f"{self.slice_spec or ''}"
+        )
+
+    @property
+    def benchmark_label(self) -> str:
+        return f"{self.benchmark} · {self.variant}" if self.variant else self.benchmark
 
     @property
     def title(self) -> str:
-        return f"{self.benchmark} · {self.model}"
+        return f"{self.benchmark_label} · {self.model}"
 
     def planned_total(self) -> int:
-        total = task_count(self.benchmark)
+        total = slice_task_count(self.benchmark)
         try:
             start, end = parse_slice(self.slice_spec, total)
         except SliceError:
-            return total
-        return max(0, end - start)
+            selected = total
+        else:
+            selected = max(0, end - start)
+        if self.variant is not None:
+            return selected
+        variants = getattr(benchmark(self.benchmark), "variant_count", 1)
+        return selected * variants if isinstance(variants, int) else selected
 
 
 @dataclass
@@ -172,6 +194,7 @@ class TaskRecord:
     response_time_s: float
     prompt: str
     response: str
+    score: float = 0.0
     error: str = ""
     entry_point: str = ""
     thinking: str = ""
@@ -278,6 +301,7 @@ class TaskCompleted:
     record: TaskRecord
     passed: int
     completed: int
+    score_points: float | None = None
 
 
 @dataclass
@@ -426,8 +450,60 @@ class _TaskOutcome:
     response_time_s: float
 
 
-def plan_total_tasks(jobs: list[JobSpec]) -> int:
-    return sum(job.planned_total() for job in jobs)
+def expand_jobs(jobs: list[JobSpec], client: object) -> list[JobSpec]:
+    """Expand benchmarks with independent score variants into concrete jobs."""
+    expanded: list[JobSpec] = []
+    for job in jobs:
+        if job.variant is not None:
+            expanded.append(job)
+            continue
+        bench = benchmark(job.benchmark)
+        variants = getattr(bench, "variants", None)
+        if not callable(variants):
+            expanded.append(job)
+            continue
+        for variant in variants(client, job.model):
+            expanded.append(
+                JobSpec(
+                    model=job.model,
+                    benchmark=job.benchmark,
+                    slice_spec=job.slice_spec,
+                    variant=str(variant),
+                )
+            )
+    return expanded
+
+
+def tasks_for_job(job: JobSpec) -> list[Task]:
+    """Return tasks belonging to one concrete job variant."""
+    bench = benchmark(job.benchmark)
+    tasks = tasks_for(job.benchmark)
+    select = getattr(bench, "tasks_for_variant", None)
+    if job.variant is not None and callable(select):
+        return list(select(tasks, job.variant))
+    return tasks
+
+
+def prompt_for(bench: object, task: Task, client: object, model: str) -> str:
+    """Build a prompt, allowing synthetic suites to use the server tokenizer."""
+    build_for = getattr(bench, "build_prompt_for", None)
+    if callable(build_for):
+        return str(build_for(task, client, model))
+    return str(bench.build_prompt(task))
+
+
+def plan_total_tasks(jobs: list[JobSpec], client: object | None = None) -> int:
+    concrete = expand_jobs(jobs, client) if client is not None else jobs
+    return sum(job.planned_total() for job in concrete)
+
+
+def _result_metadata(job: JobSpec) -> dict:
+    bench = benchmark(job.benchmark)
+    metadata = getattr(bench, "result_metadata", None)
+    if not callable(metadata):
+        return {}
+    value = metadata(job.variant)
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _empty_result(job: JobSpec) -> dict:
@@ -435,6 +511,8 @@ def _empty_result(job: JobSpec) -> dict:
     return {
         "model": job.model,
         "benchmark": job.benchmark,
+        "benchmark_label": job.benchmark_label,
+        "variant": job.variant,
         "score": 0.0,
         "passed": 0,
         "total": 0,
@@ -459,6 +537,7 @@ def _empty_result(job: JobSpec) -> dict:
         "median_thinking_time": 0.0,
         "median_time_to_answer": 0.0,
         "tasks": [],
+        **_result_metadata(job),
     }
 
 
@@ -503,6 +582,7 @@ class Engine:
         exception, so the caller still gets the jobs that already finished and
         can write a report for them.
         """
+        self.jobs = expand_jobs(self.jobs, self.client)
         results: list[dict] = []
         started = time.time()
         overall_total = plan_total_tasks(self.jobs)
@@ -563,7 +643,7 @@ class Engine:
         self, index: int, job: JobSpec, overall_total: int
     ) -> tuple[dict | None, bool]:
         bench = benchmark(job.benchmark)
-        all_tasks = tasks_for(job.benchmark)
+        all_tasks = tasks_for_job(job)
 
         slice_spec = job.slice_spec
         try:
@@ -588,6 +668,7 @@ class Engine:
             return None, False
 
         passed = 0
+        score_points = 0.0
         errors = 0
         total_tokens = 0
         total_eval_ns = 0
@@ -676,6 +757,7 @@ class Engine:
                         record = outcome.record
                         records_by_position[record.index] = record
                         passed += int(record.passed)
+                        score_points += record.score
                         errors += outcome.errors
                         total_tokens += outcome.eval_count
                         total_eval_ns += outcome.eval_duration_ns
@@ -688,6 +770,7 @@ class Engine:
                                 record,
                                 passed,
                                 completed,
+                                score_points,
                             )
                         )
             except Exception:
@@ -729,7 +812,11 @@ class Engine:
             min(float(concurrency), throughput["concurrency_eff"]),
             2,
         )
-        score = passed / completed * 100 if completed else 0.0
+        score = (
+            sum(record.score for record in records) / completed * 100
+            if completed
+            else 0.0
+        )
         loops = sum(record.loop_state == "looping" for record in records)
         suspected = sum(
             record.loop_state == "suspected" and not record.recovered_cycle
@@ -751,6 +838,8 @@ class Engine:
         result = {
             "model": job.model,
             "benchmark": bench.name,
+            "benchmark_label": job.benchmark_label,
+            "variant": job.variant,
             "score": round(score, 1),
             "passed": passed,
             "total": completed,
@@ -788,6 +877,7 @@ class Engine:
                 {
                     "task_id": record.task_id,
                     "passed": record.passed,
+                    "score": round(record.score * 100, 1),
                     "tok_s": record.tok_s,
                     "response_time_s": record.response_time_s,
                     "prompt": record.prompt,
@@ -821,6 +911,7 @@ class Engine:
                 }
                 for record in records
             ],
+            **_result_metadata(job),
         }
         return result, skipped
 
@@ -834,7 +925,7 @@ class Engine:
         bench: object,
     ) -> _GeneratedTask:
         """Generate one answer in a request worker, including live analysis."""
-        prompt = bench.build_prompt(task)
+        prompt = prompt_for(bench, task, self.client, job.model)
         error = ""
         errors = 0
         entry_point = str(task.metadata.get("entry_point", ""))
@@ -1053,6 +1144,7 @@ class Engine:
 
         timed_out = bool(gen.get("timed_out"))
         loop_killed = bool(gen.get("loop_killed"))
+        evaluation_score = 0.0
         if loop_killed:
             ok = False
             error = (
@@ -1089,7 +1181,14 @@ class Engine:
 
         if not loop_killed and not timed_out:
             try:
-                ok = bool(bench.evaluate(task, gen["response"]))
+                evaluation = bench.evaluate(task, gen["response"])
+                if isinstance(evaluation, bool):
+                    evaluation_score = 1.0 if evaluation else 0.0
+                elif isinstance(evaluation, Real):
+                    evaluation_score = min(1.0, max(0.0, float(evaluation)))
+                else:
+                    evaluation_score = 1.0 if bool(evaluation) else 0.0
+                ok = evaluation_score >= 1.0
             except Exception as exc:
                 ok = False
                 if not error:
@@ -1105,6 +1204,7 @@ class Engine:
             response_time_s=round(response_time_s, 2),
             prompt=prompt,
             response=gen.get("response", ""),
+            score=evaluation_score,
             error=error,
             entry_point=entry_point,
             thinking=gen.get("thinking", ""),

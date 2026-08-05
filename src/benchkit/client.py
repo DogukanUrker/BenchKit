@@ -33,6 +33,15 @@ _PARALLELISM_KEYS = {
     "parallelism",
 }
 _PARALLELISM_CONTAINERS = {"limits", "llamaswap", "meta", "metadata"}
+_CONTEXT_LENGTH_KEYS = {
+    "contextlength",
+    "contextsize",
+    "contextwindow",
+    "maxcontextlength",
+    "maxpositionembeddings",
+    "nctx",
+    "numctx",
+}
 
 
 def _without_v1(url: str) -> str:
@@ -78,6 +87,38 @@ def _parallelism_hint(value: object) -> int | None:
             nested = _parallelism_hint(candidate)
             if nested is not None:
                 hints.append(nested)
+    return min(hints) if hints else None
+
+
+def _context_length_hint(value: object) -> int | None:
+    """Read context-window hints from model, props, slot or Ollama payloads."""
+    hints: list[int] = []
+    if isinstance(value, list):
+        for item in value:
+            hint = _context_length_hint(item)
+            if hint is not None:
+                hints.append(hint)
+    elif isinstance(value, dict):
+        for key, candidate in value.items():
+            key_text = str(key).lower()
+            normalized = "".join(
+                character for character in key_text if character.isalnum()
+            )
+            leaf = key_text.rsplit(".", 1)[-1]
+            leaf_normalized = "".join(
+                character for character in leaf if character.isalnum()
+            )
+            if (
+                normalized in _CONTEXT_LENGTH_KEYS
+                or leaf_normalized in _CONTEXT_LENGTH_KEYS
+            ):
+                parsed = _positive_int(candidate)
+                if parsed is not None:
+                    hints.append(parsed)
+            if isinstance(candidate, (dict, list)):
+                nested = _context_length_hint(candidate)
+                if nested is not None:
+                    hints.append(nested)
     return min(hints) if hints else None
 
 
@@ -243,6 +284,9 @@ class InferenceClient:
         default_factory=dict, init=False, repr=False
     )
     _parallelism: dict[str, int] = field(default_factory=dict, init=False, repr=False)
+    _context_lengths: dict[str, int | None] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     @classmethod
     def from_env(cls) -> InferenceClient:
@@ -331,6 +375,7 @@ class InferenceClient:
                 self.provider = provider
                 self._models_by_name = {model["name"]: model for model in models}
                 self._parallelism.clear()
+                self._context_lengths.clear()
                 return models
             except (httpx.HTTPError, ValueError, TypeError) as exc:
                 errors.append(f"{provider}: {exc}")
@@ -374,6 +419,7 @@ class InferenceClient:
                     ),
                     "meta": model.get("meta") or {},
                     "parallelism": _parallelism_hint(model),
+                    "context_length": _context_length_hint(model),
                 }
             )
         return sorted(normalized, key=lambda model: model["name"].lower())
@@ -386,15 +432,17 @@ class InferenceClient:
         )
         models = response.json().get("models", [])
         running: set[str] | None = None
+        running_models: list[dict] | None = None
         try:
             response = self._request(
                 "GET",
                 f"{_without_v1(self.host)}/api/ps",
                 timeout=10,
             )
+            running_models = response.json().get("models", [])
             running = {
                 str(value)
-                for model in response.json().get("models", [])
+                for model in running_models
                 for value in (
                     model.get("name"),
                     model.get("model"),
@@ -420,6 +468,27 @@ class InferenceClient:
                 )
                 model["loaded"] = loaded
                 model["status"] = "loaded" if loaded else "unloaded"
+                matches = [
+                    entry
+                    for entry in running_models or []
+                    if any(
+                        str(value)
+                        in {
+                            str(model.get("name") or ""),
+                            str(model.get("model") or ""),
+                            str(model.get("digest") or ""),
+                        }
+                        for value in (
+                            entry.get("name"),
+                            entry.get("model"),
+                            entry.get("digest"),
+                        )
+                        if value
+                    )
+                ]
+                context_length = _context_length_hint(matches)
+                if context_length is not None:
+                    model["context_length"] = context_length
         return sorted(models, key=lambda model: model.get("size", 0))
 
     def max_parallel_requests(self, model: str) -> int:
@@ -442,6 +511,83 @@ class InferenceClient:
         capacity = min(MAX_DISCOVERED_CONCURRENCY, max(1, capacity))
         self._parallelism[model] = capacity
         return capacity
+
+    def context_length(self, model: str) -> int | None:
+        """Return the best available served-context limit for a model."""
+        if model in self._context_lengths:
+            return self._context_lengths[model]
+
+        known = _context_length_hint(self._models_by_name.get(model, {}))
+        if known is None:
+            known = self._discover_context_length(model)
+        self._context_lengths[model] = known
+        return known
+
+    def _discover_context_length(self, model: str) -> int | None:
+        if self.provider == "ollama":
+            root = _without_v1(self.host)
+            try:
+                response = self._request("GET", f"{root}/api/ps", timeout=10)
+                running = response.json().get("models", [])
+                matches = [
+                    entry
+                    for entry in running
+                    if model
+                    in {
+                        str(entry.get("name") or ""),
+                        str(entry.get("model") or ""),
+                        str(entry.get("digest") or ""),
+                    }
+                ]
+                hint = _context_length_hint(matches)
+                if hint is not None:
+                    return hint
+            except (httpx.HTTPError, RuntimeError, ValueError, TypeError):
+                pass
+            try:
+                response = self._request(
+                    "POST",
+                    f"{root}/api/show",
+                    json={"model": model},
+                    timeout=10,
+                )
+                return _context_length_hint(response.json())
+            except (httpx.HTTPError, RuntimeError, ValueError, TypeError):
+                return None
+
+        if self.provider != "openai":
+            return None
+
+        root = _without_v1(self.host)
+        info = self._models_by_name.get(model, {})
+        attempts: list[tuple[str, dict[str, str] | None]] = [
+            (f"{root}/props", {"model": model}),
+            (f"{root}/slots", {"model": model}),
+        ]
+        owner = str(info.get("owned_by") or "").strip().lower()
+        meta = info.get("meta") or {}
+        is_llama_swap = owner in {"llama-swap", "llamaswap"} or (
+            isinstance(meta, dict) and "llamaswap" in meta
+        )
+        if is_llama_swap:
+            upstream = f"{root}/upstream/{quote(model, safe='/')}"
+            attempts.extend([(f"{upstream}/props", None), (f"{upstream}/slots", None)])
+
+        for url, params in attempts:
+            try:
+                response = self._request(
+                    "GET",
+                    url,
+                    headers=self._headers(),
+                    params=params,
+                    timeout=min(self.timeout, 30),
+                )
+                hint = _context_length_hint(response.json())
+                if hint is not None:
+                    return hint
+            except (httpx.HTTPError, RuntimeError, ValueError, TypeError):
+                continue
+        return None
 
     def _discover_slot_capacity(self, model: str, info: dict) -> int | None:
         """Probe optional llama.cpp monitoring routes without breaking peers."""

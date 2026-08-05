@@ -63,6 +63,15 @@ IFEval paper. Only the schema changed: `key` became `task_id`, and the
 - Paper: <https://arxiv.org/abs/2311.07911>
 - Dataset license: Apache 2.0
 
+## RULER
+
+RULER has no dataset file. BenchKit deterministically generates its multi-key
+retrieval and variable-tracking prompts at runtime for each context bucket.
+
+- Source design: <https://github.com/NVIDIA/RULER>
+- Paper: <https://arxiv.org/abs/2404.06654>
+- Reference implementation license: Apache 2.0
+
 [afl-3.0]: https://opensource.org/license/afl-3-0-php
 [cc-by-2.0]: https://creativecommons.org/licenses/by/2.0/
 [cc-by-sa-3.0]: https://creativecommons.org/licenses/by-sa/3.0/

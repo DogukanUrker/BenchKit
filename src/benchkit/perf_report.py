@@ -147,6 +147,9 @@ def _markdown(profile: dict) -> str:
             "server-reported token generation throughput. PP is shown as n/a "
             "for tiny prompts where fixed overhead dominates the value.",
             "",
+            "> Tip: Run the `ruler` benchmark to verify how much of the "
+            "configured context window is actually usable.",
+            "",
         ]
     )
     return "\n".join(lines)

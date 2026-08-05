@@ -18,6 +18,7 @@ from benchkit.metrics import (
     stream_tok_s,
     throughput_metrics,
 )
+from benchkit.tui.formatting import throughput_stat
 
 
 def _http_error(status: int, url: str) -> httpx.HTTPStatusError:
@@ -245,6 +246,30 @@ class ThroughputMetricTests(unittest.TestCase):
         self.assertEqual(stream_tok_s(legacy), 43.7)
         self.assertAlmostEqual(effective_concurrency(legacy), 6.0)
         self.assertAlmostEqual(aggregate_tok_s(legacy), 262.2)
+
+    def test_serial_throughput_renders_stream_speed_only(self) -> None:
+        self.assertEqual(
+            throughput_stat(
+                concurrency=1,
+                aggregate=64.0,
+                stream=96.2,
+                effective=0.67,
+                precision=0,
+            ),
+            ("96 tok/s", "single stream"),
+        )
+
+    def test_parallel_throughput_renders_aggregate_breakdown(self) -> None:
+        self.assertEqual(
+            throughput_stat(
+                concurrency=4,
+                aggregate=180.0,
+                stream=52.0,
+                effective=3.46,
+                precision=0,
+            ),
+            ("180 tok/s", "aggregate · 52 stream · 3.46x effective"),
+        )
 
 
 class ConcurrentEngineTests(unittest.TestCase):

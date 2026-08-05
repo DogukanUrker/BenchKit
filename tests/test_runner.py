@@ -27,6 +27,7 @@ def _record(
     error: str = "",
     loop: bool = False,
     response: str = "response",
+    score: float = 0.0,
 ) -> TaskRecord:
     return TaskRecord(
         index=0,
@@ -36,6 +37,7 @@ def _record(
         response_time_s=0.0,
         prompt="prompt",
         response=response,
+        score=score,
         error=error,
         loop_state="looping" if loop else "clear",
     )
@@ -71,6 +73,13 @@ class LiveHeadlessStatsTests(unittest.TestCase):
 
     def test_score_is_unknown_before_the_first_task(self) -> None:
         self.assertIsNone(_LiveStats().score)
+
+    def test_live_score_includes_partial_credit(self) -> None:
+        stats = _LiveStats()
+        stats.add(_record(score=0.6))
+        stats.add(_record(passed=True))
+
+        self.assertEqual(stats.score, 80.0)
 
     def test_counters_render_all_live_values(self) -> None:
         stats = _LiveStats(passed=1, failed=1, errors=1, loops=1)

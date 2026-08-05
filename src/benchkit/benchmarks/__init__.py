@@ -13,6 +13,7 @@ from benchkit.benchmarks.mmlu import MMLU
 from benchkit.benchmarks.openbookqa import OpenBookQA
 from benchkit.benchmarks.piqa import PIQA
 from benchkit.benchmarks.quickbench import QuickBench
+from benchkit.benchmarks.ruler import RULER
 from benchkit.benchmarks.truthfulqa import TruthfulQA
 from benchkit.benchmarks.winogrande import WinoGrande
 
@@ -25,6 +26,7 @@ REGISTRY: dict[str, type] = {
     "mbpp-plus": MBPPPlus,
     "gsm8k": GSM8K,
     "ifeval": IFEval,
+    "ruler": RULER,
     "gpqa": GPQA,
     "mmlu": MMLU,
     # Classic suites - kept for comparability, largely saturated.
@@ -38,8 +40,8 @@ REGISTRY: dict[str, type] = {
 }
 
 # Tags describe what a benchmark measures (`code`, `math`, `knowledge`,
-# `commonsense`, `instruction`), how it is answered (`generative`, `mcq`) and
-# how much signal it still carries on the 4-35B models BenchKit targets.
+# `commonsense`, `instruction`, `retrieval`, `long-context`), how it is answered
+# (`generative`, `mcq`) and how much signal it carries on target models.
 #
 # `saturated` means current models score near the ceiling, so the suite mostly
 # buys comparability with published numbers. `low-signal` is the wider bucket:
@@ -54,6 +56,7 @@ TAGS: dict[str, tuple[str, ...]] = {
     "mbpp-plus": ("code", "generative"),
     "gsm8k": ("math", "generative"),
     "ifeval": ("instruction", "generative"),
+    "ruler": ("long-context", "retrieval", "generative"),
     "gpqa": ("knowledge", "mcq", "low-signal"),
     "mmlu": ("knowledge", "mcq", "saturated", "low-signal"),
     "arc": ("knowledge", "mcq", "saturated", "low-signal"),

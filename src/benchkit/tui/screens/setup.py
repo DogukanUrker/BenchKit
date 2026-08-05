@@ -14,7 +14,15 @@ from textual.widgets.selection_list import Selection
 
 from benchkit.benchmarks import REGISTRY, all_tags, signal_tag, tags_for
 from benchkit.demo import DemoClient
-from benchkit.engine import JobSpec, SliceError, parse_slice, slice_label, task_count
+from benchkit.engine import (
+    JobSpec,
+    SliceError,
+    expand_jobs,
+    parse_slice,
+    slice_label,
+    slice_task_count,
+    task_count,
+)
 from benchkit.template_check import TemplateReport, check_template
 from benchkit.tui.formatting import fmt_count, fmt_size
 from benchkit.tui.screens.modals import LimitScreen, TemplateCheckScreen
@@ -29,6 +37,7 @@ DESCRIPTIONS = {
     "mbpp-plus": "sanitized MBPP tasks with 39k+ EvalPlus test inputs",
     "gsm8k": "multi-step grade-school math problems with exact numeric answers",
     "ifeval": "prompts with code-checkable instruction-following constraints",
+    "ruler": "20 synthetic tasks per context at 4k–128k; very slow",
     "arc": "challenging grade-school science questions with four choices",
     "gpqa": "expert-written graduate science questions designed to resist search",
     "mmlu": "zero-shot coverage of 57 academic and professional subjects",
@@ -216,12 +225,13 @@ class SetupScreen(Screen[None]):
 
     def _bench_prompt(self, key: str) -> Text:
         count = self.counts.get(key)
+        custom_count = getattr(REGISTRY[key], "list_task_count", "")
         if count is None:
             count_text = "counting…"
         elif count < 0:
             count_text = "unavailable"
         else:
-            count_text = f"{fmt_count(count)} tasks"
+            count_text = f"{custom_count or fmt_count(count)} tasks"
 
         text = Text()
         text.append(_clip(key, BENCHMARK_NAME_WIDTH).ljust(BENCHMARK_NAME_WIDTH))
@@ -368,7 +378,7 @@ class SetupScreen(Screen[None]):
         if index is None:
             return
         key = widget.get_option_at_index(index).value
-        total = self.counts.get(key, 0)
+        total = slice_task_count(key) if self.counts.get(key, 0) >= 0 else -1
 
         def apply(spec: str | None) -> None:
             if spec:
@@ -457,7 +467,7 @@ class SetupScreen(Screen[None]):
             return None
 
         for key in benches:
-            total = self.counts.get(key, 0)
+            total = slice_task_count(key) if self.counts.get(key, 0) >= 0 else -1
             if total < 0:
                 self.notify(
                     f"{key}: dataset could not be loaded.",
@@ -478,27 +488,54 @@ class SetupScreen(Screen[None]):
                 )
                 return None
 
-        return [
+        jobs = [
             JobSpec(model, key, self._limit_for(key))
             for model in models
             for key in benches
         ]
+        expanded = expand_jobs(jobs, self.app.client)
+        if not expanded:
+            self.notify(
+                "No supported RULER context bucket fits the selected model(s).",
+                severity="error",
+                timeout=6,
+            )
+            return None
+        return expanded
 
     def _planned_tasks(self, key: str) -> int:
-        total = self.counts.get(key, 0)
-        if total <= 0:
+        loaded_total = self.counts.get(key, 0)
+        if loaded_total <= 0:
             return 0
+        total = slice_task_count(key)
         try:
             start, end = parse_slice(self._limit_for(key), total)
         except SliceError:
             return 0
         return max(0, end - start)
 
+    def _variant_count(self, key: str, model: str) -> int:
+        buckets = getattr(REGISTRY[key], "context_buckets", ())
+        if not buckets:
+            return 1
+        context = self.model_meta.get(model, {}).get("context_length")
+        if isinstance(context, int) and not isinstance(context, bool) and context > 0:
+            return sum(bucket <= context for bucket in buckets)
+        return len(buckets)
+
     def _refresh_summary(self) -> None:
         models = len(self.selected_models)
         benches = [key for key in self.bench_order if key in self.selected_benchmarks]
-        runs = models * len(benches)
-        tasks = sum(self._planned_tasks(key) for key in benches) * models
+        runs = sum(
+            self._variant_count(key, model)
+            for model in self.selected_models
+            for key in benches
+        )
+        tasks = sum(
+            self._planned_tasks(key) * self._variant_count(key, model)
+            for model in self.selected_models
+            for key in benches
+        )
 
         if runs == 0:
             summary = Content.from_markup(

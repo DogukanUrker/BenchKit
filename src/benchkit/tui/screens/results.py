@@ -13,13 +13,32 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
 from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
-from benchkit.tui.formatting import bar, fmt_count, fmt_duration, score_color
+from benchkit.tui.formatting import (
+    bar,
+    fmt_count,
+    fmt_duration,
+    score_color,
+    throughput_stat,
+)
 from benchkit.tui.screens.detail import JobDetailScreen
 from benchkit.tui.widgets import SectionTitle, StatCard, apply_compact
 
+
+def _benchmark_label(result: dict) -> str:
+    return str(result.get("benchmark_label") or result["benchmark"])
+
+
+def _is_parallel(result: dict) -> bool:
+    return result.get("concurrency", 1) > 1
+
+
+def _display_tok_s(result: dict) -> float:
+    return aggregate_tok_s(result) if _is_parallel(result) else stream_tok_s(result)
+
+
 SORT_KEYS = {
     "model": lambda r: (r["model"], r["benchmark"]),
-    "benchmark": lambda r: (r["benchmark"], -r["score"]),
+    "benchmark": lambda r: (_benchmark_label(r), -r["score"]),
     "score": lambda r: -r["score"],
     "passed": lambda r: -r["passed"],
     "errors": lambda r: -r.get("errors", 0),
@@ -48,6 +67,7 @@ class ResultsScreen(Screen[None]):
     def __init__(self, results: list[dict], output: Path | None) -> None:
         super().__init__()
         self.results = list(results)
+        self.has_parallel = any(_is_parallel(result) for result in self.results)
         self.output = output
         self.sort_key = "score"
 
@@ -81,10 +101,13 @@ class ResultsScreen(Screen[None]):
         table.add_column("Passed", key="passed", width=10)
         table.add_column("Loops", key="loops", width=8)
         table.add_column("Errors", key="errors", width=7)
-        table.add_column("Parallel", key="parallel", width=8)
-        table.add_column("Agg tok/s", key="aggregate", width=10)
-        table.add_column("Stream", key="stream", width=8)
-        table.add_column("Eff", key="effective", width=7)
+        if self.has_parallel:
+            table.add_column("Parallel", key="parallel", width=8)
+            table.add_column("Agg tok/s", key="aggregate", width=10)
+            table.add_column("Stream", key="stream", width=8)
+            table.add_column("Eff", key="effective", width=7)
+        else:
+            table.add_column("Tok/s", key="stream", width=9)
         table.add_column("Avg", key="avg", width=8)
         table.add_column("Wall", key="time", width=9)
 
@@ -123,9 +146,9 @@ class ResultsScreen(Screen[None]):
         for index, result in self._sorted():
             score = result["score"]
             color = score_color(score, dark)
-            table.add_row(
+            cells: list[object] = [
                 result["model"],
-                result["benchmark"]
+                _benchmark_label(result)
                 + (f" [{result['slice']}]" if result.get("slice") else ""),
                 Text(f"{score:.1f}%", style=f"bold {color}"),
                 Text(bar(score / 100, 12), style=color),
@@ -136,12 +159,27 @@ class ResultsScreen(Screen[None]):
                     else "—"
                 ),
                 str(result.get("errors", 0)) if result.get("errors") else "—",
-                str(result.get("concurrency", 1)),
-                f"{aggregate_tok_s(result):.1f}",
-                f"{stream_tok_s(result):.1f}",
-                f"{effective_concurrency(result):.2f}x",
-                f"{result['avg_response_time']}s",
-                fmt_duration(result["total_time"]),
+            ]
+            if self.has_parallel:
+                parallel = _is_parallel(result)
+                cells.extend(
+                    [
+                        str(result.get("concurrency", 1)),
+                        f"{aggregate_tok_s(result):.1f}" if parallel else "—",
+                        f"{stream_tok_s(result):.1f}",
+                        f"{effective_concurrency(result):.2f}x" if parallel else "—",
+                    ]
+                )
+            else:
+                cells.append(f"{stream_tok_s(result):.1f}")
+            cells.extend(
+                [
+                    f"{result['avg_response_time']}s",
+                    fmt_duration(result["total_time"]),
+                ]
+            )
+            table.add_row(
+                *cells,
                 key=str(index),
             )
 
@@ -149,14 +187,14 @@ class ResultsScreen(Screen[None]):
         if not self.results:
             return
         best = max(self.results, key=lambda r: r["score"])
-        fastest = max(self.results, key=aggregate_tok_s)
+        fastest = max(self.results, key=_display_tok_s)
         tasks = sum(r["total"] for r in self.results)
         total_time = sum(r["total_time"] for r in self.results)
         loops = sum(r.get("loops", 0) for r in self.results)
         loop_kills = sum(r.get("loop_kills", 0) for r in self.results)
 
         self.query_one("#stat-best", StatCard).set_state(
-            f"{best['score']:.1f}%", f"{best['model']} · {best['benchmark']}"
+            f"{best['score']:.1f}%", f"{best['model']} · {_benchmark_label(best)}"
         )
         self.query_one("#stat-runs", StatCard).set_state(str(len(self.results)))
         self.query_one("#stat-tasks", StatCard).set_state(fmt_count(tasks))
@@ -164,11 +202,15 @@ class ResultsScreen(Screen[None]):
             str(loops),
             (f"{loops / tasks * 100:.1f}% · {loop_kills} killed" if tasks else ""),
         )
-        self.query_one("#stat-fastest", StatCard).set_state(
-            f"{aggregate_tok_s(fastest):.0f} tok/s",
-            f"{fastest['model']} · {stream_tok_s(fastest):.0f} stream · "
-            f"{effective_concurrency(fastest):.2f}x effective",
+        fastest_card = self.query_one("#stat-fastest", StatCard)
+        value, hint = throughput_stat(
+            concurrency=fastest.get("concurrency", 1),
+            aggregate=aggregate_tok_s(fastest),
+            stream=stream_tok_s(fastest),
+            effective=effective_concurrency(fastest),
+            precision=0,
         )
+        fastest_card.set_state(value, f"{fastest['model']} · {hint}")
         self.query_one("#stat-time", StatCard).set_state(fmt_duration(total_time))
 
     # Events -----------------------------------------------------------
