@@ -124,7 +124,7 @@ def _insert_at_positions(filler: list[str], inserts: list[str], seed: int) -> li
     rng = random.Random(seed)
     positions = sorted(rng.randrange(len(filler) + 1) for _ in inserts)
     by_position: dict[int, list[str]] = {}
-    for position, value in zip(positions, inserts):
+    for position, value in zip(positions, inserts, strict=True):
         by_position.setdefault(position, []).append(value)
 
     output: list[str] = []
@@ -141,7 +141,7 @@ def _render_niah(task: Task, filler_units: int) -> str:
     filler = [_distractor_line(seed, index) for index in range(filler_units)]
     needles = [
         _needle_line(key, value)
-        for key, value in zip(metadata["keys"], metadata["values"])
+        for key, value in zip(metadata["keys"], metadata["values"], strict=True)
     ]
     context = "\n".join(_insert_at_positions(filler, needles, seed ^ 0xA51CE))
     return (

@@ -69,7 +69,7 @@ class RulerGenerationTests(unittest.TestCase):
         self.assertEqual(slice_task_count("ruler"), TASKS_PER_BUCKET)
         self.assertEqual(
             counts,
-            Counter({bucket: TASKS_PER_BUCKET for bucket in CONTEXT_BUCKETS}),
+            Counter(dict.fromkeys(CONTEXT_BUCKETS, TASKS_PER_BUCKET)),
         )
         self.assertTrue(all(not task.prompt for task in tasks))
         self.assertEqual(
