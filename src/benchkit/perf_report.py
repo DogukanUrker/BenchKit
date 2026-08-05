@@ -20,9 +20,7 @@ def _safe_json(data: object) -> str:
 
 def render_perf_html(profile: dict) -> str:
     template = (
-        files("benchkit")
-        .joinpath("templates/perf.html")
-        .read_text(encoding="utf-8")
+        files("benchkit").joinpath("templates/perf.html").read_text(encoding="utf-8")
     )
     return template.replace("__BENCHKIT_PERF_DATA__", _safe_json(profile))
 
@@ -81,11 +79,7 @@ def _markdown(profile: dict) -> str:
     for case in profile.get("cases", []):
         actual = case.get("actual_input_tokens") or "—"
         marker = "!" if not case.get("depth_within_tolerance", True) else ""
-        pp = (
-            f"{_number(case, 'pp_tps'):.1f}"
-            if case.get("pp_reliable")
-            else "n/a"
-        )
+        pp = f"{_number(case, 'pp_tps'):.1f}" if case.get("pp_reliable") else "n/a"
         overhead = (
             f"{_number(case, 'overhead_s'):.3f}s"
             if case.get("overhead_available")
@@ -102,8 +96,7 @@ def _markdown(profile: dict) -> str:
         )
 
     calibrated = any(
-        case.get("depth_method") == "calibrated"
-        for case in profile.get("cases", [])
+        case.get("depth_method") == "calibrated" for case in profile.get("cases", [])
     )
     inaccurate = [
         case["depth_label"]
@@ -176,9 +169,7 @@ def save_profile(profile: dict) -> Path:
                 "actual_input_tokens": case.get("actual_input_tokens", 0),
                 "depth_method": case.get("depth_method", ""),
                 "depth_deviation": case.get("depth_deviation", 0),
-                "depth_within_tolerance": case.get(
-                    "depth_within_tolerance", False
-                ),
+                "depth_within_tolerance": case.get("depth_within_tolerance", False),
                 "pp_reliable": case.get("pp_reliable", False),
                 "overhead_available": case.get("overhead_available", False),
                 "pp_tps_median": _number(case, "pp_tps"),

@@ -8,6 +8,7 @@ serialize.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 import time
@@ -538,10 +539,8 @@ class Engine:
             return
         if len(self.jobs) <= 1:
             return
-        try:
+        with contextlib.suppress(Exception):
             self.client.unload_model(job.model)
-        except Exception:
-            pass
 
     def _max_parallel_requests(self, model: str, total: int) -> int:
         """Resolve a safe worker count, keeping unknown clients serial."""
@@ -706,9 +705,7 @@ class Engine:
         records = [
             records_by_position[position] for position in sorted(records_by_position)
         ]
-        measured_wall_time_s = max(
-            0.0, time.perf_counter() - wall_start - paused_time
-        )
+        measured_wall_time_s = max(0.0, time.perf_counter() - wall_start - paused_time)
         # Demo mode deliberately accelerates its fake generations. Use their
         # simulated request durations so its reports still demonstrate
         # internally consistent throughput rather than thousands of tok/s.

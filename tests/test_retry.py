@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 
 import httpx
@@ -17,7 +17,9 @@ from benchkit.retry import (
 )
 
 
-def _status_error(status: int, headers: dict[str, str] | None = None) -> httpx.HTTPStatusError:
+def _status_error(
+    status: int, headers: dict[str, str] | None = None
+) -> httpx.HTTPStatusError:
     request = httpx.Request("POST", "http://localhost:8080/v1/chat/completions")
     response = httpx.Response(status, headers=headers or {}, request=request)
     return httpx.HTTPStatusError("boom", request=request, response=response)
@@ -34,8 +36,10 @@ def test_retry_after_seconds_reads_delta():
 
 
 def test_retry_after_seconds_reads_http_date():
-    when = datetime.now(timezone.utc) + timedelta(seconds=30)
-    hint = retry_after_seconds(_status_error(429, {"Retry-After": format_datetime(when)}))
+    when = datetime.now(UTC) + timedelta(seconds=30)
+    hint = retry_after_seconds(
+        _status_error(429, {"Retry-After": format_datetime(when)})
+    )
     assert hint is not None and 25 <= hint <= 31
 
 
@@ -43,7 +47,7 @@ def test_retry_after_seconds_ignores_junk_and_past_dates():
     assert retry_after_seconds(_status_error(429)) is None
     assert retry_after_seconds(_status_error(429, {"Retry-After": "soon"})) is None
     assert retry_after_seconds(_status_error(429, {"Retry-After": "-5"})) == 0.0
-    past = format_datetime(datetime.now(timezone.utc) - timedelta(seconds=30))
+    past = format_datetime(datetime.now(UTC) - timedelta(seconds=30))
     assert retry_after_seconds(_status_error(429, {"Retry-After": past})) == 0.0
     assert retry_after_seconds(httpx.ConnectError("nope")) is None
 
@@ -95,4 +99,8 @@ def test_run_with_retries_stops_when_cancelled():
     cancel.set()
 
     with pytest.raises(httpx.HTTPStatusError):
-        run_with_retries(policy, lambda: (_ for _ in ()).throw(_status_error(429)), cancel_event=cancel)
+        run_with_retries(
+            policy,
+            lambda: (_ for _ in ()).throw(_status_error(429)),
+            cancel_event=cancel,
+        )

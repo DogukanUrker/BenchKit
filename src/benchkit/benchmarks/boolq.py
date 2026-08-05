@@ -9,10 +9,7 @@ from benchkit.benchmarks.utils import strip_think_tags
 
 DATASET = Path(__file__).parent.parent / "datasets" / "boolq.jsonl"
 
-SYSTEM = (
-    "Read the passage and answer the question. "
-    "Reply with ONLY YES or NO."
-)
+SYSTEM = "Read the passage and answer the question. Reply with ONLY YES or NO."
 
 
 def _extract_answer(response: str) -> str | None:

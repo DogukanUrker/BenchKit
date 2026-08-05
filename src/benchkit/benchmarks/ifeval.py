@@ -46,7 +46,7 @@ class IFEval:
         instructions = task.metadata["instruction_id_list"]
         kwargs_list = task.metadata["kwargs"]
 
-        for instruction_id, kwargs in zip(instructions, kwargs_list):
+        for instruction_id, kwargs in zip(instructions, kwargs_list, strict=False):
             args = dict(kwargs or {})
             if instruction_id == "combination:repeat_prompt":
                 args.setdefault("prompt_to_repeat", task.prompt)

@@ -16,7 +16,9 @@ SYSTEM = (
 
 
 def _format_choices(choices: list[str]) -> str:
-    return "\n".join(f"{letter}) {choice}" for letter, choice in zip("AB", choices))
+    return "\n".join(
+        f"{letter}) {choice}" for letter, choice in zip("AB", choices, strict=False)
+    )
 
 
 class PIQA:

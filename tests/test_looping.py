@@ -404,9 +404,11 @@ class ClientStreamingTests(unittest.TestCase):
         def abort(_update: GenerationUpdate) -> None:
             raise RuntimeError("kill generation")
 
-        with patch("benchkit.client.httpx.stream", return_value=stream):
-            with self.assertRaisesRegex(RuntimeError, "kill generation"):
-                client.generate("model", "prompt", on_progress=abort)
+        with (
+            patch("benchkit.client.httpx.stream", return_value=stream),
+            self.assertRaisesRegex(RuntimeError, "kill generation"),
+        ):
+            client.generate("model", "prompt", on_progress=abort)
 
         self.assertTrue(stream.closed)
 

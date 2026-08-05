@@ -6,7 +6,7 @@ import contextlib
 import multiprocessing
 import os
 import platform
-from functools import lru_cache
+from functools import cache, lru_cache
 from typing import Any
 
 from benchkit.benchmarks.base import Task
@@ -44,7 +44,11 @@ def _fork_multiprocessing():
     import evalplus.eval as _ev
 
     fork_ctx = multiprocessing.get_context("fork")
-    mp_originals = (multiprocessing.Process, multiprocessing.Value, multiprocessing.Array)
+    mp_originals = (
+        multiprocessing.Process,
+        multiprocessing.Value,
+        multiprocessing.Array,
+    )
     ev_originals = (_ev.Value, _ev.Array)
     try:
         multiprocessing.Process = fork_ctx.Process
@@ -54,7 +58,9 @@ def _fork_multiprocessing():
         _ev.Array = fork_ctx.Array
         yield
     finally:
-        multiprocessing.Process, multiprocessing.Value, multiprocessing.Array = mp_originals
+        multiprocessing.Process, multiprocessing.Value, multiprocessing.Array = (
+            mp_originals
+        )
         _ev.Value, _ev.Array = ev_originals
 
 
@@ -97,7 +103,7 @@ def _problems(dataset: str) -> dict[str, dict[str, Any]]:
     raise ValueError(f"Unsupported EvalPlus dataset: {dataset}")
 
 
-@lru_cache(maxsize=None)
+@cache
 def _expected_output(dataset: str, task_id: str) -> dict[str, list[Any]]:
     """Compute the official oracle outputs once per task and process."""
     (
@@ -153,9 +159,7 @@ def _human_solution(problem: dict[str, Any], response: str) -> str:
         lines = code.splitlines()
         first = next((line for line in lines if line.strip()), "")
         if first and not first.startswith((" ", "\t")):
-            code = "\n".join(
-                f"    {line}" if line.strip() else line for line in lines
-            )
+            code = "\n".join(f"    {line}" if line.strip() else line for line in lines)
         return problem["prompt"] + code
 
     imports = [

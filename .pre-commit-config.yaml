@@ -1,0 +1,40 @@
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^src/benchkit/datasets/
+      - id: end-of-file-fixer
+        exclude: ^src/benchkit/datasets/
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: ^src/benchkit/datasets/
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: check-added-large-files
+        # The bundled MMLU dataset is ~8 MB; anything larger needs a look.
+        args: [--maxkb=10240]
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [pre-push]

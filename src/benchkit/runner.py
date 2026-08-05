@@ -15,6 +15,7 @@ Two renderings share one event sink:
 
 from __future__ import annotations
 
+import contextlib
 import signal
 import time
 from collections import deque
@@ -47,7 +48,7 @@ RECENT_TASKS = 5
 
 
 def _fmt_time(seconds: float) -> str:
-    seconds = int(round(seconds))
+    seconds = round(seconds)
     if seconds >= 3600:
         return f"{seconds // 3600}h {seconds % 3600 // 60}m"
     if seconds >= 60:
@@ -81,7 +82,7 @@ class _Glyphs:
     dot: str
 
     @classmethod
-    def for_console(cls, console: Console) -> "_Glyphs":
+    def for_console(cls, console: Console) -> _Glyphs:
         encoding = (console.encoding or "").lower().replace("-", "")
         if encoding.startswith("utf") and not console.legacy_windows:
             return cls(
@@ -270,8 +271,7 @@ class _Dashboard:
         yield Text()
         if view is not None:
             yield from self._job_lines(view, width)
-            for line in state.recent:
-                yield line
+            yield from state.recent
             if state.recent:
                 yield Text()
         yield self._overall_line(width)
@@ -346,7 +346,7 @@ class _Reporter:
         self.state = _RunState()
         self._live: Live | None = None
 
-    def __enter__(self) -> "_Reporter":
+    def __enter__(self) -> _Reporter:
         if not self.plain:
             self._live = Live(
                 _Dashboard(self.state, self.glyphs),
@@ -677,10 +677,8 @@ def run(
         )
 
     previous = None
-    try:
+    with contextlib.suppress(ValueError):  # not on the main thread
         previous = signal.signal(signal.SIGINT, on_interrupt)
-    except ValueError:  # not on the main thread
-        pass
 
     try:
         with reporter:

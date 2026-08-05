@@ -92,7 +92,9 @@ def _ifeval_answer(task: Task) -> str:
     args = {
         instruction: dict(kwargs or {})
         for instruction, kwargs in zip(
-            task.metadata["instruction_id_list"], task.metadata["kwargs"]
+            task.metadata["instruction_id_list"],
+            task.metadata["kwargs"],
+            strict=False,
         )
     }
 
@@ -106,9 +108,7 @@ def _ifeval_answer(task: Task) -> str:
     if sentence_spec:
         target = int(sentence_spec["num_sentences"])
         sentences = (
-            target
-            if sentence_spec["relation"] == "at least"
-            else max(target - 1, 1)
+            target if sentence_spec["relation"] == "at least" else max(target - 1, 1)
         )
 
     word_spec = args.get("length_constraints:number_words")

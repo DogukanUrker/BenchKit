@@ -154,9 +154,7 @@ class SetupScreen(Screen[None]):
         self.model_order = [model["name"] for model in self.app.models]
         self.model_meta = {model["name"]: model for model in self.app.models}
         self.selected_models = {
-            name
-            for name, model in self.model_meta.items()
-            if _model_is_loaded(model)
+            name for name, model in self.model_meta.items() if _model_is_loaded(model)
         }
         if not self.selected_models and len(self.model_order) == 1:
             self.selected_models = set(self.model_order)
@@ -196,8 +194,8 @@ class SetupScreen(Screen[None]):
         if isinstance(meta.get("loaded"), bool):
             detail = status or ("loaded" if meta["loaded"] else "unloaded")
         else:
-            detail = fmt_size(meta.get("size")) or status or str(
-                meta.get("owned_by") or ""
+            detail = (
+                fmt_size(meta.get("size")) or status or str(meta.get("owned_by") or "")
             )
         text = Text()
         text.append(_clip(name, MODEL_NAME_WIDTH).ljust(MODEL_NAME_WIDTH))
@@ -264,9 +262,7 @@ class SetupScreen(Screen[None]):
             self.query_one("#bench-filter", Input).value.strip()
         )
         visible = [
-            key
-            for key in self.bench_order
-            if benchmark_matches(key, include, exclude)
+            key for key in self.bench_order if benchmark_matches(key, include, exclude)
         ]
         highlighted = widget.highlighted
         widget.clear_options()
@@ -386,7 +382,8 @@ class SetupScreen(Screen[None]):
 
     def action_check_templates(self) -> None:
         targets = [
-            name for name in self.model_order
+            name
+            for name in self.model_order
             if not self.selected_models or name in self.selected_models
         ]
         if not targets:

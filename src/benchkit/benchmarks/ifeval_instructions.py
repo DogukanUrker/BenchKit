@@ -118,6 +118,7 @@ _SCRIPT_RANGES: list[tuple[int, int, str]] = [
     (0x4E00, 0x9FFF, "zh"),
 ]
 
+# fmt: off
 _LATIN_STOPWORDS: dict[str, set[str]] = {
     "en": {
         "the", "and", "that", "this", "with", "for", "you", "are", "was",
@@ -154,6 +155,7 @@ _LATIN_STOPWORDS: dict[str, set[str]] = {
     },
     "nl": {"het", "een", "van", "en", "is", "niet", "dat", "op", "met", "zijn"},
 }
+# fmt: on
 
 _VIETNAMESE_MARKS = set("ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ")
 
@@ -238,9 +240,7 @@ def detect_language(text: str) -> str | None:
         return "vi"
 
     words = set(_words(text))
-    scores = {
-        code: len(words & markers) for code, markers in _LATIN_STOPWORDS.items()
-    }
+    scores = {code: len(words & markers) for code, markers in _LATIN_STOPWORDS.items()}
     best = max(scores, key=lambda code: scores[code])
     return best if scores[best] else "en"
 
@@ -282,9 +282,7 @@ def _number_sentences(response: str, kwargs: dict) -> bool:
 
 
 def _number_words(response: str, kwargs: dict) -> bool:
-    return _compare(
-        count_words(response), kwargs["relation"], int(kwargs["num_words"])
-    )
+    return _compare(count_words(response), kwargs["relation"], int(kwargs["num_words"]))
 
 
 def _number_paragraphs(response: str, kwargs: dict) -> bool:

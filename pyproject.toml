@@ -17,7 +17,7 @@ dependencies = [
 benchkit = "benchkit.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.4.2"]
+dev = ["pytest>=8.4.2", "pre-commit>=4.4.0", "ruff>=0.14.5"]
 
 [build-system]
 requires = ["setuptools>=75"]
@@ -35,3 +35,34 @@ benchkit = [
     "templates/*.html",
     "tui/*.tcss",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplifications
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",    # line length is the formatter's job
+    "RUF001",  # the TUI leans on box-drawing and other unicode glyphs
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Textual declares BINDINGS/COMMANDS as plain class-level lists by design.
+"src/benchkit/tui/**" = ["RUF012"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

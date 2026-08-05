@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "Bump"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "Bump"
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "Bump"

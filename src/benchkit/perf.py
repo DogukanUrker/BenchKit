@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import platform
 import statistics
@@ -103,10 +104,7 @@ def _prompt_for(
     prompt = _filler_text(target_depth * 5)
     calibration: list[dict] = []
     for attempt in range(3):
-        announce(
-            f"{depth_label(target_depth)} · calibrating input "
-            f"{attempt + 1}/3"
-        )
+        announce(f"{depth_label(target_depth)} · calibrating input {attempt + 1}/3")
         try:
             measured = client.profile_completion(model, prompt, 1)
         except Exception as exc:
@@ -172,10 +170,7 @@ def _summarize_case(
         "depth_deviation": round(depth_deviation, 5),
         "depth_within_tolerance": (
             requested_depth == 0
-            or (
-                actual_depth > 0
-                and abs(depth_deviation) <= DEPTH_TOLERANCE
-            )
+            or (actual_depth > 0 and abs(depth_deviation) <= DEPTH_TOLERANCE)
         ),
         "calibration": calibration,
         "pp_reliable": actual_depth >= MIN_RELIABLE_PP_TOKENS,
@@ -190,9 +185,7 @@ def _summarize_case(
             run.get("server_time_s", 0) > 0 for run in successful
         ),
         "overhead_s": _summary([run["overhead_s"] for run in successful]),
-        "output_tokens": _summary(
-            [float(run["output_tokens"]) for run in successful]
-        ),
+        "output_tokens": _summary([float(run["output_tokens"]) for run in successful]),
         "runs": runs,
     }
 
@@ -246,12 +239,10 @@ def run_profile(
 
         for warmup in range(config.warmups):
             announce(f"{label} · warmup {warmup + 1}/{config.warmups}")
-            try:
+            with contextlib.suppress(Exception):
                 client.profile_completion(
                     config.model, prompt, min(config.gen_tokens, 32)
                 )
-            except Exception:
-                pass
 
         runs: list[dict] = []
         errors: list[str] = []
@@ -265,9 +256,7 @@ def run_profile(
                     {
                         "repetition": repetition + 1,
                         **{
-                            key: round(value, 4)
-                            if isinstance(value, float)
-                            else value
+                            key: round(value, 4) if isinstance(value, float) else value
                             for key, value in measured.items()
                             if key != "response"
                         },
@@ -304,8 +293,7 @@ def run_profile(
                 "initial_tg_tps": round(initial_tg, 3),
                 "final_tg_tps": round(final_tg, 3),
                 "change": round(change, 5),
-                "stable": bool(initial_tg)
-                and abs(change) <= DRIFT_TOLERANCE,
+                "stable": bool(initial_tg) and abs(change) <= DRIFT_TOLERANCE,
                 "tolerance": DRIFT_TOLERANCE,
             }
         except Exception as exc:

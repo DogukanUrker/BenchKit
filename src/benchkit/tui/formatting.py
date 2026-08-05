@@ -14,7 +14,7 @@ def fmt_duration(seconds: float | None) -> str:
     if seconds < 10:
         return f"{seconds:.1f}s"
 
-    total = int(round(seconds))
+    total = round(seconds)
     if total < 60:
         return f"{total}s"
     if total < 3600:
@@ -63,5 +63,5 @@ def result_color(passed: bool, error: bool = False, dark: bool = True) -> str:
 def bar(fraction: float, width: int = 12) -> str:
     """A tiny inline bar for table cells."""
     fraction = max(0.0, min(1.0, fraction))
-    filled = int(round(fraction * width))
+    filled = round(fraction * width)
     return "█" * filled + "░" * (width - filled)
