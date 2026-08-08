@@ -273,6 +273,17 @@ class ThroughputMetricTests(unittest.TestCase):
 
 
 class ConcurrentEngineTests(unittest.TestCase):
+    def test_pi_uses_normal_discovered_capacity(self) -> None:
+        client = ParallelClient({"model": 4})
+        engine = Engine(client=client, jobs=[])
+
+        concurrency = engine._max_parallel_requests(
+            JobSpec("model", "quickbench", "5", harness="pi"),
+            5,
+        )
+
+        self.assertEqual(concurrency, 4)
+
     def test_each_model_uses_its_own_discovered_capacity(self) -> None:
         client = ParallelClient({"model-x": 4, "model-y": 6})
         events: list[object] = []

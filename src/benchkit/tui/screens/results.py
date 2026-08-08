@@ -45,9 +45,29 @@ def _delta_cell(result: dict) -> Text | str:
     return Text(f"{delta:+.1f}", style=style)
 
 
+def _harness_delta_cell(result: dict) -> Text | str:
+    value = result.get("harness_delta_pp")
+    if value is None:
+        return "—"
+    delta = float(value)
+    style = "green" if delta > 0 else "red" if delta < 0 else "dim"
+    return Text(f"{delta:+.1f}", style=style)
+
+
+def _repair_delta_cell(result: dict) -> Text | str:
+    if not result.get("repair_attempts"):
+        return "—"
+    delta = float(result.get("repair_delta_pp", 0))
+    style = "green" if delta > 0 else "red" if delta < 0 else "dim"
+    return Text(f"{delta:+.1f}", style=style)
+
+
 SORT_KEYS = {
     "model": lambda r: (r["model"], r["benchmark"]),
     "benchmark": lambda r: (_benchmark_label(r), -r["score"]),
+    "harness": lambda r: (r.get("harness", "direct"), -r["score"]),
+    "harness_delta": lambda r: -float(r.get("harness_delta_pp", 0)),
+    "repair_delta": lambda r: -float(r.get("repair_delta_pp", 0)),
     "score": lambda r: -r["score"],
     "delta": lambda r: -float(r.get("score_delta_pp", 0)),
     "regressions": lambda r: -int(r.get("regressions", 0)),
@@ -82,6 +102,12 @@ class ResultsScreen(Screen[None]):
         self.has_perturbations = any(
             result.get("perturbation") for result in self.results
         )
+        self.has_harness_pairs = any(
+            result.get("harness_delta_pp") is not None for result in self.results
+        )
+        self.has_repairs = any(
+            result.get("repair_attempts", 0) for result in self.results
+        )
         self.output = output
         self.sort_key = "score"
 
@@ -109,9 +135,15 @@ class ResultsScreen(Screen[None]):
         self.sub_title = "run complete"
         table = self.query_one("#summary", DataTable)
         table.add_column("Model", key="model")
+        table.add_column("Harness", key="harness", width=18)
         table.add_column("Benchmark", key="benchmark")
         table.add_column("Score", key="score", width=8)
         table.add_column("", key="bar", width=14)
+        if self.has_harness_pairs:
+            table.add_column("Harness Δ", key="harness_delta", width=10)
+        if self.has_repairs:
+            table.add_column("Repair Δ", key="repair_delta", width=9)
+            table.add_column("Fixed", key="repair_fixed", width=8)
         if self.has_perturbations:
             table.add_column("Δ pp", key="delta", width=7)
             table.add_column("Regress", key="regressions", width=9)
@@ -165,11 +197,26 @@ class ResultsScreen(Screen[None]):
             color = score_color(score, dark)
             cells: list[object] = [
                 result["model"],
+                result.get("harness_label", "Direct"),
                 _benchmark_label(result)
                 + (f" [{result['slice']}]" if result.get("slice") else ""),
                 Text(f"{score:.1f}%", style=f"bold {color}"),
                 Text(bar(score / 100, 12), style=color),
             ]
+            if self.has_harness_pairs:
+                cells.append(_harness_delta_cell(result))
+            if self.has_repairs:
+                cells.extend(
+                    [
+                        _repair_delta_cell(result),
+                        (
+                            f"{result.get('repair_successes', 0)}/"
+                            f"{result.get('repair_attempted', 0)}"
+                            if result.get("repair_attempts")
+                            else "—"
+                        ),
+                    ]
+                )
             if self.has_perturbations:
                 cells.extend(
                     [
@@ -229,7 +276,9 @@ class ResultsScreen(Screen[None]):
         loop_kills = sum(r.get("loop_kills", 0) for r in self.results)
 
         self.query_one("#stat-best", StatCard).set_state(
-            f"{best['score']:.1f}%", f"{best['model']} · {_benchmark_label(best)}"
+            f"{best['score']:.1f}%",
+            f"{best['model']} · {best.get('harness_label', 'Direct')} · "
+            f"{_benchmark_label(best)}",
         )
         self.query_one("#stat-runs", StatCard).set_state(str(len(self.results)))
         self.query_one("#stat-tasks", StatCard).set_state(fmt_count(tasks))

@@ -356,6 +356,8 @@
       <div class="section-head"><h2>Chart gallery</h2><p class="section-note">Inspect and capture any chart directly</p></div>
       <div class="charts">
         <div id="overallChart"></div>
+        <div id="harnessChart"></div>
+        <div id="repairChart"></div>
         <div id="robustnessChart"></div>
         <div id="loopChart"></div>
         <div id="benchmarkCharts" class="charts"></div>
@@ -392,8 +394,13 @@
     });
 
     const report = JSON.parse(document.getElementById("reportData").textContent);
-    const rows = [...report.results];
+    const rows = report.results.map(row => ({
+      ...row,
+      model: `${row.model} · ${row.harness_label || (row.harness === "pi" ? "Pi agent" : "Direct")}`,
+    }));
     const capabilityRows = rows.filter(row => !row.perturbation);
+    const harnessRows = rows.filter(row => row.harness_paired_total != null);
+    const repairRows = rows.filter(row => Number(row.repair_attempts) > 0);
     const robustnessRows = rows.filter(row => row.perturbation && row.paired_total);
     const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
     const number = value => Number(value) || 0;
@@ -520,7 +527,7 @@
       meta: item => `${item.speed.toFixed(1)} tok/s · ${item.streamSpeed.toFixed(1)} stream · ${item.effective.toFixed(2)}x eff`,
     });
     benchmarks.forEach((benchmark, index) => chartConfigs.set(`benchmark-${index}`, {
-      title: benchmark, subtitle: "pass@1", items: benchmarkItems(benchmark),
+      title: benchmark, subtitle: "accuracy", items: benchmarkItems(benchmark),
       meta: item => `${item.passed}/${item.total} passed`,
     }));
 
@@ -529,7 +536,7 @@
       ? `<div class="best-score">${formatScore(best.score)}</div><div class="best-model">${escapeHtml(best.model)} · best overall</div>`
       : `<div class="best-score">—</div><div class="best-model">Per-context scores · no RULER average</div>`;
     document.getElementById("summary").innerHTML = [
-      ["Models", models.length],
+      ["Configurations", models.length],
       ["Benchmarks", benchmarks.length],
       ["Tasks scored", totalTasks],
       ["Loops detected", `${totalLoops} · ${totalTasks ? (totalLoops / totalTasks * 100).toFixed(1) : "0.0"}%`],
@@ -539,6 +546,46 @@
     document.getElementById("overallChart").innerHTML = scoredModels.length
       ? chart(chartConfigs.get("overall"))
       : `<article class="chart-shell"><div class="chart-header"><h3 class="chart-title">Overall</h3><span class="chart-subtitle">· not applicable</span></div><p class="section-note">RULER is reported independently at each context length.</p></article>`;
+    document.getElementById("harnessChart").innerHTML = harnessRows.length
+      ? `<article class="chart-shell matrix-card">
+          <div class="chart-header"><h3 class="chart-title">Harness effect</h3><span class="chart-subtitle">· paired direct vs stock Pi</span></div>
+          <div class="matrix-wrap"><table>
+          <thead><tr><th>Model</th><th>Benchmark</th><th>Feedback</th><th>Paired</th><th>Direct first</th><th>Pi first</th><th>Initial Δ</th><th>Direct final</th><th>Pi final</th><th>Final Δ</th><th>Gains</th><th>Regressions</th><th>Pi version</th></tr></thead>
+          <tbody>${harnessRows.map(row => `<tr>
+            <td>${escapeHtml(row.model.replace(/ · Pi agent(?: \+ repair)?$/, ""))}</td>
+            <td>${escapeHtml(benchmarkLabel(row))}</td>
+            <td>${number(row.repair_attempts) ? "one repair" : "none"}</td>
+            <td>${number(row.harness_paired_total)}</td>
+            <td>${number(row.direct_first_score).toFixed(1)}%</td>
+            <td>${number(row.harness_first_score).toFixed(1)}%</td>
+            <td>${number(row.harness_first_delta_pp) >= 0 ? "+" : ""}${number(row.harness_first_delta_pp).toFixed(1)}pp</td>
+            <td>${number(row.direct_score).toFixed(1)}%</td>
+            <td>${number(row.harness_score).toFixed(1)}%</td>
+            <td>${number(row.harness_delta_pp) >= 0 ? "+" : ""}${number(row.harness_delta_pp).toFixed(1)}pp</td>
+            <td>${number(row.harness_gains)}</td>
+            <td>${number(row.harness_regressions)}</td>
+            <td>${escapeHtml(row.harness_version || "latest")}</td>
+          </tr>`).join("")}</tbody>
+          </table></div>
+        </article>`
+      : "";
+    document.getElementById("repairChart").innerHTML = repairRows.length
+      ? `<article class="chart-shell matrix-card">
+          <div class="chart-header"><h3 class="chart-title">Verifier repair effect</h3><span class="chart-subtitle">· first answer vs final answer</span></div>
+          <div class="matrix-wrap"><table>
+          <thead><tr><th>Configuration</th><th>Benchmark</th><th>First</th><th>Final</th><th>Delta</th><th>Retried</th><th>Repaired</th></tr></thead>
+          <tbody>${repairRows.map(row => `<tr>
+            <td>${escapeHtml(row.model)}</td>
+            <td>${escapeHtml(benchmarkLabel(row))}</td>
+            <td>${number(row.first_attempt_score).toFixed(1)}%</td>
+            <td>${number(row.score).toFixed(1)}%</td>
+            <td>${number(row.repair_delta_pp) >= 0 ? "+" : ""}${number(row.repair_delta_pp).toFixed(1)}pp</td>
+            <td>${number(row.repair_attempted)}</td>
+            <td>${number(row.repair_successes)}</td>
+          </tr>`).join("")}</tbody>
+          </table></div>
+        </article>`
+      : "";
     document.getElementById("robustnessChart").innerHTML = robustnessRows.length
       ? `<article class="chart-shell matrix-card">
           <div class="chart-header"><h3 class="chart-title">Choice-order robustness</h3><span class="chart-subtitle">· paired clean comparison</span></div>
@@ -572,7 +619,7 @@
       rows.filter(row => benchmarkLabel(row) === benchmark).map(row => [row.model, row])
     );
     document.getElementById("suiteChart").innerHTML = `<article class="chart-shell">
-      <div class="chart-header"><h3 class="chart-title">Capability overview</h3><span class="chart-subtitle">· pass@1</span></div>
+      <div class="chart-header"><h3 class="chart-title">Capability overview</h3><span class="chart-subtitle">· accuracy</span></div>
       <div class="suite-plot">${benchmarks.map(benchmark => {
         const lookup = rowLookupForBenchmark(benchmark);
         return `<div class="suite-group">
@@ -656,12 +703,14 @@
     document.getElementById("details").innerHTML = rows
       .sort((a, b) => number(b.score) - number(a.score))
       .map(row => `<details>
-        <summary><span class="detail-title">${escapeHtml(row.model)} / ${escapeHtml(benchmarkLabel(row))}</span><span class="detail-score">${row.passed}/${row.total} · ${number(row.score).toFixed(1)}%${robustnessMeta(row)} · ${aggregateSpeed(row).toFixed(1)} agg tok/s · ${streamSpeed(row).toFixed(1)} stream · ${effectiveConcurrency(row).toFixed(2)}x eff</span></summary>
+        <summary><span class="detail-title">${escapeHtml(row.model)}${row.harness_version ? ` ${escapeHtml(row.harness_version)}` : ""} / ${escapeHtml(benchmarkLabel(row))}</span><span class="detail-score">${row.passed}/${row.total} · ${number(row.score).toFixed(1)}%${row.harness_delta_pp == null ? "" : ` · harness ${number(row.harness_delta_pp) >= 0 ? "+" : ""}${number(row.harness_delta_pp).toFixed(1)}pp`}${number(row.repair_attempts) ? ` · repair ${number(row.repair_delta_pp) >= 0 ? "+" : ""}${number(row.repair_delta_pp).toFixed(1)}pp · ${number(row.repair_successes)}/${number(row.repair_attempted)} fixed` : ""}${robustnessMeta(row)} · ${aggregateSpeed(row).toFixed(1)} agg tok/s · ${streamSpeed(row).toFixed(1)} stream · ${effectiveConcurrency(row).toFixed(2)}x eff</span></summary>
         <div class="tasks">${(row.tasks || []).map(task => `<article class="task">
-          <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} tokens</span><span><span class="status ${task.passed ? "pass" : number(task.score) > 0 ? "partial" : ""}">${task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.error ? "ERROR" : task.passed ? "PASS" : number(task.score) > 0 ? `PARTIAL ${number(task.score).toFixed(0)}%` : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(loopLabel(task))}</span></span></div>
+          <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} output · ${number(task.input_tokens)} input · ${number(task.model_turns || 1)} turns · ${number(task.tool_calls)} tools</span><span><span class="status ${task.passed ? "pass" : number(task.score) > 0 ? "partial" : ""}">${task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.error ? "ERROR" : task.passed ? "PASS" : number(task.score) > 0 ? `PARTIAL ${number(task.score).toFixed(0)}%` : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(loopLabel(task))}</span></span></div>
           <div class="exchange">
             ${task.error ? `<div class="code"><div class="code-label">Error</div><pre>${escapeHtml(task.error)}</pre></div>` : ""}
             ${task.perturbation ? `<div class="code"><div class="code-label">Choice order · seed ${number(task.perturbation.seed)}</div><pre>${escapeHtml(task.perturbation.choice_order.join(", "))}\nanswer ${escapeHtml(task.perturbation.original_answer)} → ${escapeHtml(task.perturbation.perturbed_answer)}</pre></div>` : ""}
+            ${(task.attempts || []).length ? `<div class="code thinking-code"><div class="code-label">Verifier-feedback attempts</div><pre>${escapeHtml(task.attempts.map(attempt => `Attempt ${number(attempt.attempt)} · ${attempt.passed ? "pass" : "fail"} · ${number(attempt.score).toFixed(1)}%${attempt.feedback ? `\nfeedback: ${attempt.feedback}` : ""}\n\n${attempt.response || ""}`).join("\n\n────────────────────────────────\n\n"))}</pre></div>` : ""}
+            ${(task.tool_trace || []).length ? `<div class="code thinking-code"><div class="code-label">Pi native tool trace</div><pre>${escapeHtml(task.tool_trace.map(call => `${call.name || "tool"} · attempt ${number(call.attempt || 1)} · ${call.is_error ? "error" : "ok"} · ${number(call.duration_s).toFixed(3)}s\n${JSON.stringify(call.arguments || {}, null, 2)}${call.output ? `\noutput${call.output_truncated ? " (last 8,000 chars)" : ""}:\n${call.output}` : ""}`).join("\n\n"))}</pre></div>` : ""}
             ${task.thinking ? `<div class="code thinking-code"><div class="code-label">Thinking · ${number(task.thinking_time_s).toFixed(1)}s · loop score ${(number(task.loop_score) * 100).toFixed(0)}%</div><pre>${escapeHtml(task.thinking)}</pre></div>` : ""}
             <div class="code"><div class="code-label">Prompt</div><pre>${escapeHtml(task.prompt)}</pre></div>
             <div class="code"><div class="code-label">Response</div><pre>${escapeHtml(task.response)}</pre></div>

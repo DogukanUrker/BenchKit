@@ -58,7 +58,8 @@ class JobDetailScreen(Screen[None]):
     def on_mount(self) -> None:
         result = self.result
         benchmark_label = result.get("benchmark_label", result["benchmark"])
-        self.title = f"{benchmark_label} · {result['model']}"
+        harness = result.get("harness_label", "Direct")
+        self.title = f"{benchmark_label} · {result['model']} · {harness}"
         self.sub_title = f"{result['passed']}/{result['total']} passed"
 
         table = self.query_one("#task-table", DataTable)
@@ -77,6 +78,24 @@ class JobDetailScreen(Screen[None]):
                 f"{score_hint} · Δ {result['score_delta_pp']:+.1f} pp · "
                 f"{result.get('regressions', 0)} regression(s) · "
                 f"seed {result.get('perturbation_seed', 42)}"
+            )
+        if result.get("harness_delta_pp") is not None:
+            score_hint += (
+                f" · harness Δ {result['harness_delta_pp']:+.1f} pp"
+                + (
+                    f" (initial {result.get('harness_first_delta_pp', 0):+.1f})"
+                    if result.get("repair_attempts")
+                    else ""
+                )
+                + " · "
+                f"{result.get('harness_gains', 0)} gain(s) · "
+                f"{result.get('harness_regressions', 0)} regression(s)"
+            )
+        if result.get("repair_attempts"):
+            score_hint += (
+                f" · repair Δ {result.get('repair_delta_pp', 0):+.1f} pp · "
+                f"{result.get('repair_successes', 0)}/"
+                f"{result.get('repair_attempted', 0)} fixed"
             )
         self.query_one("#stat-score", StatCard).set_state(f"{score:.1f}%", score_hint)
         self.query_one("#stat-passed", StatCard).set_state(
@@ -180,7 +199,10 @@ class JobDetailScreen(Screen[None]):
         index = int(str(event.row_key.value))
         task = self.result["tasks"][index]
         benchmark_label = self.result.get("benchmark_label", self.result["benchmark"])
-        title = f"{benchmark_label} · {self.result['model']}"
+        title = (
+            f"{benchmark_label} · {self.result['model']} · "
+            f"{self.result.get('harness_label', 'Direct')}"
+        )
         self.app.push_screen(TaskDetailScreen(title, task))
 
     # Actions ----------------------------------------------------------
@@ -206,6 +228,8 @@ def _result_cell(task: dict, dark: bool = True) -> Text:
         if task.get("timed_out")
         else "ERROR"
         if error
+        else "FIXED"
+        if task.get("repaired")
         else "PASS"
         if passed
         else f"{float(task.get('score', 0)):.0f}%"

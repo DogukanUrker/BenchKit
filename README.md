@@ -42,7 +42,7 @@ LM Studio — as well as a native Ollama host.
 | Screen      | What happens there                                                                                                                                                                                         |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Connect** | Host, provider, API key and timeout are editable in place. Auto-connects from your `.env`, shows the real error when it fails, retries on `Ctrl+R`.                                                        |
-| **Setup**   | Multi-select panes for models and benchmarks with live filters, task counts, global or per-benchmark limits, and an optional paired choice-order run. A summary line keeps score: `3 models × 2 benchmarks = 6 runs · 1,240 tasks`. |
+| **Setup**   | Multi-select panes for models and benchmarks with live filters, task counts, global or per-benchmark limits, optional verifier repair, and an optional paired choice-order run. A summary line keeps score: `3 models × 2 benchmarks = 6 runs · 1,240 tasks`. |
 | **Run**     | Per-job and overall progress, live accuracy / tok-s / latency / elapsed, streamed thinking/answer phases, loop detection and configurable loop killing, and a task table that updates in place. Pause, skip a job or stop at any point. |
 | **Results** | Sortable summary, drill-down into every task with a pass/fail/search filter, and the path to the saved reports.                                                                                            |
 
@@ -126,6 +126,8 @@ uv run benchkit --headless --models all --benchmarks quickbench --verbose
 uv run benchkit --headless --models qwen3:8b --tag code
 uv run benchkit --headless --models qwen3:8b --benchmarks ruler:5
 uv run benchkit --headless --models qwen3:8b --benchmarks mmlu-pro:100 --perturbation choice-order
+uv run benchkit --headless --models qwen3:8b --benchmarks gsm8k:20 --harness both
+uv run benchkit --headless --models qwen3:8b --benchmarks gsm8k:20 --harness both --repair-attempts 1
 uv run benchkit --list
 uv run benchkit --list --tag mcq,-saturated
 ```
@@ -133,6 +135,82 @@ uv run benchkit --list --tag mcq,-saturated
 `--verbose` prints every prompt, available reasoning trace and response. Reports
 are saved exactly as they are from the TUI, and a run that fails part-way still
 keeps what finished.
+
+### Direct API vs Pi agent
+
+Use `--harness direct`, `--harness pi`, or `--harness both` to measure the same
+model and task with raw next-token generation, the stock Pi coding agent, or a
+paired run of both. In the TUI, choose the same modes from the **Harness**
+selector. Paired results report the direct score, Pi score, percentage-point
+effect, gains, and regressions for matching task IDs.
+
+`--repair-attempts 1` is an orthogonal verifier-feedback condition that works
+with direct, Pi, and paired harness runs. After an incorrect first answer,
+BenchKit returns one sanitized verifier message and accepts one complete
+replacement answer. Direct mode makes a second raw request containing the
+original exchange. Pi receives a second user turn in the same stock agent
+session and keeps its container workspace and native tool history. Reports
+retain both attempts and separately show first-attempt score, final score,
+repair delta, tasks retried, and successful repairs. The default is
+`--repair-attempts 0`, preserving ordinary pass@1 behavior.
+With `--harness both --repair-attempts 1`, one run therefore records direct
+first/final and Pi first/final scores, plus the initial and final harness
+deltas.
+
+Verifier feedback never includes the expected answer or hidden test bodies.
+Exact-match benchmarks receive a generic incorrect/partial-credit message;
+bundled Python suites expose only safe categories such as syntax error,
+assertion failure, runtime exception type, or timeout. This is called a repair
+attempt rather than "2-shot," which normally means examples placed in the
+initial prompt.
+
+Pi mode requires a running Docker daemon. At the start of every Pi benchmark
+run, BenchKit builds `benchkit-pi:latest` with Docker's build cache disabled and
+installs `@earendil-works/pi-coding-agent@latest`. There is deliberately no Pi
+version pin: the exact resolved version is recorded in every result and report.
+This makes startup slower and makes runs across different dates less
+reproducible, but keeps the comparison on Pi's current release as intended. The
+image is automatically removed when the benchmark ends, including failed or
+cancelled runs.
+
+BenchKit does not replace Pi's system prompt or tool definitions. It starts Pi
+in its native RPC mode with its normal `read`, `bash`, `edit`, and `write` tools,
+so an agent can create a Python program, execute it, inspect an error, revise
+files, and continue its own normal tool loop. This is intentionally different
+from adding a calculator call to a raw model request.
+
+Each task receives a fresh, persistent `/workspace` inside a Docker container.
+All of that task's agent turns and native tool calls share the workspace; the
+container is removed when the task finishes. The task container has no host
+mount, Docker socket, or direct network egress. A separate restricted proxy
+exposes only the selected inference server's OpenAI-compatible model and chat
+routes, keeping the real upstream API key outside the agent container. This
+task-environment boundary is also the foundation for adding repository files,
+setup commands, and environment-based multi-step suites later.
+
+This boundary isolates Pi's native tool execution. Existing code-suite
+verifiers still run through BenchKit's current evaluator; with repair enabled,
+the answer-safe result is returned before Pi's optional second turn. Moving
+hidden tests into task-specific images is a separate step for future
+Terminal-Bench/SWE-bench-style environments.
+
+Pi jobs use the same automatically discovered model-server capacity as direct
+jobs, keeping paired runs at matching concurrency. Every active Pi task owns an
+agent container and a proxy container, so resource use scales at twice the task
+concurrency. The remaining sandbox limits and deadline can be tuned without
+changing benchmark definitions:
+
+```env
+BENCHKIT_PI_TIMEOUT=900
+BENCHKIT_SANDBOX_MEMORY=2g
+BENCHKIT_SANDBOX_CPUS=2
+BENCHKIT_SANDBOX_PIDS=256
+```
+
+`--demo` remains direct-only because it has no real inference endpoint for Pi's
+multi-turn requests. Pi's total input/output tokens, assistant turns, native
+tool count, tool names/arguments/errors, and resolved Pi version are retained
+in JSON and the human-readable reports.
 
 ### Choice-order robustness
 
