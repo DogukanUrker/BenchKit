@@ -193,6 +193,7 @@ DataTable > .datatable--cursor {
 }
 
 #setup-options .field-label,
+#setup-harness .field-label,
 #setup-perturbation .field-label {
     padding: 0 1 0 0;
 }
@@ -207,6 +208,23 @@ DataTable > .datatable--cursor {
 }
 
 #setup-options .hint {
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#setup-harness {
+    height: 3;
+    padding: 0 2;
+}
+
+#setup-harness Select {
+    width: 22;
+    height: 3;
+    margin: -1 2 0 0;
+}
+
+#setup-harness .hint {
+    padding: 0 0 0 0;
     text-wrap: nowrap;
     text-overflow: ellipsis;
 }

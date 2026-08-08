@@ -96,6 +96,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Headless: deterministic perturbation seed (default: 42)",
     )
     parser.add_argument(
+        "--harness",
+        choices=("direct", "pi", "both"),
+        default="direct",
+        help=(
+            "Execution harness: raw API, latest stock Pi in Docker, or paired "
+            "direct + Pi runs (default: direct)"
+        ),
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="Print the available benchmarks and exit",
@@ -299,24 +308,30 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
             console.print(f"[dim]Supported: {', '.join(supported)}[/dim]")
             sys.exit(1)
 
+    harnesses = ("direct", "pi") if args.harness == "both" else (args.harness,)
     jobs: list[JobSpec] = []
     for model in models:
         for key, spec in specs:
-            jobs.append(JobSpec(model, key, spec))
-            if args.perturbation:
-                jobs.append(
-                    JobSpec(
-                        model,
-                        key,
-                        spec,
-                        perturbation=args.perturbation,
-                        perturbation_seed=args.perturbation_seed,
+            for harness in harnesses:
+                jobs.append(JobSpec(model, key, spec, harness=harness))
+                if args.perturbation:
+                    jobs.append(
+                        JobSpec(
+                            model,
+                            key,
+                            spec,
+                            perturbation=args.perturbation,
+                            perturbation_seed=args.perturbation_seed,
+                            harness=harness,
+                        )
                     )
-                )
     return jobs
 
 
 def _headless(args: argparse.Namespace) -> None:
+    if args.demo and args.harness != "direct":
+        console.print("[red]Pi harness is unavailable in demo mode.[/red]")
+        sys.exit(1)
     try:
         client = _client(args)
     except ValueError as exc:
@@ -368,8 +383,14 @@ def _headless(args: argparse.Namespace) -> None:
     # Fold long model and benchmark names instead of ellipsizing them: the
     # summary is the part of a headless run people copy into a report.
     table.add_column("Model", overflow="fold")
+    table.add_column("Harness")
     table.add_column("Benchmark", overflow="fold")
     table.add_column("Score", justify="right")
+    has_harness_pairs = any(
+        result.get("harness_delta_pp") is not None for result in results
+    )
+    if has_harness_pairs:
+        table.add_column("Harness Δ", justify="right")
     has_perturbations = any(result.get("perturbation") for result in results)
     if has_perturbations:
         table.add_column("Delta", justify="right")
@@ -392,9 +413,15 @@ def _headless(args: argparse.Namespace) -> None:
         parallel = result.get("concurrency", 1) > 1
         row = [
             result["model"],
+            result.get("harness_label", "Direct"),
             result.get("benchmark_label", result["benchmark"]),
             _score_text(result["score"]),
         ]
+        if has_harness_pairs:
+            harness_delta = result.get("harness_delta_pp")
+            row.append(
+                f"{float(harness_delta):+.1f}pp" if harness_delta is not None else "—"
+            )
         if has_perturbations:
             delta = result.get("score_delta_pp")
             row.extend(

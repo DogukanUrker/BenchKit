@@ -165,6 +165,7 @@ class RunScreen(Screen[None]):
         queue = self.query_one("#queue", DataTable)
         queue.add_column("#", key="index", width=3)
         queue.add_column("Model", key="model")
+        queue.add_column("Harness", key="harness", width=10)
         queue.add_column("Benchmark", key="benchmark")
         queue.add_column("Progress", key="progress", width=10)
         queue.add_column("Score", key="score", width=7)
@@ -173,6 +174,7 @@ class RunScreen(Screen[None]):
             queue.add_row(
                 str(index + 1),
                 job.model,
+                job.harness_label,
                 job.benchmark_label,
                 Text("—", style="dim"),
                 Text("—", style="dim"),
@@ -279,9 +281,11 @@ class RunScreen(Screen[None]):
 
         job = event.job
         title = Content.from_markup(
-            "[b]$bench[/b]  [dim]on[/dim]  $model[dim]$slice$parallel[/dim]",
+            "[b]$bench[/b]  [dim]on[/dim]  $model  [cyan]$harness[/cyan]"
+            "[dim]$slice$parallel[/dim]",
             bench=job.benchmark_label,
             model=job.model,
+            harness=job.harness_label,
             slice=f"   slice {job.slice_spec}" if job.slice_spec else "",
             parallel=f"   · {event.concurrency} concurrent",
         )

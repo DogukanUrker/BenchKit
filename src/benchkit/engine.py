@@ -27,6 +27,7 @@ from benchkit.client import GenerationUpdate, InferenceClient
 from benchkit.looping import LoopAnalyzer
 from benchkit.metrics import throughput_metrics
 from benchkit.perturbations import annotate_robustness, perturb_task
+from benchkit.pi_agent import PiAgentRunner
 
 
 class SliceError(ValueError):
@@ -156,13 +157,14 @@ class JobSpec:
     variant: str | None = None
     perturbation: str | None = None
     perturbation_seed: int = 42
+    harness: Literal["direct", "pi"] = "direct"
 
     @property
     def key(self) -> str:
         return (
             f"{self.model}|{self.benchmark}|{self.variant or ''}|"
             f"{self.slice_spec or ''}|{self.perturbation or ''}|"
-            f"{self.perturbation_seed if self.perturbation else ''}"
+            f"{self.perturbation_seed if self.perturbation else ''}|{self.harness}"
         )
 
     @property
@@ -176,7 +178,11 @@ class JobSpec:
 
     @property
     def title(self) -> str:
-        return f"{self.benchmark_label} · {self.model}"
+        return f"{self.benchmark_label} · {self.model} · {self.harness_label}"
+
+    @property
+    def harness_label(self) -> str:
+        return "Pi agent" if self.harness == "pi" else "Direct"
 
     def planned_total(self) -> int:
         total = slice_task_count(self.benchmark)
@@ -231,6 +237,12 @@ class TaskRecord:
     cycle_period_tokens: int = 0
     cycle_repetitions: int = 0
     repeated_suffix_tokens: int = 0
+    harness: str = "direct"
+    harness_version: str = ""
+    input_tokens: int = 0
+    model_turns: int = 1
+    tool_calls: int = 0
+    tool_trace: list[dict] = field(default_factory=list)
 
     @property
     def label(self) -> str:
@@ -482,6 +494,7 @@ def expand_jobs(jobs: list[JobSpec], client: object) -> list[JobSpec]:
                     variant=str(variant),
                     perturbation=job.perturbation,
                     perturbation_seed=job.perturbation_seed,
+                    harness=job.harness,
                 )
             )
     return expanded
@@ -515,6 +528,7 @@ def _result_metadata(job: JobSpec) -> dict:
     metadata = getattr(bench, "result_metadata", None)
     value = metadata(job.variant) if callable(metadata) else None
     result = dict(value) if isinstance(value, dict) else {}
+    result.update(harness=job.harness, harness_label=job.harness_label)
     if job.perturbation:
         result.update(
             perturbation=job.perturbation,
@@ -531,6 +545,8 @@ def _empty_result(job: JobSpec) -> dict:
         "benchmark": job.benchmark,
         "benchmark_label": job.benchmark_label,
         "variant": job.variant,
+        "harness": job.harness,
+        "harness_label": job.harness_label,
         "score": 0.0,
         "passed": 0,
         "total": 0,
@@ -539,6 +555,9 @@ def _empty_result(job: JobSpec) -> dict:
         "tok_s_aggregate": 0.0,
         "concurrency_eff": 0.0,
         "total_output_tokens": 0,
+        "total_input_tokens": 0,
+        "model_turns": 0,
+        "tool_calls": 0,
         "sum_generation_time": 0.0,
         "sum_request_time": 0.0,
         "avg_response_time": 0.0,
@@ -557,6 +576,59 @@ def _empty_result(job: JobSpec) -> dict:
         "tasks": [],
         **_result_metadata(job),
     }
+
+
+def _harness_pair_key(result: dict) -> tuple[object, ...]:
+    return (
+        result.get("model"),
+        result.get("benchmark"),
+        result.get("variant"),
+        result.get("slice"),
+        result.get("perturbation"),
+        result.get("perturbation_seed") if result.get("perturbation") else None,
+    )
+
+
+def annotate_harness_effect(results: list[dict]) -> None:
+    """Attach paired direct-versus-agent deltas to Pi result rows."""
+    direct = {
+        _harness_pair_key(result): result
+        for result in results
+        if result.get("harness", "direct") == "direct"
+    }
+    for result in results:
+        if result.get("harness") != "pi":
+            continue
+        baseline = direct.get(_harness_pair_key(result))
+        if baseline is None:
+            continue
+        baseline_tasks = {task["task_id"]: task for task in baseline.get("tasks", [])}
+        pairs = [
+            (baseline_tasks[task["task_id"]], task)
+            for task in result.get("tasks", [])
+            if task["task_id"] in baseline_tasks
+        ]
+        if not pairs:
+            continue
+        total = len(pairs)
+        direct_points = sum(float(before.get("score", 0)) for before, _ in pairs)
+        pi_points = sum(float(after.get("score", 0)) for _, after in pairs)
+        gains = sum(
+            not bool(before.get("passed")) and bool(after.get("passed"))
+            for before, after in pairs
+        )
+        regressions = sum(
+            bool(before.get("passed")) and not bool(after.get("passed"))
+            for before, after in pairs
+        )
+        result.update(
+            harness_paired_total=total,
+            direct_score=round(direct_points / total, 1),
+            harness_score=round(pi_points / total, 1),
+            harness_delta_pp=round((pi_points - direct_points) / total, 1),
+            harness_gains=gains,
+            harness_regressions=regressions,
+        )
 
 
 @dataclass
@@ -580,6 +652,7 @@ class Engine:
     _emit_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
+    _pi_runner: PiAgentRunner | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.loop_kill_percent = min(100.0, max(0.0, self.loop_kill_percent))
@@ -592,6 +665,13 @@ class Engine:
             # single-threaded state machines.
             with self._emit_lock:
                 self.sink(event)
+
+    def _pi(self) -> PiAgentRunner:
+        if self._pi_runner is None:
+            if getattr(self.client, "provider", None) == "demo":
+                raise RuntimeError("Pi harness is unavailable in demo mode")
+            self._pi_runner = PiAgentRunner(self.client)
+        return self._pi_runner
 
     def run(self) -> list[dict]:
         """Run every job and return the results, including a partial run.
@@ -606,23 +686,31 @@ class Engine:
         overall_total = plan_total_tasks(self.jobs)
         self.emit(RunStarted(list(self.jobs), overall_total))
 
-        for index, job in enumerate(self.jobs):
-            if self.controls.stopped:
-                break
-            try:
-                result, skipped = self._run_job(index, job, overall_total)
-            except Exception as exc:
-                self.failure = f"{type(exc).__name__}: {exc}"
-                self.emit(RunFailed(self.failure))
-                break
-            # Every job reports a terminal event, even an empty one, so the UI
-            # never leaves a queue row running.
-            self.emit(JobCompleted(index, job, result or _empty_result(job), skipped))
-            if result is not None:
-                results.append(result)
-            self._maybe_unload(index, job)
+        try:
+            for index, job in enumerate(self.jobs):
+                if self.controls.stopped:
+                    break
+                try:
+                    result, skipped = self._run_job(index, job, overall_total)
+                except Exception as exc:
+                    self.failure = f"{type(exc).__name__}: {exc}"
+                    self.emit(RunFailed(self.failure))
+                    break
+                # Every job reports a terminal event, even an empty one, so the UI
+                # never leaves a queue row running.
+                self.emit(
+                    JobCompleted(index, job, result or _empty_result(job), skipped)
+                )
+                if result is not None:
+                    results.append(result)
+                self._maybe_unload(index, job)
+        finally:
+            if self._pi_runner is not None:
+                with contextlib.suppress(Exception):
+                    self._pi_runner.cleanup()
 
         annotate_robustness(results)
+        annotate_harness_effect(results)
         elapsed = (
             round(sum(result["total_time"] for result in results), 1)
             if getattr(self.client, "simulated_timing", False)
@@ -641,15 +729,21 @@ class Engine:
         with contextlib.suppress(Exception):
             self.client.unload_model(job.model)
 
-    def _max_parallel_requests(self, model: str, total: int) -> int:
+    def _max_parallel_requests(self, job: JobSpec, total: int) -> int:
         """Resolve a safe worker count, keeping unknown clients serial."""
         if total <= 1:
             return 1
+        if job.harness == "pi":
+            try:
+                configured = int(os.environ.get("BENCHKIT_PI_CONCURRENCY", "1"))
+            except ValueError:
+                configured = 1
+            return min(total, max(1, configured))
         discover = getattr(self.client, "max_parallel_requests", None)
         if not callable(discover):
             return 1
         try:
-            capacity = discover(model)
+            capacity = discover(job.model)
             if isinstance(capacity, bool):
                 return 1
             return min(total, max(1, int(capacity)))
@@ -671,8 +765,7 @@ class Engine:
             start, end, slice_spec = 0, len(all_tasks), None
         tasks = all_tasks[start:end]
 
-        concurrency = self._max_parallel_requests(job.model, len(tasks))
-        wall_start = time.perf_counter()
+        concurrency = self._max_parallel_requests(job, len(tasks))
         self.emit(
             JobStarted(
                 index,
@@ -683,9 +776,28 @@ class Engine:
             )
         )
 
+        if job.harness == "pi" and tasks:
+            first = tasks[0]
+            self.emit(
+                TaskPhase(
+                    index=index,
+                    job=job,
+                    position=1,
+                    total=len(tasks),
+                    task_id=first.id,
+                    entry_point=str(first.metadata.get("entry_point", "")),
+                    phase="generating",
+                    activity="preparing latest Pi sandbox image",
+                )
+            )
+            self._pi().prepare()
+
         if not tasks:
             return None, False
 
+        # Image resolution is run setup, not task execution. Per-task Pi
+        # container startup and every agent/tool turn remain in the timing.
+        wall_start = time.perf_counter()
         passed = 0
         score_points = 0.0
         errors = 0
@@ -859,6 +971,13 @@ class Engine:
             "benchmark": bench.name,
             "benchmark_label": job.benchmark_label,
             "variant": job.variant,
+            "harness": job.harness,
+            "harness_label": job.harness_label,
+            "harness_version": (
+                self._pi_runner.version
+                if job.harness == "pi" and self._pi_runner
+                else ""
+            ),
             "score": round(score, 1),
             "passed": passed,
             "total": completed,
@@ -869,6 +988,9 @@ class Engine:
             "tok_s_aggregate": tok_s_aggregate,
             "concurrency_eff": concurrency_eff,
             "total_output_tokens": total_tokens,
+            "total_input_tokens": sum(record.input_tokens for record in records),
+            "model_turns": sum(record.model_turns for record in records),
+            "tool_calls": sum(record.tool_calls for record in records),
             "sum_generation_time": round(total_eval_ns / 1e9, 3),
             "sum_request_time": round(total_response_time, 3),
             "avg_response_time": round(total_response_time / completed, 1),
@@ -928,6 +1050,12 @@ class Engine:
                     "cycle_period_tokens": record.cycle_period_tokens,
                     "cycle_repetitions": record.cycle_repetitions,
                     "repeated_suffix_tokens": record.repeated_suffix_tokens,
+                    "harness": record.harness,
+                    "harness_version": record.harness_version,
+                    "input_tokens": record.input_tokens,
+                    "model_turns": record.model_turns,
+                    "tool_calls": record.tool_calls,
+                    "tool_trace": record.tool_trace,
                 }
                 for record in records
             ],
@@ -1067,7 +1195,8 @@ class Engine:
             )
 
         try:
-            gen = self.client.generate(
+            generator = self._pi() if job.harness == "pi" else self.client
+            gen = generator.generate(
                 job.model,
                 prompt,
                 on_progress=on_progress,
@@ -1186,7 +1315,8 @@ class Engine:
         elif timed_out:
             ok = False
             if not error:
-                error = f"generation timed out after {self.client.timeout:g}s"
+                timeout_s = float(gen.get("timeout_s") or self.client.timeout)
+                error = f"generation timed out after {timeout_s:g}s"
                 errors += 1
             phase = "timed_out"
             activity = "timed out — skipping task"
@@ -1269,6 +1399,12 @@ class Engine:
             cycle_period_tokens=loop.cycle_period_tokens,
             cycle_repetitions=loop.cycle_repetitions,
             repeated_suffix_tokens=loop.repeated_suffix_tokens,
+            harness=str(gen.get("harness") or job.harness),
+            harness_version=str(gen.get("harness_version") or ""),
+            input_tokens=int(gen.get("input_tokens") or 0),
+            model_turns=int(gen.get("model_turns") or 1),
+            tool_calls=int(gen.get("tool_calls") or 0),
+            tool_trace=list(gen.get("tool_trace") or []),
         )
         return _TaskOutcome(
             record=record,

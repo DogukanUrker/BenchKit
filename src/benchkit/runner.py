@@ -284,6 +284,7 @@ class _Dashboard:
         title.append(view.job.benchmark_label, style="bold")
         title.append(f" {glyphs.dot} ", style="dim")
         title.append(view.job.model)
+        title.append(f" {glyphs.dot} {view.job.harness_label}", style="cyan")
         meta = Text(
             f"job {view.index + 1}/{len(self.state.jobs)} {glyphs.dot} "
             f"{slice_label(view.job.slice_spec)} {glyphs.dot} "
@@ -424,6 +425,7 @@ class _Reporter:
                 Text(
                     f"[{self._stamp()}] job {event.index + 1}/{len(self.state.jobs)}"
                     f" {event.job.benchmark_label} on {event.job.model}"
+                    f" via {event.job.harness_label}"
                     f" {self.glyphs.dot} {event.total} tasks"
                     f" {self.glyphs.dot} {event.concurrency} concurrent"
                     f" {self.glyphs.dot} {slice_label(event.job.slice_spec)}",
@@ -618,6 +620,9 @@ class _Reporter:
         line.append(result.get("benchmark_label", result["benchmark"]), style="bold")
         line.append(f" {glyphs.dot} ", style="dim")
         line.append(result["model"])
+        line.append(
+            f" {glyphs.dot} {result.get('harness_label', 'Direct')}", style="cyan"
+        )
         line.append("  ")
         line.append_text(_score_text(result["score"]))
         line.append("  ")

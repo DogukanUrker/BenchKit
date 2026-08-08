@@ -58,7 +58,8 @@ class JobDetailScreen(Screen[None]):
     def on_mount(self) -> None:
         result = self.result
         benchmark_label = result.get("benchmark_label", result["benchmark"])
-        self.title = f"{benchmark_label} · {result['model']}"
+        harness = result.get("harness_label", "Direct")
+        self.title = f"{benchmark_label} · {result['model']} · {harness}"
         self.sub_title = f"{result['passed']}/{result['total']} passed"
 
         table = self.query_one("#task-table", DataTable)
@@ -77,6 +78,12 @@ class JobDetailScreen(Screen[None]):
                 f"{score_hint} · Δ {result['score_delta_pp']:+.1f} pp · "
                 f"{result.get('regressions', 0)} regression(s) · "
                 f"seed {result.get('perturbation_seed', 42)}"
+            )
+        if result.get("harness_delta_pp") is not None:
+            score_hint += (
+                f" · harness Δ {result['harness_delta_pp']:+.1f} pp · "
+                f"{result.get('harness_gains', 0)} gain(s) · "
+                f"{result.get('harness_regressions', 0)} regression(s)"
             )
         self.query_one("#stat-score", StatCard).set_state(f"{score:.1f}%", score_hint)
         self.query_one("#stat-passed", StatCard).set_state(
@@ -180,7 +187,10 @@ class JobDetailScreen(Screen[None]):
         index = int(str(event.row_key.value))
         task = self.result["tasks"][index]
         benchmark_label = self.result.get("benchmark_label", self.result["benchmark"])
-        title = f"{benchmark_label} · {self.result['model']}"
+        title = (
+            f"{benchmark_label} · {self.result['model']} · "
+            f"{self.result.get('harness_label', 'Direct')}"
+        )
         self.app.push_screen(TaskDetailScreen(title, task))
 
     # Actions ----------------------------------------------------------

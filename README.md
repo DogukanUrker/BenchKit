@@ -126,6 +126,7 @@ uv run benchkit --headless --models all --benchmarks quickbench --verbose
 uv run benchkit --headless --models qwen3:8b --tag code
 uv run benchkit --headless --models qwen3:8b --benchmarks ruler:5
 uv run benchkit --headless --models qwen3:8b --benchmarks mmlu-pro:100 --perturbation choice-order
+uv run benchkit --headless --models qwen3:8b --benchmarks gsm8k:20 --harness both
 uv run benchkit --list
 uv run benchkit --list --tag mcq,-saturated
 ```
@@ -133,6 +134,59 @@ uv run benchkit --list --tag mcq,-saturated
 `--verbose` prints every prompt, available reasoning trace and response. Reports
 are saved exactly as they are from the TUI, and a run that fails part-way still
 keeps what finished.
+
+### Direct API vs Pi agent
+
+Use `--harness direct`, `--harness pi`, or `--harness both` to measure the same
+model and task with raw next-token generation, the stock Pi coding agent, or a
+paired run of both. In the TUI, choose the same modes from the **Harness**
+selector. Paired results report the direct score, Pi score, percentage-point
+effect, gains, and regressions for matching task IDs.
+
+Pi mode requires a running Docker daemon. At the start of every Pi benchmark
+run, BenchKit builds `benchkit-pi:latest` with Docker's build cache disabled and
+installs `@earendil-works/pi-coding-agent@latest`. There is deliberately no Pi
+version pin: the exact resolved version is recorded in every result and report.
+This makes startup slower and makes runs across different dates less
+reproducible, but keeps the comparison on Pi's current release as intended. The
+image is automatically removed when the benchmark ends, including failed or
+cancelled runs.
+
+BenchKit does not replace Pi's system prompt or tool definitions. It starts Pi
+in its native RPC mode with its normal `read`, `bash`, `edit`, and `write` tools,
+so an agent can create a Python program, execute it, inspect an error, revise
+files, and continue its own normal tool loop. This is intentionally different
+from adding a calculator call to a raw model request.
+
+Each task receives a fresh, persistent `/workspace` inside a Docker container.
+All of that task's agent turns and native tool calls share the workspace; the
+container is removed when the task finishes. The task container has no host
+mount, Docker socket, or direct network egress. A separate restricted proxy
+exposes only the selected inference server's OpenAI-compatible model and chat
+routes, keeping the real upstream API key outside the agent container. This
+task-environment boundary is also the foundation for adding repository files,
+setup commands, and environment-based multi-step suites later.
+
+This boundary isolates Pi's native tool execution. Existing code-suite
+verifiers still use BenchKit's current evaluator after Pi returns its final
+answer; moving hidden tests into task-specific images is a separate step for
+future Terminal-Bench/SWE-bench-style environments.
+
+Pi jobs are serial by default because every active task owns two containers.
+The limits and deadline can be tuned without changing benchmark definitions:
+
+```env
+BENCHKIT_PI_TIMEOUT=900
+BENCHKIT_PI_CONCURRENCY=1
+BENCHKIT_SANDBOX_MEMORY=2g
+BENCHKIT_SANDBOX_CPUS=2
+BENCHKIT_SANDBOX_PIDS=256
+```
+
+`--demo` remains direct-only because it has no real inference endpoint for Pi's
+multi-turn requests. Pi's total input/output tokens, assistant turns, native
+tool count, tool names/arguments/errors, and resolved Pi version are retained
+in JSON and the human-readable reports.
 
 ### Choice-order robustness
 
