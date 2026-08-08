@@ -34,12 +34,14 @@ HELP = """
 | `Space` / `Enter` | Toggle the highlighted row |
 | `a` / `n` / `i` | Select all / clear / invert the focused list |
 | `l` | Task limit for the highlighted benchmark |
+| `p` | Toggle the paired choice-order run |
 | `v` | Check chat templates (selected models, or all) |
 | `/` | Jump to the filter box |
 | `s` / `F5` | Start the run |
 | `Esc` | Back to the connection screen |
 
 Limits accept `20` (first 20), `-20` (last 20) and `40-80` (a range).
+Choice-order runs each selected task clean and with deterministically shuffled options.
 
 ### Run
 

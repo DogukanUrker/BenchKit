@@ -18,6 +18,7 @@ from collections.abc import Callable
 from benchkit.benchmarks.base import Task
 from benchkit.client import GenerationUpdate
 from benchkit.engine import benchmark, prompt_for, tasks_for
+from benchkit.perturbations import perturb_task
 
 LETTERS = "ABCDEFGHIJ"
 
@@ -258,13 +259,17 @@ class DemoClient:
     def __init__(self, speed: float = 1.0) -> None:
         self.speed = max(speed, 0.01)
         self._answers: dict[str, tuple[Task, str | None]] = {}
-        self._primed: set[str] = set()
+        self._primed: set[tuple[str, str | None, int]] = set()
 
-    def prime(self, benchmark_keys: list[str]) -> None:
+    def prime(
+        self,
+        benchmark_keys: list[str],
+        perturbations: list[tuple[str, int]] | None = None,
+    ) -> None:
         """Index prompts for the benchmarks about to run."""
+        specs: list[tuple[str | None, int]] = [(None, 42)]
+        specs.extend(perturbations or [])
         for key in benchmark_keys:
-            if key in self._primed:
-                continue
             bench = benchmark(key)
             solutions = _canonical_solutions(key)
             selected_tasks = tasks_for(key)
@@ -276,13 +281,23 @@ class DemoClient:
                     for variant in variants(self, DEMO_MODELS[0]["name"])
                     for task in select(selected_tasks, variant)
                 ]
-            for task in selected_tasks:
-                prompt = prompt_for(bench, task, self, DEMO_MODELS[0]["name"])
-                solution = solutions.get(task.id) or task.metadata.get(
-                    "canonical_solution"
-                )
-                self._answers[prompt] = (task, solution)
-            self._primed.add(key)
+            for perturbation, seed in specs:
+                cache_key = (key, perturbation, seed)
+                if cache_key in self._primed:
+                    continue
+                for task in selected_tasks:
+                    case = perturb_task(key, task, perturbation, seed)
+                    prompt = prompt_for(
+                        bench,
+                        case.prompt_task,
+                        self,
+                        DEMO_MODELS[0]["name"],
+                    )
+                    solution = solutions.get(task.id) or task.metadata.get(
+                        "canonical_solution"
+                    )
+                    self._answers[prompt] = (case.evaluation_task, solution)
+                self._primed.add(cache_key)
 
     def list_models(self) -> list[dict]:
         return [

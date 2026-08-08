@@ -192,7 +192,8 @@ DataTable > .datatable--cursor {
     margin: 1 0 0 0;
 }
 
-#setup-options .field-label {
+#setup-options .field-label,
+#setup-perturbation .field-label {
     padding: 0 1 0 0;
 }
 
@@ -206,6 +207,35 @@ DataTable > .datatable--cursor {
 }
 
 #setup-options .hint {
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#setup-perturbation {
+    height: 1;
+    padding: 0 2;
+}
+
+#choice-order {
+    width: 29;
+    height: 1;
+}
+
+#perturbation-seed-label {
+    width: 6;
+    padding: 0 1 0 0;
+}
+
+.seed-input {
+    width: 9;
+    height: 1;
+    border: none;
+    background: $bk-raise;
+    padding: 0 1;
+    margin: 0 2 0 0;
+}
+
+#setup-perturbation .hint {
     text-wrap: nowrap;
     text-overflow: ellipsis;
 }

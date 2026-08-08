@@ -74,6 +74,13 @@ def _variant_cap_note(jobs: list[JobSpec]) -> str:
     return ", ".join(notes)
 
 
+def _include_in_overall(job: JobSpec) -> bool:
+    """Match the engine/report rule for model-level score aggregation."""
+    return job.perturbation is None and getattr(
+        benchmark(job.benchmark), "include_in_overall", True
+    )
+
+
 class RunScreen(Screen[None]):
     """Everything that happens while benchmarks are running."""
 
@@ -489,7 +496,7 @@ class RunScreen(Screen[None]):
             else float(event.passed)
         )
         self.overall_completed += 1
-        if getattr(benchmark(event.job.benchmark), "include_in_overall", True):
+        if _include_in_overall(event.job):
             self.overall_score_points += (
                 record.score if record.score > 0 or not record.passed else 1.0
             )
@@ -710,13 +717,14 @@ class RunScreen(Screen[None]):
         score = self.current_score_points / completed * 100
         failed = self.current_completed - self.current_passed
         accuracy = self.query_one("#stat-accuracy", StatCard)
-        include_current = getattr(
-            benchmark(self.jobs[self.current_index].benchmark),
-            "include_in_overall",
-            True,
-        )
+        current_job = self.jobs[self.current_index]
+        include_current = _include_in_overall(current_job)
         if not include_current:
-            overall_hint = "per-context · not averaged"
+            overall_hint = (
+                "paired perturbation · not averaged"
+                if current_job.perturbation
+                else "per-context · not averaged"
+            )
         elif self.overall_scored_tasks:
             overall = self.overall_score_points / self.overall_scored_tasks * 100
             overall_hint = f"{overall:.1f}% overall"

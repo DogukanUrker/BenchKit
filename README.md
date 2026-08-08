@@ -42,7 +42,7 @@ LM Studio — as well as a native Ollama host.
 | Screen      | What happens there                                                                                                                                                                                         |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Connect** | Host, provider, API key and timeout are editable in place. Auto-connects from your `.env`, shows the real error when it fails, retries on `Ctrl+R`.                                                        |
-| **Setup**   | Multi-select panes for models and benchmarks with live filters, task counts, and a task limit set globally or per benchmark. A summary line keeps score: `3 models × 2 benchmarks = 6 runs · 1,240 tasks`. |
+| **Setup**   | Multi-select panes for models and benchmarks with live filters, task counts, global or per-benchmark limits, and an optional paired choice-order run. A summary line keeps score: `3 models × 2 benchmarks = 6 runs · 1,240 tasks`. |
 | **Run**     | Per-job and overall progress, live accuracy / tok-s / latency / elapsed, streamed thinking/answer phases, loop detection and configurable loop killing, and a task table that updates in place. Pause, skip a job or stop at any point. |
 | **Results** | Sortable summary, drill-down into every task with a pass/fail/search filter, and the path to the saved reports.                                                                                            |
 
@@ -99,6 +99,7 @@ to inspect.
 | `Space`         | Toggle the highlighted model or benchmark    |
 | `a` / `n` / `i` | Select all / clear / invert the focused list |
 | `l`             | Task limit for the highlighted benchmark     |
+| `p`             | Toggle choice-order in setup                  |
 | `/`             | Jump to the filter box                       |
 | `s` / `F5`      | Start the run                                |
 | `p` / `k` / `x` | Pause / skip job / stop during a run         |
@@ -124,6 +125,7 @@ uv run benchkit --headless --models qwen3:8b,gemma3:12b --benchmarks humaneval:2
 uv run benchkit --headless --models all --benchmarks quickbench --verbose
 uv run benchkit --headless --models qwen3:8b --tag code
 uv run benchkit --headless --models qwen3:8b --benchmarks ruler:5
+uv run benchkit --headless --models qwen3:8b --benchmarks mmlu-pro:100 --perturbation choice-order
 uv run benchkit --list
 uv run benchkit --list --tag mcq,-saturated
 ```
@@ -131,6 +133,35 @@ uv run benchkit --list --tag mcq,-saturated
 `--verbose` prints every prompt, available reasoning trace and response. Reports
 are saved exactly as they are from the TUI, and a run that fails part-way still
 keeps what finished.
+
+### Choice-order robustness
+
+Use `--perturbation choice-order` to test whether a model keeps solving the
+same multiple-choice tasks after their options move to different labels. Each
+selected task runs twice: the clean baseline first, followed by a deterministic
+permutation whose correct answer is guaranteed to move. BenchKit remaps the
+ground-truth letter, pairs the task results, and reports the clean and perturbed
+scores, percentage-point delta, regressions and recoveries. Perturbed jobs are
+kept out of the overall model score.
+
+Choice order is supported by `arc`, `gpqa`, `hellaswag`, `mmlu`, `mmlu-pro`,
+`openbookqa`, `piqa`, `truthfulqa` and `winogrande`. A mixed selection containing
+an unsupported benchmark fails before inference rather than silently skipping
+it. `uv run benchkit --list` shows support in the **Perturbations** column.
+
+Permutations are stable for the benchmark, task ID and seed. Change the default
+seed when you want another ordering:
+
+```bash
+uv run benchkit --headless --models qwen3:8b --benchmarks arc:100 \
+  --perturbation choice-order --perturbation-seed 7
+```
+
+In the TUI setup screen, enable **Run clean + choice-order** (or press `p`) and
+optionally change its seed. The plan summary doubles the run and task totals,
+unsupported benchmark selections are rejected before inference, and the results
+table shows paired score deltas and regressions. The same data is included in
+JSON, CSV, Markdown and HTML reports.
 
 ### Automatic request concurrency
 

@@ -71,7 +71,10 @@ def save(
     summary = [{k: v for k, v in r.items() if k != "tasks"} for r in results]
     if summary:
         with open(out / "results.csv", "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=summary[0].keys())
+            fieldnames = list(
+                dict.fromkeys(key for result in summary for key in result)
+            )
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(summary)
 
@@ -80,18 +83,26 @@ def save(
         f.write("# BenchKit Results\n\n")
         f.write(f"**Date:** {ts}\n\n")
         f.write(
-            "| Model | Benchmark | Parallel | Score | Passed | Total | Loops | Killed | Trace | Agg tok/s | Stream tok/s | Effective | Avg Resp | Wall Time |\n"
+            "| Model | Benchmark | Score | Delta | Regressions | Passed | Total | Parallel | Loops | Killed | Trace | Agg tok/s | Stream tok/s | Effective | Avg Resp | Wall Time |\n"
         )
         f.write(
-            "|-------|-----------|----------|-------|--------|-------|-------|--------|-------|-----------|--------------|-----------|----------|-----------|\n"
+            "|-------|-----------|------:|------:|------------:|-------:|------:|---------:|------:|-------:|------:|----------:|-------------:|----------:|---------:|----------:|\n"
         )
         for result in results:
             benchmark_label = result.get("benchmark_label", result["benchmark"])
+            delta = result.get("score_delta_pp")
+            delta_text = f"{float(delta):+.1f}pp" if delta is not None else "—"
+            regressions = (
+                f"{result.get('regressions', 0)}/{result.get('paired_total', 0)}"
+                if result.get("perturbation")
+                else "—"
+            )
             f.write(
                 f"| {result['model']} | {benchmark_label} "
-                f"| {result.get('concurrency', 1)} | {result['score']}% "
-                f"| {result['passed']} "
-                f"| {result['total']} | {result.get('loop_rate', 0)}% "
+                f"| {result['score']}% | {delta_text} | {regressions} "
+                f"| {result['passed']} | {result['total']} "
+                f"| {result.get('concurrency', 1)} "
+                f"| {result.get('loop_rate', 0)}% "
                 f"| {result.get('loop_kills', 0)} "
                 f"| {result.get('trace_coverage', 0)}% "
                 f"| {aggregate_tok_s(result):.1f} "
@@ -106,6 +117,28 @@ def save(
             "wall time. Stream tok/s uses summed server decode time. Effective "
             "concurrency is summed request time divided by wall time.\n"
         )
+
+        perturbed = [result for result in results if result.get("perturbation")]
+        if perturbed:
+            f.write("\n## Choice-order robustness\n\n")
+            f.write(
+                "| Model | Benchmark | Seed | Paired | Clean | Perturbed | Delta | Regressions | Recoveries |\n"
+            )
+            f.write(
+                "|-------|-----------|-----:|-------:|------:|----------:|------:|------------:|-----------:|\n"
+            )
+            for result in perturbed:
+                f.write(
+                    f"| {result['model']} "
+                    f"| {result.get('baseline_benchmark_label', result['benchmark'])} "
+                    f"| {result.get('perturbation_seed', 42)} "
+                    f"| {result.get('paired_total', 0)} "
+                    f"| {result.get('baseline_score', 0):.1f}% "
+                    f"| {result.get('perturbed_score', 0):.1f}% "
+                    f"| {result.get('score_delta_pp', 0):+.1f}pp "
+                    f"| {result.get('regressions', 0)} "
+                    f"| {result.get('recoveries', 0)} |\n"
+                )
 
         f.write("\n---\n\n")
         for result in results:
@@ -149,6 +182,15 @@ def save(
                 )
                 if task.get("error"):
                     f.write(f"**Error:** {task['error']}\n\n")
+                if perturbation := task.get("perturbation"):
+                    order = ", ".join(perturbation.get("choice_order", []))
+                    f.write(
+                        "**Perturbation:** choice-order "
+                        f"(seed {perturbation.get('seed')}) · original labels in "
+                        f"new order: {order} · answer "
+                        f"{perturbation.get('original_answer')} → "
+                        f"{perturbation.get('perturbed_answer')}\n\n"
+                    )
                 f.write("**Prompt:**\n\n")
                 f.write(f"~~~\n{task['prompt'].rstrip()}\n~~~\n\n")
                 if task.get("thinking"):

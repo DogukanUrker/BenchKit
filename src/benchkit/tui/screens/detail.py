@@ -71,9 +71,14 @@ class JobDetailScreen(Screen[None]):
         table.add_column("Stream tok/s", key="tok_s", width=12)
 
         score = result["score"]
-        self.query_one("#stat-score", StatCard).set_state(
-            f"{score:.1f}%", slice_label(result.get("slice"))
-        )
+        score_hint = slice_label(result.get("slice"))
+        if result.get("score_delta_pp") is not None:
+            score_hint = (
+                f"{score_hint} · Δ {result['score_delta_pp']:+.1f} pp · "
+                f"{result.get('regressions', 0)} regression(s) · "
+                f"seed {result.get('perturbation_seed', 42)}"
+            )
+        self.query_one("#stat-score", StatCard).set_state(f"{score:.1f}%", score_hint)
         self.query_one("#stat-passed", StatCard).set_state(
             f"{result['passed']}/{result['total']}",
             f"{result.get('errors', 0)} error(s)",

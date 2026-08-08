@@ -9,7 +9,16 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.content import Content
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, Label, SelectionList, Static
+from textual.widgets import (
+    Button,
+    Checkbox,
+    Footer,
+    Header,
+    Input,
+    Label,
+    SelectionList,
+    Static,
+)
 from textual.widgets.selection_list import Selection
 
 from benchkit.benchmarks import REGISTRY, all_tags, signal_tag, tags_for
@@ -23,6 +32,7 @@ from benchkit.engine import (
     slice_task_count,
     task_count,
 )
+from benchkit.perturbations import CHOICE_ORDER, perturbations_for
 from benchkit.template_check import TemplateReport, check_template
 from benchkit.tui.formatting import fmt_count, fmt_size
 from benchkit.tui.screens.modals import LimitScreen, TemplateCheckScreen
@@ -107,6 +117,7 @@ class SetupScreen(Screen[None]):
         Binding("n", "select_none", "Clear"),
         Binding("i", "invert", "Invert"),
         Binding("l", "set_limit", "Task limit"),
+        Binding("p", "toggle_perturbation", "Choice order"),
         Binding("v", "check_templates", "Check templates"),
         Binding("slash", "focus_filter", "Filter"),
         Binding("escape", "back", "Back"),
@@ -151,6 +162,24 @@ class SetupScreen(Screen[None]):
             yield Input(placeholder="all", id="global-limit", classes="limit-input")
             yield Static(
                 "N first N · -N last N · A-B range · press [b]l[/b] for a per-benchmark limit",
+                classes="hint",
+            )
+        with Horizontal(id="setup-perturbation"):
+            yield Label("Perturbation", classes="field-label wide")
+            yield Checkbox(
+                "Run clean + choice-order",
+                id="choice-order",
+                compact=True,
+            )
+            yield Label("Seed", id="perturbation-seed-label")
+            yield Input(
+                value="42",
+                id="perturbation-seed",
+                classes="seed-input",
+                disabled=True,
+            )
+            yield Static(
+                "paired shuffled options · supported multiple-choice benchmarks only",
                 classes="hint",
             )
         with Horizontal(id="setup-footer"):
@@ -311,8 +340,14 @@ class SetupScreen(Screen[None]):
                 "#model-list" if event.input.id == "model-filter" else "#bench-list"
             )
             self.query_one(target, SelectionList).focus()
-        elif event.input.id == "global-limit":
+        elif event.input.id in {"global-limit", "perturbation-seed"}:
             self.action_start()
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if event.checkbox.id != "choice-order":
+            return
+        self.query_one("#perturbation-seed", Input).disabled = not event.value
+        self._refresh_summary()
 
     def on_selection_list_selected_changed(
         self, event: SelectionList.SelectedChanged
@@ -391,6 +426,10 @@ class SetupScreen(Screen[None]):
 
         self.app.push_screen(LimitScreen(key, self.limits.get(key, ""), total), apply)
 
+    def action_toggle_perturbation(self) -> None:
+        checkbox = self.query_one("#choice-order", Checkbox)
+        checkbox.value = not checkbox.value
+
     def action_check_templates(self) -> None:
         targets = [
             name
@@ -443,7 +482,17 @@ class SetupScreen(Screen[None]):
         if jobs is None:
             return
         if self.app.demo and isinstance(self.app.client, DemoClient):
-            self.app.client.prime(sorted({job.benchmark for job in jobs}))
+            perturbations = sorted(
+                {
+                    (job.perturbation, job.perturbation_seed)
+                    for job in jobs
+                    if job.perturbation
+                }
+            )
+            self.app.client.prime(
+                sorted({job.benchmark for job in jobs}),
+                perturbations=perturbations,
+            )
         self.app.start_run(jobs)
 
     # Planning ---------------------------------------------------------
@@ -453,6 +502,16 @@ class SetupScreen(Screen[None]):
 
     def _limit_for(self, key: str) -> str | None:
         return self.limits.get(key) or self._global_limit() or None
+
+    def _choice_order_enabled(self) -> bool:
+        return self.query_one("#choice-order", Checkbox).value
+
+    def _perturbation_seed(self) -> int | None:
+        value = self.query_one("#perturbation-seed", Input).value.strip()
+        try:
+            return int(value)
+        except ValueError:
+            return None
 
     def _build_jobs(self) -> list[JobSpec] | None:
         models = [name for name in self.model_order if name in self.selected_models]
@@ -466,6 +525,29 @@ class SetupScreen(Screen[None]):
             self.notify("Select at least one benchmark", severity="error", timeout=4)
             self.query_one("#bench-list", SelectionList).focus()
             return None
+
+        choice_order = self._choice_order_enabled()
+        seed = self._perturbation_seed()
+        if choice_order and seed is None:
+            self.notify(
+                "Choice-order seed must be an integer.",
+                severity="error",
+                timeout=4,
+            )
+            self.query_one("#perturbation-seed", Input).focus()
+            return None
+        if choice_order:
+            unsupported = [
+                key for key in benches if CHOICE_ORDER not in perturbations_for(key)
+            ]
+            if unsupported:
+                self.notify(
+                    "Choice-order is unsupported for: " + ", ".join(unsupported),
+                    severity="error",
+                    timeout=6,
+                )
+                self.query_one("#bench-list", SelectionList).focus()
+                return None
 
         for key in benches:
             total = slice_task_count(key) if self.counts.get(key, 0) >= 0 else -1
@@ -489,11 +571,21 @@ class SetupScreen(Screen[None]):
                 )
                 return None
 
-        jobs = [
-            JobSpec(model, key, self._limit_for(key))
-            for model in models
-            for key in benches
-        ]
+        jobs: list[JobSpec] = []
+        for model in models:
+            for key in benches:
+                jobs.append(JobSpec(model, key, self._limit_for(key)))
+                if choice_order:
+                    assert seed is not None
+                    jobs.append(
+                        JobSpec(
+                            model,
+                            key,
+                            self._limit_for(key),
+                            perturbation=CHOICE_ORDER,
+                            perturbation_seed=seed,
+                        )
+                    )
         expanded = expand_jobs(jobs, self.app.client)
         if not expanded:
             self.notify(
@@ -527,25 +619,45 @@ class SetupScreen(Screen[None]):
     def _refresh_summary(self) -> None:
         models = len(self.selected_models)
         benches = [key for key in self.bench_order if key in self.selected_benchmarks]
-        runs = sum(
-            self._variant_count(key, model)
-            for model in self.selected_models
-            for key in benches
+        choice_order = self._choice_order_enabled()
+        unsupported = (
+            [key for key in benches if CHOICE_ORDER not in perturbations_for(key)]
+            if choice_order
+            else []
         )
-        tasks = sum(
-            self._planned_tasks(key) * self._variant_count(key, model)
-            for model in self.selected_models
-            for key in benches
+        multiplier = 2 if choice_order else 1
+        runs = (
+            sum(
+                self._variant_count(key, model)
+                for model in self.selected_models
+                for key in benches
+            )
+            * multiplier
+        )
+        tasks = (
+            sum(
+                self._planned_tasks(key) * self._variant_count(key, model)
+                for model in self.selected_models
+                for key in benches
+            )
+            * multiplier
         )
 
         if runs == 0:
             summary = Content.from_markup(
                 "[dim]Nothing selected yet — pick models and benchmarks.[/dim]"
             )
+        elif unsupported:
+            summary = Content.from_markup(
+                "[red]Choice-order unsupported for: $unsupported[/red]"
+                "[dim] — change the benchmark selection or turn it off.[/dim]",
+                unsupported=", ".join(unsupported),
+            )
         else:
             summary = Content.from_markup(
                 "[b]$models[/b][dim] model$ms  ×  [/dim][b]$benches[/b][dim] benchmark$bs"
-                "  =  [/dim][b]$runs[/b][dim] run$rs  ·  [/dim][b]$tasks[/b][dim] tasks total[/dim]",
+                "  =  [/dim][b]$runs[/b][dim] run$rs  ·  [/dim][b]$tasks[/b][dim] tasks total"
+                "$paired[/dim]",
                 models=models,
                 ms="" if models == 1 else "s",
                 benches=len(benches),
@@ -553,6 +665,7 @@ class SetupScreen(Screen[None]):
                 runs=runs,
                 rs="" if runs == 1 else "s",
                 tasks=fmt_count(tasks),
+                paired=" · clean + choice-order" if choice_order else "",
             )
         self.query_one("#plan-summary", Static).update(summary)
 

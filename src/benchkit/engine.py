@@ -26,6 +26,7 @@ from benchkit.benchmarks.base import Task
 from benchkit.client import GenerationUpdate, InferenceClient
 from benchkit.looping import LoopAnalyzer
 from benchkit.metrics import throughput_metrics
+from benchkit.perturbations import annotate_robustness, perturb_task
 
 
 class SliceError(ValueError):
@@ -153,17 +154,25 @@ class JobSpec:
     benchmark: str
     slice_spec: str | None = None
     variant: str | None = None
+    perturbation: str | None = None
+    perturbation_seed: int = 42
 
     @property
     def key(self) -> str:
         return (
             f"{self.model}|{self.benchmark}|{self.variant or ''}|"
-            f"{self.slice_spec or ''}"
+            f"{self.slice_spec or ''}|{self.perturbation or ''}|"
+            f"{self.perturbation_seed if self.perturbation else ''}"
         )
 
     @property
     def benchmark_label(self) -> str:
-        return f"{self.benchmark} · {self.variant}" if self.variant else self.benchmark
+        parts = [self.benchmark]
+        if self.variant:
+            parts.append(self.variant)
+        if self.perturbation:
+            parts.append(self.perturbation)
+        return " · ".join(parts)
 
     @property
     def title(self) -> str:
@@ -194,6 +203,7 @@ class TaskRecord:
     response_time_s: float
     prompt: str
     response: str
+    perturbation: dict = field(default_factory=dict)
     score: float = 0.0
     error: str = ""
     entry_point: str = ""
@@ -431,6 +441,7 @@ class _GeneratedTask:
     position: int
     task: Task
     prompt: str
+    perturbation: dict
     gen: dict
     error: str
     errors: int
@@ -469,6 +480,8 @@ def expand_jobs(jobs: list[JobSpec], client: object) -> list[JobSpec]:
                     benchmark=job.benchmark,
                     slice_spec=job.slice_spec,
                     variant=str(variant),
+                    perturbation=job.perturbation,
+                    perturbation_seed=job.perturbation_seed,
                 )
             )
     return expanded
@@ -500,10 +513,15 @@ def plan_total_tasks(jobs: list[JobSpec], client: object | None = None) -> int:
 def _result_metadata(job: JobSpec) -> dict:
     bench = benchmark(job.benchmark)
     metadata = getattr(bench, "result_metadata", None)
-    if not callable(metadata):
-        return {}
-    value = metadata(job.variant)
-    return dict(value) if isinstance(value, dict) else {}
+    value = metadata(job.variant) if callable(metadata) else None
+    result = dict(value) if isinstance(value, dict) else {}
+    if job.perturbation:
+        result.update(
+            perturbation=job.perturbation,
+            perturbation_seed=job.perturbation_seed,
+            include_in_overall=False,
+        )
+    return result
 
 
 def _empty_result(job: JobSpec) -> dict:
@@ -604,6 +622,7 @@ class Engine:
                 results.append(result)
             self._maybe_unload(index, job)
 
+        annotate_robustness(results)
         elapsed = (
             round(sum(result["total_time"] for result in results), 1)
             if getattr(self.client, "simulated_timing", False)
@@ -882,6 +901,7 @@ class Engine:
                     "response_time_s": record.response_time_s,
                     "prompt": record.prompt,
                     "response": record.response,
+                    "perturbation": record.perturbation or None,
                     "error": record.error,
                     "entry_point": record.entry_point,
                     "thinking": record.thinking,
@@ -925,7 +945,14 @@ class Engine:
         bench: object,
     ) -> _GeneratedTask:
         """Generate one answer in a request worker, including live analysis."""
-        prompt = prompt_for(bench, task, self.client, job.model)
+        case = perturb_task(
+            job.benchmark,
+            task,
+            job.perturbation,
+            job.perturbation_seed,
+        )
+        task = case.evaluation_task
+        prompt = prompt_for(bench, case.prompt_task, self.client, job.model)
         error = ""
         errors = 0
         entry_point = str(task.metadata.get("entry_point", ""))
@@ -1090,6 +1117,7 @@ class Engine:
             position=position,
             task=task,
             prompt=prompt,
+            perturbation=case.details,
             gen=gen,
             error=error,
             errors=errors,
@@ -1204,6 +1232,7 @@ class Engine:
             response_time_s=round(response_time_s, 2),
             prompt=prompt,
             response=gen.get("response", ""),
+            perturbation=generated.perturbation,
             score=evaluation_score,
             error=error,
             entry_point=entry_point,

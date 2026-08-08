@@ -36,10 +36,21 @@ def _display_tok_s(result: dict) -> float:
     return aggregate_tok_s(result) if _is_parallel(result) else stream_tok_s(result)
 
 
+def _delta_cell(result: dict) -> Text | str:
+    value = result.get("score_delta_pp")
+    if value is None:
+        return "—"
+    delta = float(value)
+    style = "green" if delta > 0 else "red" if delta < 0 else "dim"
+    return Text(f"{delta:+.1f}", style=style)
+
+
 SORT_KEYS = {
     "model": lambda r: (r["model"], r["benchmark"]),
     "benchmark": lambda r: (_benchmark_label(r), -r["score"]),
     "score": lambda r: -r["score"],
+    "delta": lambda r: -float(r.get("score_delta_pp", 0)),
+    "regressions": lambda r: -int(r.get("regressions", 0)),
     "passed": lambda r: -r["passed"],
     "errors": lambda r: -r.get("errors", 0),
     "loops": lambda r: -r.get("loop_rate", 0),
@@ -68,6 +79,9 @@ class ResultsScreen(Screen[None]):
         super().__init__()
         self.results = list(results)
         self.has_parallel = any(_is_parallel(result) for result in self.results)
+        self.has_perturbations = any(
+            result.get("perturbation") for result in self.results
+        )
         self.output = output
         self.sort_key = "score"
 
@@ -98,6 +112,9 @@ class ResultsScreen(Screen[None]):
         table.add_column("Benchmark", key="benchmark")
         table.add_column("Score", key="score", width=8)
         table.add_column("", key="bar", width=14)
+        if self.has_perturbations:
+            table.add_column("Δ pp", key="delta", width=7)
+            table.add_column("Regress", key="regressions", width=9)
         table.add_column("Passed", key="passed", width=10)
         table.add_column("Loops", key="loops", width=8)
         table.add_column("Errors", key="errors", width=7)
@@ -152,14 +169,29 @@ class ResultsScreen(Screen[None]):
                 + (f" [{result['slice']}]" if result.get("slice") else ""),
                 Text(f"{score:.1f}%", style=f"bold {color}"),
                 Text(bar(score / 100, 12), style=color),
-                f"{result['passed']}/{result['total']}",
-                (
-                    f"{result.get('loop_rate', 0):.1f}%"
-                    if result.get("loops", 0)
-                    else "—"
-                ),
-                str(result.get("errors", 0)) if result.get("errors") else "—",
             ]
+            if self.has_perturbations:
+                cells.extend(
+                    [
+                        _delta_cell(result),
+                        (
+                            f"{result['regressions']}/{result['paired_total']}"
+                            if result.get("paired_total") is not None
+                            else "—"
+                        ),
+                    ]
+                )
+            cells.extend(
+                [
+                    f"{result['passed']}/{result['total']}",
+                    (
+                        f"{result.get('loop_rate', 0):.1f}%"
+                        if result.get("loops", 0)
+                        else "—"
+                    ),
+                    str(result.get("errors", 0)) if result.get("errors") else "—",
+                ]
+            )
             if self.has_parallel:
                 parallel = _is_parallel(result)
                 cells.extend(
@@ -186,7 +218,10 @@ class ResultsScreen(Screen[None]):
     def _fill_stats(self) -> None:
         if not self.results:
             return
-        best = max(self.results, key=lambda r: r["score"])
+        overall_results = [
+            result for result in self.results if result.get("include_in_overall", True)
+        ]
+        best = max(overall_results or self.results, key=lambda r: r["score"])
         fastest = max(self.results, key=_display_tok_s)
         tasks = sum(r["total"] for r in self.results)
         total_time = sum(r["total_time"] for r in self.results)

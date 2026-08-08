@@ -28,6 +28,7 @@ from benchkit.engine import (
 from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
 from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
 from benchkit.perf_report import save_profile
+from benchkit.perturbations import PERTURBATIONS, perturbations_for
 from benchkit.report import save
 from benchkit.runner import run
 from benchkit.tui import run_tui
@@ -81,6 +82,18 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "Combines with --benchmarks; a per-benchmark slice can be appended "
             "with --benchmarks. Tags: " + " ".join(all_tags())
         ),
+    )
+    parser.add_argument(
+        "--perturbation",
+        choices=PERTURBATIONS,
+        help=("Headless: add a paired perturbed run alongside each clean baseline"),
+    )
+    parser.add_argument(
+        "--perturbation-seed",
+        type=int,
+        default=42,
+        metavar="SEED",
+        help="Headless: deterministic perturbation seed (default: 42)",
     )
     parser.add_argument(
         "--list",
@@ -190,6 +203,7 @@ def _list_benchmarks(tag: str = "") -> None:
     table.add_column("Benchmark")
     table.add_column("Tasks", justify="right")
     table.add_column("Tags")
+    table.add_column("Perturbations")
     table.add_column("Notes")
     for key in keys:
         try:
@@ -202,6 +216,7 @@ def _list_benchmarks(tag: str = "") -> None:
             key,
             count,
             f"[dim]{' '.join(tags_for(key))}[/dim]",
+            f"[cyan]{' '.join(perturbations_for(key))}[/cyan]",
             f"[yellow]{note}[/yellow]" if note else "",
         )
     console.print(table)
@@ -268,7 +283,37 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
         console.print("[red]--benchmarks or --tag is required with --headless[/red]")
         sys.exit(1)
 
-    return [JobSpec(model, key, spec) for model in models for key, spec in specs]
+    if args.perturbation:
+        unsupported = [
+            key for key, _ in specs if args.perturbation not in perturbations_for(key)
+        ]
+        if unsupported:
+            unique = list(dict.fromkeys(unsupported))
+            console.print(
+                f"[red]{args.perturbation} is unsupported for:[/red] "
+                + ", ".join(unique)
+            )
+            supported = [
+                key for key in REGISTRY if args.perturbation in perturbations_for(key)
+            ]
+            console.print(f"[dim]Supported: {', '.join(supported)}[/dim]")
+            sys.exit(1)
+
+    jobs: list[JobSpec] = []
+    for model in models:
+        for key, spec in specs:
+            jobs.append(JobSpec(model, key, spec))
+            if args.perturbation:
+                jobs.append(
+                    JobSpec(
+                        model,
+                        key,
+                        spec,
+                        perturbation=args.perturbation,
+                        perturbation_seed=args.perturbation_seed,
+                    )
+                )
+    return jobs
 
 
 def _headless(args: argparse.Namespace) -> None:
@@ -296,7 +341,17 @@ def _headless(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
     if args.demo:
-        client.prime(sorted({job.benchmark for job in jobs}))
+        perturbations = sorted(
+            {
+                (job.perturbation, job.perturbation_seed)
+                for job in jobs
+                if job.perturbation
+            }
+        )
+        client.prime(
+            sorted({job.benchmark for job in jobs}),
+            perturbations=perturbations,
+        )
 
     results, failure = run(client, jobs, console, args.verbose)
     if not results:
@@ -315,6 +370,10 @@ def _headless(args: argparse.Namespace) -> None:
     table.add_column("Model", overflow="fold")
     table.add_column("Benchmark", overflow="fold")
     table.add_column("Score", justify="right")
+    has_perturbations = any(result.get("perturbation") for result in results)
+    if has_perturbations:
+        table.add_column("Delta", justify="right")
+        table.add_column("Regress", justify="right")
     table.add_column("P/F/E", justify="right")
     table.add_column("Loops/Killed", justify="right")
     has_parallel = any(result.get("concurrency", 1) > 1 for result in results)
@@ -335,9 +394,26 @@ def _headless(args: argparse.Namespace) -> None:
             result["model"],
             result.get("benchmark_label", result["benchmark"]),
             _score_text(result["score"]),
-            f"{passed}/{failed}/{errors}",
-            f"{result.get('loops', 0)}/{result.get('loop_kills', 0)}",
         ]
+        if has_perturbations:
+            delta = result.get("score_delta_pp")
+            row.extend(
+                [
+                    f"{float(delta):+.1f}pp" if delta is not None else "—",
+                    (
+                        f"{result.get('regressions', 0)}/"
+                        f"{result.get('paired_total', 0)}"
+                        if result.get("perturbation")
+                        else "—"
+                    ),
+                ]
+            )
+        row.extend(
+            [
+                f"{passed}/{failed}/{errors}",
+                f"{result.get('loops', 0)}/{result.get('loop_kills', 0)}",
+            ]
+        )
         if has_parallel:
             row.extend(
                 [
