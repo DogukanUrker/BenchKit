@@ -16,6 +16,7 @@ from textual.widgets import (
     Header,
     Input,
     Label,
+    Select,
     SelectionList,
     Static,
 )
@@ -162,6 +163,22 @@ class SetupScreen(Screen[None]):
             yield Input(placeholder="all", id="global-limit", classes="limit-input")
             yield Static(
                 "N first N · -N last N · A-B range · press [b]l[/b] for a per-benchmark limit",
+                classes="hint",
+            )
+        with Horizontal(id="setup-harness"):
+            yield Label("Harness", classes="field-label wide")
+            yield Select(
+                [
+                    ("Direct API", "direct"),
+                    ("Pi agent", "pi"),
+                    ("Direct + Pi", "both"),
+                ],
+                value="direct",
+                allow_blank=False,
+                id="harness",
+            )
+            yield Static(
+                "Pi uses its original tools inside a persistent Docker sandbox",
                 classes="hint",
             )
         with Horizontal(id="setup-perturbation"):
@@ -349,6 +366,10 @@ class SetupScreen(Screen[None]):
         self.query_one("#perturbation-seed", Input).disabled = not event.value
         self._refresh_summary()
 
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "harness":
+            self._refresh_summary()
+
     def on_selection_list_selected_changed(
         self, event: SelectionList.SelectedChanged
     ) -> None:
@@ -506,6 +527,10 @@ class SetupScreen(Screen[None]):
     def _choice_order_enabled(self) -> bool:
         return self.query_one("#choice-order", Checkbox).value
 
+    def _harnesses(self) -> tuple[str, ...]:
+        value = self.query_one("#harness", Select).value
+        return ("direct", "pi") if value == "both" else (str(value),)
+
     def _perturbation_seed(self) -> int | None:
         value = self.query_one("#perturbation-seed", Input).value.strip()
         try:
@@ -524,6 +549,14 @@ class SetupScreen(Screen[None]):
         if not benches:
             self.notify("Select at least one benchmark", severity="error", timeout=4)
             self.query_one("#bench-list", SelectionList).focus()
+            return None
+        if self.app.demo and "pi" in self._harnesses():
+            self.notify(
+                "Pi harness is unavailable in demo mode.",
+                severity="error",
+                timeout=5,
+            )
+            self.query_one("#harness", Select).focus()
             return None
 
         choice_order = self._choice_order_enabled()
@@ -574,18 +607,27 @@ class SetupScreen(Screen[None]):
         jobs: list[JobSpec] = []
         for model in models:
             for key in benches:
-                jobs.append(JobSpec(model, key, self._limit_for(key)))
-                if choice_order:
-                    assert seed is not None
+                for harness in self._harnesses():
                     jobs.append(
                         JobSpec(
                             model,
                             key,
                             self._limit_for(key),
-                            perturbation=CHOICE_ORDER,
-                            perturbation_seed=seed,
+                            harness=harness,
                         )
                     )
+                    if choice_order:
+                        assert seed is not None
+                        jobs.append(
+                            JobSpec(
+                                model,
+                                key,
+                                self._limit_for(key),
+                                perturbation=CHOICE_ORDER,
+                                perturbation_seed=seed,
+                                harness=harness,
+                            )
+                        )
         expanded = expand_jobs(jobs, self.app.client)
         if not expanded:
             self.notify(
@@ -625,7 +667,7 @@ class SetupScreen(Screen[None]):
             if choice_order
             else []
         )
-        multiplier = 2 if choice_order else 1
+        multiplier = (2 if choice_order else 1) * len(self._harnesses())
         runs = (
             sum(
                 self._variant_count(key, model)

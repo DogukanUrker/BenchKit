@@ -226,6 +226,13 @@ def _openai_metrics(data: dict, elapsed_s: float) -> dict:
         or timings.get("tokens_predicted")
         or 0
     )
+    input_tokens = int(
+        usage.get("prompt_tokens")
+        or usage.get("input_tokens")
+        or timings.get("prompt_n")
+        or timings.get("tokens_evaluated")
+        or 0
+    )
     predicted_ms = float(
         timings.get("predicted_ms") or timings.get("generation_ms") or 0.0
     )
@@ -246,6 +253,7 @@ def _openai_metrics(data: dict, elapsed_s: float) -> dict:
 
     return {
         "tok_s": tok_s,
+        "input_tokens": input_tokens,
         "eval_count": eval_count,
         "eval_duration_ns": eval_duration_ns,
         "response_time_s": elapsed_s,
@@ -1003,6 +1011,7 @@ class InferenceClient:
             "response": "".join(response_parts),
             "trace_status": _trace_status(thinking, reasoning_channel_seen),
             "tok_s": tok_s,
+            "input_tokens": int(final.get("prompt_eval_count") or 0),
             "eval_count": eval_count,
             "eval_duration_ns": eval_duration_ns,
             "response_time_s": (

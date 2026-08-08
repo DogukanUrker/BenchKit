@@ -135,6 +135,7 @@ def _result_key(result: dict) -> tuple[object, ...]:
         result.get("benchmark"),
         result.get("variant"),
         result.get("slice"),
+        result.get("harness", "direct"),
     )
 
 

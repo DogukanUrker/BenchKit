@@ -83,23 +83,28 @@ def save(
         f.write("# BenchKit Results\n\n")
         f.write(f"**Date:** {ts}\n\n")
         f.write(
-            "| Model | Benchmark | Score | Delta | Regressions | Passed | Total | Parallel | Loops | Killed | Trace | Agg tok/s | Stream tok/s | Effective | Avg Resp | Wall Time |\n"
+            "| Model | Harness | Benchmark | Score | Harness Δ | Delta | Regressions | Passed | Total | Parallel | Loops | Killed | Trace | Agg tok/s | Stream tok/s | Effective | Avg Resp | Wall Time |\n"
         )
         f.write(
-            "|-------|-----------|------:|------:|------------:|-------:|------:|---------:|------:|-------:|------:|----------:|-------------:|----------:|---------:|----------:|\n"
+            "|-------|---------|-----------|------:|----------:|------:|------------:|-------:|------:|---------:|------:|-------:|------:|----------:|-------------:|----------:|---------:|----------:|\n"
         )
         for result in results:
             benchmark_label = result.get("benchmark_label", result["benchmark"])
             delta = result.get("score_delta_pp")
             delta_text = f"{float(delta):+.1f}pp" if delta is not None else "—"
+            harness_delta = result.get("harness_delta_pp")
+            harness_delta_text = (
+                f"{float(harness_delta):+.1f}pp" if harness_delta is not None else "—"
+            )
             regressions = (
                 f"{result.get('regressions', 0)}/{result.get('paired_total', 0)}"
                 if result.get("perturbation")
                 else "—"
             )
             f.write(
-                f"| {result['model']} | {benchmark_label} "
-                f"| {result['score']}% | {delta_text} | {regressions} "
+                f"| {result['model']} | {result.get('harness_label', 'Direct')} "
+                f"| {benchmark_label} | {result['score']}% "
+                f"| {harness_delta_text} | {delta_text} | {regressions} "
                 f"| {result['passed']} | {result['total']} "
                 f"| {result.get('concurrency', 1)} "
                 f"| {result.get('loop_rate', 0)}% "
@@ -118,18 +123,45 @@ def save(
             "concurrency is summed request time divided by wall time.\n"
         )
 
+        harness_pairs = [
+            result
+            for result in results
+            if result.get("harness_paired_total") is not None
+        ]
+        if harness_pairs:
+            f.write("\n## Harness effect\n\n")
+            f.write(
+                "| Model | Benchmark | Paired | Direct | Pi agent | Delta | Gains | Regressions | Pi version |\n"
+            )
+            f.write(
+                "|-------|-----------|-------:|-------:|---------:|------:|------:|------------:|------------|\n"
+            )
+            for result in harness_pairs:
+                f.write(
+                    f"| {result['model']} "
+                    f"| {result.get('benchmark_label', result['benchmark'])} "
+                    f"| {result.get('harness_paired_total', 0)} "
+                    f"| {result.get('direct_score', 0):.1f}% "
+                    f"| {result.get('harness_score', 0):.1f}% "
+                    f"| {result.get('harness_delta_pp', 0):+.1f}pp "
+                    f"| {result.get('harness_gains', 0)} "
+                    f"| {result.get('harness_regressions', 0)} "
+                    f"| {result.get('harness_version', 'latest')} |\n"
+                )
+
         perturbed = [result for result in results if result.get("perturbation")]
         if perturbed:
             f.write("\n## Choice-order robustness\n\n")
             f.write(
-                "| Model | Benchmark | Seed | Paired | Clean | Perturbed | Delta | Regressions | Recoveries |\n"
+                "| Model | Harness | Benchmark | Seed | Paired | Clean | Perturbed | Delta | Regressions | Recoveries |\n"
             )
             f.write(
-                "|-------|-----------|-----:|-------:|------:|----------:|------:|------------:|-----------:|\n"
+                "|-------|---------|-----------|-----:|-------:|------:|----------:|------:|------------:|-----------:|\n"
             )
             for result in perturbed:
                 f.write(
                     f"| {result['model']} "
+                    f"| {result.get('harness_label', 'Direct')} "
                     f"| {result.get('baseline_benchmark_label', result['benchmark'])} "
                     f"| {result.get('perturbation_seed', 42)} "
                     f"| {result.get('paired_total', 0)} "
@@ -143,7 +175,12 @@ def save(
         f.write("\n---\n\n")
         for result in results:
             benchmark_label = result.get("benchmark_label", result["benchmark"])
-            f.write(f"## {result['model']} / {benchmark_label}\n\n")
+            harness = result.get("harness_label", "Direct")
+            version = result.get("harness_version")
+            version_text = f" {version}" if version else ""
+            f.write(
+                f"## {result['model']} / {harness}{version_text} / {benchmark_label}\n\n"
+            )
             for task in result["tasks"]:
                 task_id = task["task_id"]
                 entry = task.get("entry_point")
@@ -175,6 +212,9 @@ def save(
                 f.write(f"### {label} — {status} · {loop}\n\n")
                 f.write(
                     f"**Generation:** {task.get('output_tokens', 0)} tokens · "
+                    f"{task.get('input_tokens', 0)} input · "
+                    f"{task.get('model_turns', 1)} model turn(s) · "
+                    f"{task.get('tool_calls', 0)} tool call(s) · "
                     f"{task.get('tok_s', 0)} stream tok/s · "
                     f"{task.get('response_time_s', 0)}s · "
                     f"trace {task.get('trace_status', 'unavailable')} · "
@@ -182,6 +222,32 @@ def save(
                 )
                 if task.get("error"):
                     f.write(f"**Error:** {task['error']}\n\n")
+                if tool_trace := task.get("tool_trace"):
+                    f.write("**Pi native tools:**\n\n")
+                    for call in tool_trace:
+                        state = "error" if call.get("is_error") else "ok"
+                        duration = float(call.get("duration_s") or 0)
+                        f.write(
+                            f"- `{call.get('name', 'tool')}` · {state} · "
+                            f"{duration:.3f}s\n\n"
+                        )
+                        f.write(
+                            "~~~json\n"
+                            + json.dumps(
+                                call.get("arguments") or {},
+                                ensure_ascii=False,
+                                indent=2,
+                            ).rstrip()
+                            + "\n~~~\n\n"
+                        )
+                        if call.get("output"):
+                            suffix = (
+                                " (last 8,000 chars)"
+                                if call.get("output_truncated")
+                                else ""
+                            )
+                            f.write(f"Tool output{suffix}:\n\n")
+                            f.write(f"~~~\n{str(call['output']).rstrip()}\n~~~\n\n")
                 if perturbation := task.get("perturbation"):
                     order = ", ".join(perturbation.get("choice_order", []))
                     f.write(
