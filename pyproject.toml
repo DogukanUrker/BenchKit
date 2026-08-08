@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Benchmark your local LLMs with real eval suites"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "Apache-2.0"
 dependencies = [
     "evalplus==0.3.1",
     "httpx>=0.28.1",
