@@ -733,12 +733,6 @@ class Engine:
         """Resolve a safe worker count, keeping unknown clients serial."""
         if total <= 1:
             return 1
-        if job.harness == "pi":
-            try:
-                configured = int(os.environ.get("BENCHKIT_PI_CONCURRENCY", "1"))
-            except ValueError:
-                configured = 1
-            return min(total, max(1, configured))
         discover = getattr(self.client, "max_parallel_requests", None)
         if not callable(discover):
             return 1

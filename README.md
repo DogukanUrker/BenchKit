@@ -172,12 +172,14 @@ verifiers still use BenchKit's current evaluator after Pi returns its final
 answer; moving hidden tests into task-specific images is a separate step for
 future Terminal-Bench/SWE-bench-style environments.
 
-Pi jobs are serial by default because every active task owns two containers.
-The limits and deadline can be tuned without changing benchmark definitions:
+Pi jobs use the same automatically discovered model-server capacity as direct
+jobs, keeping paired runs at matching concurrency. Every active Pi task owns an
+agent container and a proxy container, so resource use scales at twice the task
+concurrency. The remaining sandbox limits and deadline can be tuned without
+changing benchmark definitions:
 
 ```env
 BENCHKIT_PI_TIMEOUT=900
-BENCHKIT_PI_CONCURRENCY=1
 BENCHKIT_SANDBOX_MEMORY=2g
 BENCHKIT_SANDBOX_CPUS=2
 BENCHKIT_SANDBOX_PIDS=256
