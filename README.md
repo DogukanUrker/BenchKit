@@ -10,7 +10,7 @@ Not vibes. Actual scores.
 
 <img src="https://img.shields.io/badge/Python-3.11%2B-2563EB?style=flat-square&logo=python&logoColor=white&labelColor=0b0b0b" alt="Python 3.11+">
 <img src="https://img.shields.io/badge/TUI-Textual-60A5FA?style=flat-square&labelColor=0b0b0b" alt="Built with Textual">
-<img src="https://img.shields.io/badge/Suites-17-34D399?style=flat-square&labelColor=0b0b0b" alt="17 benchmark suites">
+<img src="https://img.shields.io/badge/Suites-18-34D399?style=flat-square&labelColor=0b0b0b" alt="18 benchmark suites">
 <img src="https://img.shields.io/badge/License-Apache%202.0-6B7280?style=flat-square&labelColor=0b0b0b" alt="Apache 2.0">
 
 </div>
