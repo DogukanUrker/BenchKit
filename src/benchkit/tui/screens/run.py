@@ -165,7 +165,7 @@ class RunScreen(Screen[None]):
         queue = self.query_one("#queue", DataTable)
         queue.add_column("#", key="index", width=3)
         queue.add_column("Model", key="model")
-        queue.add_column("Harness", key="harness", width=10)
+        queue.add_column("Harness", key="harness", width=18)
         queue.add_column("Benchmark", key="benchmark")
         queue.add_column("Progress", key="progress", width=10)
         queue.add_column("Score", key="score", width=7)

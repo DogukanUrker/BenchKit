@@ -177,8 +177,13 @@ class SetupScreen(Screen[None]):
                 allow_blank=False,
                 id="harness",
             )
+            yield Checkbox(
+                "One verifier repair",
+                id="repair-once",
+                compact=True,
+            )
             yield Static(
-                "Pi uses its original tools inside a persistent Docker sandbox",
+                "failed answers get one sanitized feedback turn",
                 classes="hint",
             )
         with Horizontal(id="setup-perturbation"):
@@ -361,6 +366,9 @@ class SetupScreen(Screen[None]):
             self.action_start()
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if event.checkbox.id == "repair-once":
+            self._refresh_summary()
+            return
         if event.checkbox.id != "choice-order":
             return
         self.query_one("#perturbation-seed", Input).disabled = not event.value
@@ -531,6 +539,9 @@ class SetupScreen(Screen[None]):
         value = self.query_one("#harness", Select).value
         return ("direct", "pi") if value == "both" else (str(value),)
 
+    def _repair_attempts(self) -> int:
+        return int(self.query_one("#repair-once", Checkbox).value)
+
     def _perturbation_seed(self) -> int | None:
         value = self.query_one("#perturbation-seed", Input).value.strip()
         try:
@@ -614,6 +625,7 @@ class SetupScreen(Screen[None]):
                             key,
                             self._limit_for(key),
                             harness=harness,
+                            repair_attempts=self._repair_attempts(),
                         )
                     )
                     if choice_order:
@@ -626,6 +638,7 @@ class SetupScreen(Screen[None]):
                                 perturbation=CHOICE_ORDER,
                                 perturbation_seed=seed,
                                 harness=harness,
+                                repair_attempts=self._repair_attempts(),
                             )
                         )
         expanded = expand_jobs(jobs, self.app.client)
@@ -707,7 +720,10 @@ class SetupScreen(Screen[None]):
                 runs=runs,
                 rs="" if runs == 1 else "s",
                 tasks=fmt_count(tasks),
-                paired=" · clean + choice-order" if choice_order else "",
+                paired=(
+                    (" · clean + choice-order" if choice_order else "")
+                    + (" · one verifier repair" if self._repair_attempts() else "")
+                ),
             )
         self.query_one("#plan-summary", Static).update(summary)
 

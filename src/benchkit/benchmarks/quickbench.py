@@ -5,7 +5,8 @@ from pathlib import Path
 
 from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.utils import strip_think_tags
-from benchkit.executor import execute
+from benchkit.evaluation import EvaluationResult
+from benchkit.executor import execute_with_feedback
 
 DATASET = Path(__file__).parent.parent / "datasets" / "quickbench.jsonl"
 
@@ -63,6 +64,9 @@ class QuickBench:
         return f"{SYSTEM}\n\n{task.prompt}"
 
     def evaluate(self, task: Task, response: str) -> bool:
+        return self.evaluate_with_feedback(task, response).passed
+
+    def evaluate_with_feedback(self, task: Task, response: str) -> EvaluationResult:
         code = _extract_code(response)
         entry = task.metadata["entry_point"]
 
@@ -77,4 +81,5 @@ class QuickBench:
             fn_code = task.prompt + code
 
         full = fn_code + "\n\n" + task.metadata["test"] + f"\ncheck({entry})\n"
-        return execute(full)
+        result = execute_with_feedback(full)
+        return EvaluationResult(float(result.passed), result.feedback)

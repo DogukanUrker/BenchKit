@@ -83,10 +83,10 @@ def save(
         f.write("# BenchKit Results\n\n")
         f.write(f"**Date:** {ts}\n\n")
         f.write(
-            "| Model | Harness | Benchmark | Score | Harness Δ | Delta | Regressions | Passed | Total | Parallel | Loops | Killed | Trace | Agg tok/s | Stream tok/s | Effective | Avg Resp | Wall Time |\n"
+            "| Model | Harness | Benchmark | Score | Harness Δ | Repair Δ | Fixed | Delta | Regressions | Passed | Total | Parallel | Loops | Killed | Trace | Agg tok/s | Stream tok/s | Effective | Avg Resp | Wall Time |\n"
         )
         f.write(
-            "|-------|---------|-----------|------:|----------:|------:|------------:|-------:|------:|---------:|------:|-------:|------:|----------:|-------------:|----------:|---------:|----------:|\n"
+            "|-------|---------|-----------|------:|----------:|---------:|------:|------:|------------:|-------:|------:|---------:|------:|-------:|------:|----------:|-------------:|----------:|---------:|----------:|\n"
         )
         for result in results:
             benchmark_label = result.get("benchmark_label", result["benchmark"])
@@ -96,6 +96,17 @@ def save(
             harness_delta_text = (
                 f"{float(harness_delta):+.1f}pp" if harness_delta is not None else "—"
             )
+            repair_delta_text = (
+                f"{float(result.get('repair_delta_pp', 0)):+.1f}pp"
+                if result.get("repair_attempts")
+                else "—"
+            )
+            repaired_text = (
+                f"{result.get('repair_successes', 0)}/"
+                f"{result.get('repair_attempted', 0)}"
+                if result.get("repair_attempts")
+                else "—"
+            )
             regressions = (
                 f"{result.get('regressions', 0)}/{result.get('paired_total', 0)}"
                 if result.get("perturbation")
@@ -104,7 +115,8 @@ def save(
             f.write(
                 f"| {result['model']} | {result.get('harness_label', 'Direct')} "
                 f"| {benchmark_label} | {result['score']}% "
-                f"| {harness_delta_text} | {delta_text} | {regressions} "
+                f"| {harness_delta_text} | {repair_delta_text} | {repaired_text} "
+                f"| {delta_text} | {regressions} "
                 f"| {result['passed']} | {result['total']} "
                 f"| {result.get('concurrency', 1)} "
                 f"| {result.get('loop_rate', 0)}% "
@@ -131,22 +143,47 @@ def save(
         if harness_pairs:
             f.write("\n## Harness effect\n\n")
             f.write(
-                "| Model | Benchmark | Paired | Direct | Pi agent | Delta | Gains | Regressions | Pi version |\n"
+                "| Model | Benchmark | Feedback | Paired | Direct first | Pi first | Initial Δ | Direct final | Pi final | Final Δ | Gains | Regressions | Pi version |\n"
             )
             f.write(
-                "|-------|-----------|-------:|-------:|---------:|------:|------:|------------:|------------|\n"
+                "|-------|-----------|----------|-------:|-------------:|---------:|----------:|-------------:|---------:|--------:|------:|------------:|------------|\n"
             )
             for result in harness_pairs:
                 f.write(
                     f"| {result['model']} "
                     f"| {result.get('benchmark_label', result['benchmark'])} "
+                    f"| {'one repair' if result.get('repair_attempts') else 'none'} "
                     f"| {result.get('harness_paired_total', 0)} "
+                    f"| {result.get('direct_first_score', 0):.1f}% "
+                    f"| {result.get('harness_first_score', 0):.1f}% "
+                    f"| {result.get('harness_first_delta_pp', 0):+.1f}pp "
                     f"| {result.get('direct_score', 0):.1f}% "
                     f"| {result.get('harness_score', 0):.1f}% "
                     f"| {result.get('harness_delta_pp', 0):+.1f}pp "
                     f"| {result.get('harness_gains', 0)} "
                     f"| {result.get('harness_regressions', 0)} "
                     f"| {result.get('harness_version', 'latest')} |\n"
+                )
+
+        repair_rows = [result for result in results if result.get("repair_attempts")]
+        if repair_rows:
+            f.write("\n## Verifier repair effect\n\n")
+            f.write(
+                "| Model | Harness | Benchmark | First attempt | Final | Delta | Retried | Repaired |\n"
+            )
+            f.write(
+                "|-------|---------|-----------|--------------:|------:|------:|--------:|---------:|\n"
+            )
+            for result in repair_rows:
+                f.write(
+                    f"| {result['model']} "
+                    f"| {result.get('harness_label', 'Direct')} "
+                    f"| {result.get('benchmark_label', result['benchmark'])} "
+                    f"| {result.get('first_attempt_score', 0):.1f}% "
+                    f"| {result.get('score', 0):.1f}% "
+                    f"| {result.get('repair_delta_pp', 0):+.1f}pp "
+                    f"| {result.get('repair_attempted', 0)} "
+                    f"| {result.get('repair_successes', 0)} |\n"
                 )
 
         perturbed = [result for result in results if result.get("perturbation")]
@@ -222,6 +259,19 @@ def save(
                 )
                 if task.get("error"):
                     f.write(f"**Error:** {task['error']}\n\n")
+                if attempts := task.get("attempts"):
+                    f.write("**Verifier-feedback attempts:**\n\n")
+                    for attempt in attempts:
+                        state = "pass" if attempt.get("passed") else "fail"
+                        f.write(
+                            f"#### Attempt {attempt.get('attempt', 1)} — "
+                            f"{state} · {attempt.get('score', 0):.1f}%\n\n"
+                        )
+                        if attempt.get("feedback"):
+                            f.write(f"Verifier feedback: {attempt['feedback']}\n\n")
+                        f.write("~~~text\n")
+                        f.write(str(attempt.get("response") or "").rstrip())
+                        f.write("\n~~~\n\n")
                 if tool_trace := task.get("tool_trace"):
                     f.write("**Pi native tools:**\n\n")
                     for call in tool_trace:

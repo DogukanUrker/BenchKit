@@ -105,6 +105,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--repair-attempts",
+        type=int,
+        choices=(0, 1),
+        default=0,
+        metavar="{0,1}",
+        help=(
+            "Verifier-feedback repair turns after an incorrect first answer; "
+            "works with direct and Pi harnesses (default: 0)"
+        ),
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="Print the available benchmarks and exit",
@@ -313,7 +324,15 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
     for model in models:
         for key, spec in specs:
             for harness in harnesses:
-                jobs.append(JobSpec(model, key, spec, harness=harness))
+                jobs.append(
+                    JobSpec(
+                        model,
+                        key,
+                        spec,
+                        harness=harness,
+                        repair_attempts=args.repair_attempts,
+                    )
+                )
                 if args.perturbation:
                     jobs.append(
                         JobSpec(
@@ -323,6 +342,7 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
                             perturbation=args.perturbation,
                             perturbation_seed=args.perturbation_seed,
                             harness=harness,
+                            repair_attempts=args.repair_attempts,
                         )
                     )
     return jobs
@@ -391,6 +411,10 @@ def _headless(args: argparse.Namespace) -> None:
     )
     if has_harness_pairs:
         table.add_column("Harness Δ", justify="right")
+    has_repairs = any(result.get("repair_attempts", 0) for result in results)
+    if has_repairs:
+        table.add_column("Repair Δ", justify="right")
+        table.add_column("Fixed", justify="right")
     has_perturbations = any(result.get("perturbation") for result in results)
     if has_perturbations:
         table.add_column("Delta", justify="right")
@@ -422,6 +446,19 @@ def _headless(args: argparse.Namespace) -> None:
             row.append(
                 f"{float(harness_delta):+.1f}pp" if harness_delta is not None else "—"
             )
+        if has_repairs:
+            if result.get("repair_attempts", 0):
+                row.extend(
+                    [
+                        f"{float(result.get('repair_delta_pp', 0)):+.1f}pp",
+                        (
+                            f"{result.get('repair_successes', 0)}/"
+                            f"{result.get('repair_attempted', 0)}"
+                        ),
+                    ]
+                )
+            else:
+                row.extend(["—", "—"])
         if has_perturbations:
             delta = result.get("score_delta_pp")
             row.extend(

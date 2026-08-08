@@ -276,6 +276,7 @@ class GenerationUpdate:
     elapsed_s: float = 0.0
     reasoning_channel_seen: bool = False
     done: bool = False
+    attempt: int = 0
 
 
 @dataclass

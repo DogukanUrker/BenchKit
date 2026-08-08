@@ -136,6 +136,7 @@ def _result_key(result: dict) -> tuple[object, ...]:
         result.get("variant"),
         result.get("slice"),
         result.get("harness", "direct"),
+        result.get("repair_attempts", 0),
     )
 
 

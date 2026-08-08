@@ -81,9 +81,21 @@ class JobDetailScreen(Screen[None]):
             )
         if result.get("harness_delta_pp") is not None:
             score_hint += (
-                f" · harness Δ {result['harness_delta_pp']:+.1f} pp · "
+                f" · harness Δ {result['harness_delta_pp']:+.1f} pp"
+                + (
+                    f" (initial {result.get('harness_first_delta_pp', 0):+.1f})"
+                    if result.get("repair_attempts")
+                    else ""
+                )
+                + " · "
                 f"{result.get('harness_gains', 0)} gain(s) · "
                 f"{result.get('harness_regressions', 0)} regression(s)"
+            )
+        if result.get("repair_attempts"):
+            score_hint += (
+                f" · repair Δ {result.get('repair_delta_pp', 0):+.1f} pp · "
+                f"{result.get('repair_successes', 0)}/"
+                f"{result.get('repair_attempted', 0)} fixed"
             )
         self.query_one("#stat-score", StatCard).set_state(f"{score:.1f}%", score_hint)
         self.query_one("#stat-passed", StatCard).set_state(
@@ -216,6 +228,8 @@ def _result_cell(task: dict, dark: bool = True) -> Text:
         if task.get("timed_out")
         else "ERROR"
         if error
+        else "FIXED"
+        if task.get("repaired")
         else "PASS"
         if passed
         else f"{float(task.get('score', 0)):.0f}%"

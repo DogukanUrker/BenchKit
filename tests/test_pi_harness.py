@@ -207,7 +207,12 @@ class PiRpcTraceTests(unittest.TestCase):
                         {"type": "thinking", "thinking": "I should calculate."},
                         {"type": "text", "text": "The answer is 42."},
                     ],
-                    "usage": {"input": 100, "output": 25},
+                    "usage": {
+                        "input": 100,
+                        "cacheRead": 20,
+                        "cacheWrite": 5,
+                        "output": 25,
+                    },
                     "stopReason": "stop",
                 },
             }
@@ -215,7 +220,7 @@ class PiRpcTraceTests(unittest.TestCase):
 
         self.assertEqual(trace.final_response, "The answer is 42.")
         self.assertEqual(trace.thinking_parts, ["I should calculate."])
-        self.assertEqual((trace.input_tokens, trace.output_tokens), (100, 25))
+        self.assertEqual((trace.input_tokens, trace.output_tokens), (125, 25))
         self.assertEqual(trace.turns, 1)
         self.assertEqual(trace.tool_trace[0]["name"], "bash")
         self.assertEqual(
@@ -300,8 +305,47 @@ class HarnessPairingTests(unittest.TestCase):
         self.assertEqual(pi["direct_score"], 50.0)
         self.assertEqual(pi["harness_score"], 100.0)
         self.assertEqual(pi["harness_delta_pp"], 50.0)
+        self.assertEqual(pi["harness_first_delta_pp"], 50.0)
         self.assertEqual(pi["harness_gains"], 1)
         self.assertEqual(pi["harness_regressions"], 0)
+
+    def test_pair_metrics_separate_initial_and_repaired_harness_effects(self) -> None:
+        common = {
+            "model": "model",
+            "benchmark": "quickbench",
+            "variant": None,
+            "slice": "1",
+            "repair_attempts": 1,
+        }
+        direct = {
+            **common,
+            "harness": "direct",
+            "tasks": [
+                {
+                    "task_id": "a",
+                    "first_attempt_score": 0.0,
+                    "score": 100.0,
+                    "passed": True,
+                }
+            ],
+        }
+        pi = {
+            **common,
+            "harness": "pi",
+            "tasks": [
+                {
+                    "task_id": "a",
+                    "first_attempt_score": 100.0,
+                    "score": 100.0,
+                    "passed": True,
+                }
+            ],
+        }
+
+        annotate_harness_effect([direct, pi])
+
+        self.assertEqual(pi["harness_first_delta_pp"], 100.0)
+        self.assertEqual(pi["harness_delta_pp"], 0.0)
 
 
 if __name__ == "__main__":

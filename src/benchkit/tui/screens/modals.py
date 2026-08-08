@@ -102,6 +102,24 @@ class LimitScreen(ModalScreen[str | None]):
         self.dismiss(self.current or None)
 
 
+def _attempts_text(attempts: list[dict]) -> str:
+    """Render verifier-feedback attempts as a readable transcript."""
+    sections = []
+    for attempt in attempts:
+        number = int(attempt.get("attempt") or len(sections) + 1)
+        status = "PASS" if attempt.get("passed") else "FAIL"
+        lines = [
+            f"ATTEMPT {number} · {status} · {float(attempt.get('score') or 0):.1f}%"
+        ]
+        if attempt.get("feedback"):
+            lines.extend(["", "Verifier feedback:", str(attempt["feedback"])])
+        if attempt.get("thinking"):
+            lines.extend(["", "Thinking:", str(attempt["thinking"])])
+        lines.extend(["", "Response:", str(attempt.get("response") or "")])
+        sections.append("\n".join(lines))
+    return ("\n\n" + "─" * 48 + "\n\n").join(sections)
+
+
 class TaskDetailScreen(ModalScreen[None]):
     """Prompt, response and error for a single task."""
 
@@ -158,6 +176,10 @@ class TaskDetailScreen(ModalScreen[None]):
             f"trace {trace}",
             f"loop {loop_label} ({loop_score:.0%})",
         ]
+        if self.task_data.get("repair_attempts_used"):
+            pieces.append(
+                f"repaired after {self.task_data['repair_attempts_used']} feedback turn"
+            )
         if float(self.task_data.get("score", 0)) > 0 and not self.task_data.get(
             "passed"
         ):
@@ -192,6 +214,14 @@ class TaskDetailScreen(ModalScreen[None]):
                         soft_wrap=True,
                         id="response-text",
                     )
+                if self.task_data.get("attempts"):
+                    with TabPane("Attempts", id="attempts-tab"):
+                        yield TextArea(
+                            _attempts_text(self.task_data["attempts"]),
+                            read_only=True,
+                            soft_wrap=True,
+                            id="attempts-text",
+                        )
                 with TabPane("Prompt", id="prompt-tab"):
                     yield TextArea(
                         self.task_data.get("prompt", ""),

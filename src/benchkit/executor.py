@@ -3,6 +3,7 @@
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 BLOCKED_MODULES = {
@@ -31,8 +32,40 @@ _b.__import__ = _safe
 """
 
 
-def execute(code: str, timeout: int = 10) -> bool:
-    """Run code in a subprocess. Returns True if exit code is 0."""
+@dataclass(frozen=True)
+class ExecutionResult:
+    """Code-verifier result with answer-safe diagnostic feedback."""
+
+    passed: bool
+    feedback: str = ""
+
+
+def _failure_feedback(stderr: str) -> str:
+    """Describe the failure category without exposing hidden test source."""
+    if "SyntaxError" in stderr:
+        return "The submitted Python failed to parse with SyntaxError."
+    if "IndentationError" in stderr:
+        return "The submitted Python failed to parse with IndentationError."
+    if "AssertionError" in stderr:
+        return "The submitted Python ran, but a verifier assertion failed."
+    for name in (
+        "NameError",
+        "TypeError",
+        "ValueError",
+        "IndexError",
+        "KeyError",
+        "AttributeError",
+        "ZeroDivisionError",
+        "RecursionError",
+        "ImportError",
+    ):
+        if name in stderr:
+            return f"The submitted Python failed during verification with {name}."
+    return "The submitted Python exited unsuccessfully during verification."
+
+
+def execute_with_feedback(code: str, timeout: int = 10) -> ExecutionResult:
+    """Run code and retain only a sanitized failure category."""
     full = SANDBOX_HEADER + "\n" + code
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -43,10 +76,21 @@ def execute(code: str, timeout: int = 10) -> bool:
         result = subprocess.run(
             [sys.executable, str(path)],
             capture_output=True,
+            text=True,
             timeout=timeout,
         )
-        return result.returncode == 0
+        if result.returncode == 0:
+            return ExecutionResult(True)
+        return ExecutionResult(False, _failure_feedback(result.stderr or ""))
     except subprocess.TimeoutExpired:
-        return False
+        return ExecutionResult(
+            False,
+            f"The submitted Python exceeded the {timeout}s verifier timeout.",
+        )
     finally:
         path.unlink(missing_ok=True)
+
+
+def execute(code: str, timeout: int = 10) -> bool:
+    """Run code in a subprocess. Returns True if exit code is 0."""
+    return execute_with_feedback(code, timeout).passed

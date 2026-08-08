@@ -14,8 +14,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field
-from numbers import Real
+from dataclasses import dataclass, field, replace
 from statistics import median
 from typing import Literal
 
@@ -24,6 +23,12 @@ import httpx
 from benchkit.benchmarks import REGISTRY
 from benchkit.benchmarks.base import Task
 from benchkit.client import GenerationUpdate, InferenceClient
+from benchkit.evaluation import (
+    EvaluationResult,
+    combine_attempts,
+    evaluate_response,
+    standalone_repair_prompt,
+)
 from benchkit.looping import LoopAnalyzer
 from benchkit.metrics import throughput_metrics
 from benchkit.perturbations import annotate_robustness, perturb_task
@@ -158,13 +163,19 @@ class JobSpec:
     perturbation: str | None = None
     perturbation_seed: int = 42
     harness: Literal["direct", "pi"] = "direct"
+    repair_attempts: int = 0
+
+    def __post_init__(self) -> None:
+        if self.repair_attempts not in {0, 1}:
+            raise ValueError("repair_attempts must be 0 or 1")
 
     @property
     def key(self) -> str:
         return (
             f"{self.model}|{self.benchmark}|{self.variant or ''}|"
             f"{self.slice_spec or ''}|{self.perturbation or ''}|"
-            f"{self.perturbation_seed if self.perturbation else ''}|{self.harness}"
+            f"{self.perturbation_seed if self.perturbation else ''}|{self.harness}|"
+            f"{self.repair_attempts}"
         )
 
     @property
@@ -182,7 +193,8 @@ class JobSpec:
 
     @property
     def harness_label(self) -> str:
-        return "Pi agent" if self.harness == "pi" else "Direct"
+        label = "Pi agent" if self.harness == "pi" else "Direct"
+        return f"{label} + repair" if self.repair_attempts else label
 
     def planned_total(self) -> int:
         total = slice_task_count(self.benchmark)
@@ -243,6 +255,11 @@ class TaskRecord:
     model_turns: int = 1
     tool_calls: int = 0
     tool_trace: list[dict] = field(default_factory=list)
+    attempts: list[dict] = field(default_factory=list)
+    repair_attempts_used: int = 0
+    repair_feedback: list[str] = field(default_factory=list)
+    first_attempt_score: float = 0.0
+    repaired: bool = False
 
     @property
     def label(self) -> str:
@@ -495,6 +512,7 @@ def expand_jobs(jobs: list[JobSpec], client: object) -> list[JobSpec]:
                     perturbation=job.perturbation,
                     perturbation_seed=job.perturbation_seed,
                     harness=job.harness,
+                    repair_attempts=job.repair_attempts,
                 )
             )
     return expanded
@@ -528,7 +546,11 @@ def _result_metadata(job: JobSpec) -> dict:
     metadata = getattr(bench, "result_metadata", None)
     value = metadata(job.variant) if callable(metadata) else None
     result = dict(value) if isinstance(value, dict) else {}
-    result.update(harness=job.harness, harness_label=job.harness_label)
+    result.update(
+        harness=job.harness,
+        harness_label=job.harness_label,
+        repair_attempts=job.repair_attempts,
+    )
     if job.perturbation:
         result.update(
             perturbation=job.perturbation,
@@ -558,6 +580,10 @@ def _empty_result(job: JobSpec) -> dict:
         "total_input_tokens": 0,
         "model_turns": 0,
         "tool_calls": 0,
+        "first_attempt_score": 0.0,
+        "repair_delta_pp": 0.0,
+        "repair_attempted": 0,
+        "repair_successes": 0,
         "sum_generation_time": 0.0,
         "sum_request_time": 0.0,
         "avg_response_time": 0.0,
@@ -586,6 +612,7 @@ def _harness_pair_key(result: dict) -> tuple[object, ...]:
         result.get("slice"),
         result.get("perturbation"),
         result.get("perturbation_seed") if result.get("perturbation") else None,
+        result.get("repair_attempts", 0),
     )
 
 
@@ -613,6 +640,14 @@ def annotate_harness_effect(results: list[dict]) -> None:
         total = len(pairs)
         direct_points = sum(float(before.get("score", 0)) for before, _ in pairs)
         pi_points = sum(float(after.get("score", 0)) for _, after in pairs)
+        direct_first_points = sum(
+            float(before.get("first_attempt_score", before.get("score", 0)))
+            for before, _ in pairs
+        )
+        pi_first_points = sum(
+            float(after.get("first_attempt_score", after.get("score", 0)))
+            for _, after in pairs
+        )
         gains = sum(
             not bool(before.get("passed")) and bool(after.get("passed"))
             for before, after in pairs
@@ -626,6 +661,12 @@ def annotate_harness_effect(results: list[dict]) -> None:
             direct_score=round(direct_points / total, 1),
             harness_score=round(pi_points / total, 1),
             harness_delta_pp=round((pi_points - direct_points) / total, 1),
+            direct_first_score=round(direct_first_points / total, 1),
+            harness_first_score=round(pi_first_points / total, 1),
+            harness_first_delta_pp=round(
+                (pi_first_points - direct_first_points) / total,
+                1,
+            ),
             harness_gains=gains,
             harness_regressions=regressions,
         )
@@ -650,6 +691,9 @@ class Engine:
     )
     failure: str | None = field(default=None, init=False)
     _emit_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
+    _evaluation_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
     _pi_runner: PiAgentRunner | None = field(default=None, init=False, repr=False)
@@ -985,6 +1029,21 @@ class Engine:
             "total_input_tokens": sum(record.input_tokens for record in records),
             "model_turns": sum(record.model_turns for record in records),
             "tool_calls": sum(record.tool_calls for record in records),
+            "first_attempt_score": round(
+                sum(record.first_attempt_score for record in records) / completed * 100,
+                1,
+            ),
+            "repair_delta_pp": round(
+                score
+                - sum(record.first_attempt_score for record in records)
+                / completed
+                * 100,
+                1,
+            ),
+            "repair_attempted": sum(
+                record.repair_attempts_used > 0 for record in records
+            ),
+            "repair_successes": sum(record.repaired for record in records),
             "sum_generation_time": round(total_eval_ns / 1e9, 3),
             "sum_request_time": round(total_response_time, 3),
             "avg_response_time": round(total_response_time / completed, 1),
@@ -1050,12 +1109,94 @@ class Engine:
                     "model_turns": record.model_turns,
                     "tool_calls": record.tool_calls,
                     "tool_trace": record.tool_trace,
+                    "attempts": record.attempts,
+                    "repair_attempts_used": record.repair_attempts_used,
+                    "repair_feedback": record.repair_feedback,
+                    "first_attempt_score": round(record.first_attempt_score * 100, 1),
+                    "repaired": record.repaired,
                 }
                 for record in records
             ],
             **_result_metadata(job),
         }
         return result, skipped
+
+    def _verify_response(
+        self,
+        bench: object,
+        task: Task,
+        response: str,
+    ) -> EvaluationResult:
+        """Run evaluators serially and convert infrastructure errors to data."""
+        with self._evaluation_lock:
+            try:
+                return evaluate_response(bench, task, response)
+            except Exception as exc:
+                return EvaluationResult(
+                    score=0.0,
+                    error=f"evaluation failed: {type(exc).__name__}: {exc}",
+                )
+
+    def _generate_direct_with_repairs(
+        self,
+        job: JobSpec,
+        prompt: str,
+        verifier: Callable[[str], EvaluationResult],
+        on_progress: Callable[[GenerationUpdate], None],
+    ) -> dict:
+        """Run stateless direct calls with an explicit feedback transcript."""
+        attempts: list[tuple[dict, EvaluationResult]] = []
+        feedback_sent: list[str] = []
+        request_prompt = prompt
+        elapsed_offset = 0.0
+
+        for attempt in range(job.repair_attempts + 1):
+
+            def forward(
+                update: GenerationUpdate,
+                *,
+                number: int = attempt,
+                offset: float = elapsed_offset,
+            ) -> None:
+                on_progress(
+                    replace(
+                        update,
+                        elapsed_s=offset + update.elapsed_s,
+                        attempt=number,
+                    )
+                )
+
+            gen = self.client.generate(
+                job.model,
+                request_prompt,
+                on_progress=forward,
+                cancel_event=self.controls.cancel_event,
+            )
+            terminal = bool(
+                gen.get("cancelled") or gen.get("timed_out") or gen.get("loop_killed")
+            )
+            evaluation = (
+                EvaluationResult(score=0.0)
+                if terminal
+                else verifier(str(gen.get("response") or ""))
+            )
+            attempts.append((gen, evaluation))
+            if terminal or evaluation.passed or evaluation.error:
+                break
+            if attempt >= job.repair_attempts:
+                break
+
+            feedback_sent.append(evaluation.feedback)
+            request_prompt = standalone_repair_prompt(
+                prompt,
+                str(gen.get("response") or ""),
+                evaluation.feedback,
+                attempt + 1,
+                job.repair_attempts,
+            )
+            elapsed_offset += float(gen.get("response_time_s") or 0.0)
+
+        return combine_attempts(attempts, feedback_sent)
 
     def _generate_task(
         self,
@@ -1099,8 +1240,11 @@ class Engine:
         loop_above_since: float | None = None
         loop_killed_at_s: float | None = None
         loop_kill_score = 0.0
+        current_attempt = 0
 
         def on_progress(update: GenerationUpdate) -> None:
+            nonlocal analyzer
+            nonlocal current_attempt
             nonlocal first_answer_at
             nonlocal last_progress_emit
             nonlocal last_progress_state
@@ -1112,6 +1256,29 @@ class Engine:
 
             if self.controls.cancel_requested:
                 raise _GenerationCancelled
+
+            if update.attempt != current_attempt:
+                current_attempt = update.attempt
+                analyzer = LoopAnalyzer()
+                reasoning_channel_seen = False
+                loop_above_since = None
+                loop_detected_at = None
+                last_progress_emit = 0.0
+                last_progress_state = ""
+                self.emit(
+                    TaskPhase(
+                        index=index,
+                        job=job,
+                        position=position + 1,
+                        total=total,
+                        task_id=task.id,
+                        entry_point=entry_point,
+                        phase="generating",
+                        activity=(
+                            f"running verifier-feedback repair {current_attempt}"
+                        ),
+                    )
+                )
 
             analyzer.add(thinking=update.thinking, answer=update.response)
             reasoning_channel_seen = (
@@ -1190,12 +1357,34 @@ class Engine:
 
         try:
             generator = self._pi() if job.harness == "pi" else self.client
-            gen = generator.generate(
-                job.model,
-                prompt,
-                on_progress=on_progress,
-                cancel_event=self.controls.cancel_event,
-            )
+            if job.repair_attempts:
+
+                def verifier(response: str) -> EvaluationResult:
+                    return self._verify_response(bench, task, response)
+
+                if job.harness == "pi":
+                    gen = generator.generate(
+                        job.model,
+                        prompt,
+                        on_progress=on_progress,
+                        cancel_event=self.controls.cancel_event,
+                        verifier=verifier,
+                        repair_attempts=job.repair_attempts,
+                    )
+                else:
+                    gen = self._generate_direct_with_repairs(
+                        job,
+                        prompt,
+                        verifier,
+                        on_progress,
+                    )
+            else:
+                gen = generator.generate(
+                    job.model,
+                    prompt,
+                    on_progress=on_progress,
+                    cancel_event=self.controls.cancel_event,
+                )
         except _GenerationCancelled:
             gen = dict(ERROR_GENERATION)
             gen.update(done_reason="cancelled", cancelled=True)
@@ -1332,20 +1521,26 @@ class Engine:
         )
 
         if not loop_killed and not timed_out:
-            try:
-                evaluation = bench.evaluate(task, gen["response"])
-                if isinstance(evaluation, bool):
-                    evaluation_score = 1.0 if evaluation else 0.0
-                elif isinstance(evaluation, Real):
-                    evaluation_score = min(1.0, max(0.0, float(evaluation)))
-                else:
-                    evaluation_score = 1.0 if bool(evaluation) else 0.0
-                ok = evaluation_score >= 1.0
-            except Exception as exc:
-                ok = False
-                if not error:
-                    error = f"evaluation failed: {type(exc).__name__}: {exc}"
+            if "evaluation_score" in gen:
+                evaluation_score = min(
+                    1.0, max(0.0, float(gen.get("evaluation_score") or 0.0))
+                )
+                evaluation_error = str(gen.get("evaluation_error") or "")
+                ok = evaluation_score >= 1.0 and not evaluation_error
+                if evaluation_error and not error:
+                    error = evaluation_error
                     errors += 1
+            else:
+                evaluation = self._verify_response(bench, task, gen["response"])
+                evaluation_score = evaluation.score
+                ok = evaluation.passed
+                if evaluation.error and not error:
+                    error = evaluation.error
+                    errors += 1
+            if not ok and not error and gen.get("evaluation_error"):
+                ok = False
+                error = str(gen["evaluation_error"])
+                errors += 1
 
         response_time_s = float(gen.get("response_time_s", 0.0))
         record = TaskRecord(
@@ -1399,6 +1594,11 @@ class Engine:
             model_turns=int(gen.get("model_turns") or 1),
             tool_calls=int(gen.get("tool_calls") or 0),
             tool_trace=list(gen.get("tool_trace") or []),
+            attempts=list(gen.get("attempts") or []),
+            repair_attempts_used=int(gen.get("repair_attempts_used") or 0),
+            repair_feedback=list(gen.get("repair_feedback") or []),
+            first_attempt_score=float(gen.get("first_attempt_score", evaluation_score)),
+            repaired=bool(gen.get("repaired")),
         )
         return _TaskOutcome(
             record=record,
