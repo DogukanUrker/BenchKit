@@ -518,6 +518,9 @@ class EngineIntegrationTests(unittest.TestCase):
         self.assertTrue(
             all("timed out after 9s" in task["error"] for task in result["tasks"])
         )
+        self.assertTrue(all(task["tokens_recovered"] for task in result["tasks"]))
+        self.assertTrue(all(task["output_tokens"] > 0 for task in result["tasks"]))
+        self.assertEqual(result["throughput_coverage"], 0.0)
 
     def test_stop_abandons_the_inflight_task_without_waiting(self) -> None:
         controls = RunControls()
@@ -585,6 +588,8 @@ class EngineIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(task["loop_kill_score"], 0.8)
         self.assertIn("confirmed active cycle", task["error"])
         self.assertIn("at or above 80% for 1s", task["error"])
+        self.assertTrue(task["tokens_recovered"])
+        self.assertGreater(task["output_tokens"], 0)
         confirmed = [
             event
             for event in events
@@ -714,6 +719,15 @@ class TimeoutClient:
         self, model: str, prompt: str, on_progress=None, cancel_event=None
     ) -> dict:
         self.calls += 1
+        if on_progress is not None:
+            on_progress(
+                GenerationUpdate(
+                    thinking="partial reasoning",
+                    response="return len(set(string.lower()))",
+                    elapsed_s=self.timeout,
+                    reasoning_channel_seen=True,
+                )
+            )
         return {
             "thinking": "partial reasoning",
             # This is deliberately a valid first QuickBench solution. A zero
@@ -721,12 +735,17 @@ class TimeoutClient:
             "response": "return len(set(string.lower()))",
             "trace_status": "observed",
             "tok_s": 0.0,
-            "eval_count": 8,
+            "eval_count": 0,
             "eval_duration_ns": 0,
             "response_time_s": self.timeout,
             "done_reason": "timeout",
             "timed_out": True,
         }
+
+    def tokenize(
+        self, model: str, content: str, *, add_special: bool = True
+    ) -> list[int]:
+        return list(range(len(content.split()) + int(add_special)))
 
 
 class TokenLoopClient:
@@ -824,6 +843,11 @@ class SustainedLoopClient:
             )
         )
         raise AssertionError("sustained loop should have killed the request")
+
+    def tokenize(
+        self, model: str, content: str, *, add_special: bool = True
+    ) -> list[int]:
+        return list(range(len(content.split()) + int(add_special)))
 
 
 class SurvivingLoopClient:

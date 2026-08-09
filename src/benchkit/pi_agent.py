@@ -40,31 +40,55 @@ class _RpcTrace:
     output_tokens: int = 0
     input_tokens: int = 0
     turns: int = 0
+    tool_calls_started: int = 0
     tool_trace: list[dict[str, Any]] = field(default_factory=list)
     done_reason: str = "stop"
+    generation_time_s: float = 0.0
+    _assistant_started_at: float | None = field(default=None, repr=False)
     _active_tools: dict[str, tuple[float, dict[str, Any]]] = field(
         default_factory=dict, repr=False
     )
+    _streamed_thinking: list[str] = field(default_factory=list, repr=False)
+    _streamed_text: list[str] = field(default_factory=list, repr=False)
 
     def handle(self, event: dict[str, Any]) -> tuple[str, str]:
         """Consume one RPC event and return streamed thinking/text deltas."""
         event_type = event.get("type")
         thinking_delta = ""
         text_delta = ""
-        if event_type == "message_update":
+        if event_type == "message_start":
+            message = event.get("message") or {}
+            if message.get("role") == "assistant":
+                self._assistant_started_at = time.monotonic()
+                self._streamed_thinking.clear()
+                self._streamed_text.clear()
+        elif event_type == "message_update":
             delta = event.get("assistantMessageEvent") or {}
             if delta.get("type") == "thinking_delta":
                 thinking_delta = str(delta.get("delta") or "")
+                self._streamed_thinking.append(thinking_delta)
             elif delta.get("type") == "text_delta":
                 text_delta = str(delta.get("delta") or "")
+                self._streamed_text.append(text_delta)
+            if (thinking_delta or text_delta) and self._assistant_started_at is None:
+                self._assistant_started_at = time.monotonic()
         elif event_type == "message_end":
             message = event.get("message") or {}
             if message.get("role") == "assistant":
+                if self._assistant_started_at is not None:
+                    self.generation_time_s += max(
+                        0.0, time.monotonic() - self._assistant_started_at
+                    )
+                    self._assistant_started_at = None
                 self.turns += 1
-                text = _message_blocks(message, "text", "text")
+                text = _message_blocks(message, "text", "text") or "".join(
+                    self._streamed_text
+                )
                 if text:
                     self.final_response = text
-                thinking = _message_blocks(message, "thinking", "thinking")
+                thinking = _message_blocks(message, "thinking", "thinking") or "".join(
+                    self._streamed_thinking
+                )
                 if thinking:
                     self.thinking_parts.append(thinking)
                 usage = message.get("usage") or {}
@@ -74,7 +98,10 @@ class _RpcTrace:
                 )
                 self.output_tokens += int(usage.get("output") or 0)
                 self.done_reason = str(message.get("stopReason") or self.done_reason)
+                self._streamed_thinking.clear()
+                self._streamed_text.clear()
         elif event_type == "tool_execution_start":
+            self.tool_calls_started += 1
             tool_id = str(event.get("toolCallId") or "")
             item = {
                 "name": str(event.get("toolName") or ""),
@@ -292,7 +319,12 @@ class PiAgentRunner:
                         )
                     thinking = "\n\n".join(trace.thinking_parts)
                     error = "".join(stderr_parts).strip()
-                    if not trace.final_response and not (cancelled or timed_out):
+                    length_exceeded = trace.done_reason == "length"
+                    if (
+                        not trace.final_response
+                        and not (cancelled or timed_out or length_exceeded)
+                        and trace.turns == 0
+                    ):
                         detail = (
                             error[-2000:]
                             if error
@@ -302,15 +334,24 @@ class PiAgentRunner:
                             f"Pi agent exited without a response: {detail}"
                         )
                     output_tokens = trace.output_tokens
+                    generation_time_s = trace.generation_time_s
                     generation = {
                         "thinking": thinking,
                         "response": trace.final_response,
-                        "trace_status": "observed" if thinking else "unavailable",
+                        "trace_status": (
+                            "observed"
+                            if thinking
+                            else "available_empty"
+                            if trace.turns
+                            else "unavailable"
+                        ),
                         "tok_s": (
-                            output_tokens / turn_elapsed if turn_elapsed > 0 else 0.0
+                            output_tokens / generation_time_s
+                            if generation_time_s > 0
+                            else 0.0
                         ),
                         "eval_count": output_tokens,
-                        "eval_duration_ns": int(turn_elapsed * 1e9),
+                        "eval_duration_ns": int(generation_time_s * 1e9),
                         "response_time_s": turn_elapsed,
                         "done_reason": (
                             "cancelled"
@@ -322,18 +363,19 @@ class PiAgentRunner:
                         "timed_out": timed_out,
                         "timeout_s": timeout,
                         "cancelled": cancelled,
+                        "length_exceeded": length_exceeded,
                         "harness": "pi",
                         "harness_version": self.version,
                         "input_tokens": trace.input_tokens,
                         "model_turns": trace.turns,
-                        "tool_calls": len(trace.tool_trace),
+                        "tool_calls": trace.tool_calls_started,
                         "tool_trace": trace.tool_trace,
                     }
                     generation_results.append(generation)
 
                     if verifier is None:
                         break
-                    terminal = cancelled or timed_out
+                    terminal = cancelled or timed_out or length_exceeded
                     verification_started = time.perf_counter()
                     evaluation = (
                         EvaluationResult(score=0.0)
@@ -352,6 +394,21 @@ class PiAgentRunner:
                         attempt + 1,
                         repair_attempts,
                     )
+                scaffold_value = environment.pi_scaffold()
+                scaffold = (
+                    dict(scaffold_value) if isinstance(scaffold_value, dict) else {}
+                )
+                system_prompt = str(scaffold.get("system_prompt") or "")
+                tokenize = getattr(self.client, "tokenize", None)
+                if system_prompt and callable(tokenize):
+                    try:
+                        tokens = tokenize(model, system_prompt, add_special=False)
+                    except (TypeError, ValueError):
+                        tokens = None
+                    if tokens is not None:
+                        scaffold["system_prompt_tokens"] = len(tokens)
+                for generation in generation_results:
+                    generation["pi_scaffold"] = scaffold
         finally:
             if process is not None and process.poll() is None:
                 process.terminate()
@@ -373,7 +430,6 @@ class PiAgentRunner:
         overhead = max(0.0, elapsed - accounted - verification_time)
         last_generation = generation_results[-1]
         last_generation["response_time_s"] += overhead
-        last_generation["eval_duration_ns"] += int(overhead * 1e9)
 
         if verifier is None:
             output_tokens = int(last_generation.get("eval_count") or 0)

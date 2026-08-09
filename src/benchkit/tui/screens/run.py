@@ -103,6 +103,7 @@ class RunScreen(Screen[None]):
         self.current_passed = 0
         self.current_score_points = 0.0
         self.current_completed = 0
+        self.current_scored_total = 0
         self.latency_sum = 0.0
         self.tok_s_sum = 0.0
         self.output_tokens_sum = 0
@@ -264,6 +265,7 @@ class RunScreen(Screen[None]):
         self.current_passed = 0
         self.current_score_points = 0.0
         self.current_completed = 0
+        self.current_scored_total = 0
         self.latency_sum = 0.0
         self.tok_s_sum = 0.0
         self.output_tokens_sum = 0
@@ -499,8 +501,13 @@ class RunScreen(Screen[None]):
             if event.score_points is not None
             else float(event.passed)
         )
+        self.current_scored_total = (
+            event.scored_total
+            if event.scored_total is not None
+            else event.completed - int(record.harness_error)
+        )
         self.overall_completed += 1
-        if _include_in_overall(event.job):
+        if _include_in_overall(event.job) and not record.harness_error:
             self.overall_score_points += (
                 record.score if record.score > 0 or not record.passed else 1.0
             )
@@ -553,7 +560,11 @@ class RunScreen(Screen[None]):
             progress=self.overall_completed
         )
         self._update_live_state()
-        score = self.current_score_points / self.current_completed * 100
+        score = (
+            self.current_score_points / self.current_scored_total * 100
+            if self.current_scored_total
+            else 0.0
+        )
         self._update_queue_row(
             event.index,
             progress=bar(event.completed / max(self.current_total, 1), 10),
@@ -711,6 +722,7 @@ class RunScreen(Screen[None]):
 
     def _update_stats(self) -> None:
         completed = max(self.current_completed, 1)
+        scored = max(self.current_scored_total, 1)
         measured_elapsed = max(time.monotonic() - self.job_started_at, 0.001)
         elapsed = (
             max(self.latency_sum / self.current_concurrency, 0.001)
@@ -718,7 +730,7 @@ class RunScreen(Screen[None]):
             and self.latency_sum > 0
             else measured_elapsed
         )
-        score = self.current_score_points / completed * 100
+        score = self.current_score_points / scored * 100
         failed = self.current_completed - self.current_passed
         accuracy = self.query_one("#stat-accuracy", StatCard)
         current_job = self.jobs[self.current_index]
@@ -836,6 +848,8 @@ def _result_cell(record: TaskRecord, dark: bool = True) -> Text:
         if record.loop_killed
         else "TIMEOUT"
         if record.timed_out
+        else "LENGTH"
+        if record.length_exceeded
         else "ERROR"
         if record.error
         else "PASS"
@@ -916,6 +930,7 @@ def _record_task_data(record: TaskRecord) -> dict:
         "done_reason": record.done_reason,
         "timed_out": record.timed_out,
         "loop_killed": record.loop_killed,
+        "length_exceeded": record.length_exceeded,
         "loop_kill_score": record.loop_kill_score,
         "loop_killed_at_s": record.loop_killed_at_s,
         "trace_status": record.trace_status,

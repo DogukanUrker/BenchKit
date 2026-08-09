@@ -407,10 +407,11 @@ def _headless(args: argparse.Namespace) -> None:
     table.add_column("Benchmark", overflow="fold")
     table.add_column("Score", justify="right")
     has_harness_pairs = any(
-        result.get("harness_delta_pp") is not None for result in results
+        result.get("harness_score_delta_pp") is not None for result in results
     )
     if has_harness_pairs:
-        table.add_column("Harness Δ", justify="right")
+        table.add_column("Harness score Δ", justify="right")
+        table.add_column("Loop-kill Δ", justify="right")
     has_repairs = any(result.get("repair_attempts", 0) for result in results)
     if has_repairs:
         table.add_column("Repair Δ", justify="right")
@@ -419,8 +420,8 @@ def _headless(args: argparse.Namespace) -> None:
     if has_perturbations:
         table.add_column("Delta", justify="right")
         table.add_column("Regress", justify="right")
-    table.add_column("P/F/E", justify="right")
-    table.add_column("Loops/Killed", justify="right")
+    table.add_column("Pass/Scored", justify="right")
+    table.add_column("Fail/Loop/TO/Len/HE", justify="right")
     has_parallel = any(result.get("concurrency", 1) > 1 for result in results)
     if has_parallel:
         table.add_column("Parallel", justify="right", style="dim")
@@ -442,10 +443,12 @@ def _headless(args: argparse.Namespace) -> None:
             _score_text(result["score"]),
         ]
         if has_harness_pairs:
-            harness_delta = result.get("harness_delta_pp")
+            harness_delta = result.get("harness_score_delta_pp")
             row.append(
                 f"{float(harness_delta):+.1f}pp" if harness_delta is not None else "—"
             )
+            loop_delta = result.get("loop_kill_delta_pp")
+            row.append(f"{float(loop_delta):+.1f}pp" if loop_delta is not None else "—")
         if has_repairs:
             if result.get("repair_attempts", 0):
                 row.extend(
@@ -474,8 +477,11 @@ def _headless(args: argparse.Namespace) -> None:
             )
         row.extend(
             [
-                f"{passed}/{failed}/{errors}",
-                f"{result.get('loops', 0)}/{result.get('loop_kills', 0)}",
+                f"{passed}/{result.get('scored_total', result['total'])}",
+                f"{result.get('failures', failed)}/{result.get('loop_kills', 0)}/"
+                f"{result.get('timeouts', 0)}/"
+                f"{result.get('length_exceeded', 0)}/"
+                f"{result.get('harness_errors', errors)}",
             ]
         )
         if has_parallel:

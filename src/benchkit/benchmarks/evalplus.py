@@ -6,6 +6,7 @@ import contextlib
 import multiprocessing
 import os
 import platform
+import textwrap
 from functools import cache, lru_cache
 from typing import Any
 
@@ -156,11 +157,28 @@ def _human_solution(problem: dict[str, Any], response: str) -> str:
     code = _extract_code(response)
     entry_point = problem["entry_point"]
     if f"def {entry_point}" not in code:
-        lines = code.splitlines()
-        first = next((line for line in lines if line.strip()), "")
-        if first and not first.startswith((" ", "\t")):
-            code = "\n".join(f"    {line}" if line.strip() else line for line in lines)
-        return problem["prompt"] + code
+        normalized = textwrap.dedent(code)
+        solution = problem["prompt"] + textwrap.indent(normalized, "    ")
+        try:
+            compile(solution, "<benchkit-humaneval>", "exec")
+        except (IndentationError, TabError):
+            lines = code.splitlines()
+            first_index = next(
+                (index for index, line in enumerate(lines) if line.strip()), None
+            )
+            if first_index is not None and not lines[first_index].startswith(
+                (" ", "\t")
+            ):
+                lines[first_index] = "    " + lines[first_index]
+                normalized = textwrap.dedent("\n".join(lines))
+                repaired = problem["prompt"] + textwrap.indent(normalized, "    ")
+                try:
+                    compile(repaired, "<benchkit-humaneval>", "exec")
+                except (IndentationError, TabError):
+                    pass
+                else:
+                    solution = repaired
+        return solution
 
     imports = [
         line

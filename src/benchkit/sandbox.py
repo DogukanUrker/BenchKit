@@ -314,6 +314,27 @@ class DockerTaskEnvironment:
             bufsize=1,
         )
 
+    def pi_scaffold(self) -> dict:
+        """Read scaffold metadata captured from Pi's first inference request."""
+        result = _run(
+            [
+                self.docker,
+                "exec",
+                self.proxy_name,
+                "cat",
+                "/tmp/benchkit_pi_scaffold.json",
+            ],
+            timeout=10,
+            check=False,
+        )
+        if result.returncode:
+            return {}
+        try:
+            payload = json.loads(result.stdout)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     def exec(
         self,
         command: list[str],

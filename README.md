@@ -141,8 +141,9 @@ keeps what finished.
 Use `--harness direct`, `--harness pi`, or `--harness both` to measure the same
 model and task with raw next-token generation, the stock Pi coding agent, or a
 paired run of both. In the TUI, choose the same modes from the **Harness**
-selector. Paired results report the direct score, Pi score, percentage-point
-effect, gains, and regressions for matching task IDs.
+selector. Paired results report the direct score, Pi score, score delta,
+loop-kill delta, gains, and regressions. Harness errors on either side are
+excluded so both scores use the same item set.
 
 `--repair-attempts 1` is an orthogonal verifier-feedback condition that works
 with direct, Pi, and paired harness runs. After an incorrect first answer,
@@ -154,7 +155,7 @@ retain both attempts and separately show first-attempt score, final score,
 repair delta, tasks retried, and successful repairs. The default is
 `--repair-attempts 0`, preserving ordinary pass@1 behavior.
 With `--harness both --repair-attempts 1`, one run therefore records direct
-first/final and Pi first/final scores, plus the initial and final harness
+first/final and Pi first/final scores, plus the initial and final harness score
 deltas.
 
 Verifier feedback never includes the expected answer or hidden test bodies.
@@ -178,6 +179,12 @@ in its native RPC mode with its normal `read`, `bash`, `edit`, and `write` tools
 so an agent can create a Python program, execute it, inspect an error, revise
 files, and continue its own normal tool loop. This is intentionally different
 from adding a calculator call to a raw model request.
+
+The restricted inference proxy records the exact Pi system prompt and advertised
+native tool names from the first request actually sent to the model. Reports
+persist that prompt, its hash and token count, and show tool calls used versus
+tools available. A zero tool-call count therefore means the stock tools were
+available but unused for that benchmark item.
 
 Each task receives a fresh, persistent `/workspace` inside a Docker container.
 All of that task's agent turns and native tool calls share the workspace; the
@@ -262,23 +269,29 @@ Pause stops new requests after the active group drains. Skip, stop and Ctrl+C
 cancel every request currently in flight. The detected width is shown in the
 headless dashboard, TUI run title, CSV/JSON output and Markdown report.
 
-Parallel runs report throughput in three separate forms:
+Parallel runs report throughput in three separate forms. Loop kills, timeouts,
+length-exceeded generations, and harness errors retain recoverable task token
+counts, but aggregate timing uses generations with complete token and timing
+payloads and reports the represented request-time share as
+`throughput_coverage`. Length-exceeded items remain scored failures; only
+genuine harness errors are excluded from scoring and paired comparisons:
 
-- **Aggregate tok/s** is total output tokens divided by job wall time. This is
-  the number to use when comparing how quickly a benchmark workload finishes.
-- **Stream tok/s** is total output tokens divided by summed server-reported
+- **Aggregate tok/s** is covered output tokens divided by covered job wall time.
+  Compare it alongside throughput coverage when a run has terminal items.
+- **Stream tok/s** is covered output tokens divided by summed server-reported
   decode time. It describes the speed of an individual generation stream and
   commonly falls as more streams share the same hardware.
-- **Effective concurrency** is summed request duration divided by job wall
-  time. For example, a value near `6.0x` with `--parallel 7` means roughly six
-  request slots stayed occupied on average.
+- **Effective concurrency** is summed covered request duration divided by
+  covered job wall time. For example, a value near `6.0x` with `--parallel 7`
+  means roughly six request slots stayed occupied on average.
 
 The TUI leaderboard and aggregate-throughput report charts use aggregate
 tok/s. JSON and CSV expose these values as `tok_s_aggregate`,
 `tok_s_per_stream` and `concurrency_eff`. The legacy `tok_s` field remains as
 an alias for `tok_s_per_stream` so existing report consumers keep working.
 The raw denominators are also retained as `total_output_tokens`,
-`sum_generation_time`, `sum_request_time` and `total_time`.
+`throughput_output_tokens`, `sum_generation_time`, `sum_request_time`,
+`throughput_wall_time`, and `total_time`.
 
 ## Performance profiles
 

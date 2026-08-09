@@ -221,15 +221,26 @@ class TaskRecord:
     response_time_s: float
     prompt: str
     response: str
+    outcome: Literal[
+        "pass",
+        "fail",
+        "loop_killed",
+        "timeout",
+        "length_exceeded",
+        "harness_error",
+    ] = "fail"
     perturbation: dict = field(default_factory=dict)
     score: float = 0.0
     error: str = ""
     entry_point: str = ""
     thinking: str = ""
     output_tokens: int = 0
+    tokens_recovered: bool = False
     done_reason: str = ""
     timed_out: bool = False
     loop_killed: bool = False
+    length_exceeded: bool = False
+    harness_error: bool = False
     loop_kill_score: float = 0.0
     loop_killed_at_s: float | None = None
     trace_status: str = "unavailable"
@@ -255,6 +266,7 @@ class TaskRecord:
     model_turns: int = 1
     tool_calls: int = 0
     tool_trace: list[dict] = field(default_factory=list)
+    pi_scaffold: dict = field(default_factory=dict)
     attempts: list[dict] = field(default_factory=list)
     repair_attempts_used: int = 0
     repair_feedback: list[str] = field(default_factory=list)
@@ -293,7 +305,14 @@ class TaskPhase:
     total: int
     task_id: str
     entry_point: str
-    phase: Literal["generating", "evaluating", "timed_out", "loop_killed"]
+    phase: Literal[
+        "generating",
+        "evaluating",
+        "timed_out",
+        "loop_killed",
+        "length_exceeded",
+        "harness_error",
+    ]
     activity: str
 
     @property
@@ -341,6 +360,7 @@ class TaskCompleted:
     passed: int
     completed: int
     score_points: float | None = None
+    scored_total: int | None = None
 
 
 @dataclass
@@ -459,6 +479,8 @@ ERROR_GENERATION = {
     "timed_out": False,
     "cancelled": False,
     "loop_killed": False,
+    "length_exceeded": False,
+    "harness_error": False,
     "trace_status": "unavailable",
 }
 
@@ -572,10 +594,14 @@ def _empty_result(job: JobSpec) -> dict:
         "score": 0.0,
         "passed": 0,
         "total": 0,
+        "scored_total": 0,
         "tok_s": 0.0,
         "tok_s_per_stream": 0.0,
         "tok_s_aggregate": 0.0,
         "concurrency_eff": 0.0,
+        "throughput_coverage": 0.0,
+        "throughput_items": 0,
+        "throughput_wall_time": 0.0,
         "total_output_tokens": 0,
         "total_input_tokens": 0,
         "model_turns": 0,
@@ -591,8 +617,11 @@ def _empty_result(job: JobSpec) -> dict:
         "slice": job.slice_spec,
         "concurrency": 1,
         "errors": 0,
+        "harness_errors": 0,
+        "length_exceeded": 0,
         "timeouts": 0,
         "loop_kills": 0,
+        "failures": 0,
         "loops": 0,
         "suspected_loops": 0,
         "loop_rate": 0.0,
@@ -634,6 +663,8 @@ def annotate_harness_effect(results: list[dict]) -> None:
             (baseline_tasks[task["task_id"]], task)
             for task in result.get("tasks", [])
             if task["task_id"] in baseline_tasks
+            and not task.get("harness_error")
+            and not baseline_tasks[task["task_id"]].get("harness_error")
         ]
         if not pairs:
             continue
@@ -656,19 +687,27 @@ def annotate_harness_effect(results: list[dict]) -> None:
             bool(before.get("passed")) and not bool(after.get("passed"))
             for before, after in pairs
         )
+        direct_loop_kills = sum(bool(before.get("loop_killed")) for before, _ in pairs)
+        harness_loop_kills = sum(bool(after.get("loop_killed")) for _, after in pairs)
         result.update(
             harness_paired_total=total,
             direct_score=round(direct_points / total, 1),
             harness_score=round(pi_points / total, 1),
-            harness_delta_pp=round((pi_points - direct_points) / total, 1),
+            harness_score_delta_pp=round((pi_points - direct_points) / total, 1),
             direct_first_score=round(direct_first_points / total, 1),
             harness_first_score=round(pi_first_points / total, 1),
-            harness_first_delta_pp=round(
+            harness_first_score_delta_pp=round(
                 (pi_first_points - direct_first_points) / total,
                 1,
             ),
             harness_gains=gains,
             harness_regressions=regressions,
+            direct_loop_kill_rate=round(direct_loop_kills / total * 100, 1),
+            harness_loop_kill_rate=round(harness_loop_kills / total * 100, 1),
+            loop_kill_delta_pp=round(
+                (harness_loop_kills - direct_loop_kills) / total * 100,
+                1,
+            ),
         )
 
 
@@ -838,10 +877,14 @@ class Engine:
         wall_start = time.perf_counter()
         passed = 0
         score_points = 0.0
+        scored_total = 0
         errors = 0
         total_tokens = 0
-        total_eval_ns = 0
         total_response_time = 0.0
+        throughput_tokens = 0
+        throughput_eval_ns = 0
+        throughput_response_time = 0.0
+        throughput_items = 0
         records_by_position: dict[int, TaskRecord] = {}
         skipped = False
         paused_time = 0.0
@@ -927,10 +970,27 @@ class Engine:
                         records_by_position[record.index] = record
                         passed += int(record.passed)
                         score_points += record.score
+                        scored_total += int(not record.harness_error)
                         errors += outcome.errors
                         total_tokens += outcome.eval_count
-                        total_eval_ns += outcome.eval_duration_ns
                         total_response_time += outcome.response_time_s
+                        complete_length_metrics = not record.length_exceeded or (
+                            outcome.eval_count > 0
+                            and outcome.eval_duration_ns > 0
+                            and outcome.response_time_s > 0
+                        )
+                        if (
+                            not (
+                                record.loop_killed
+                                or record.timed_out
+                                or record.harness_error
+                            )
+                            and complete_length_metrics
+                        ):
+                            throughput_tokens += outcome.eval_count
+                            throughput_eval_ns += outcome.eval_duration_ns
+                            throughput_response_time += outcome.response_time_s
+                            throughput_items += 1
                         completed = len(records_by_position)
                         self.emit(
                             TaskCompleted(
@@ -940,6 +1000,7 @@ class Engine:
                                 passed,
                                 completed,
                                 score_points,
+                                scored_total,
                             )
                         )
             except Exception:
@@ -969,11 +1030,21 @@ class Engine:
         )
         total_time = round(wall_time_s, 1)
         completed = len(records)
+        scored_records = [record for record in records if not record.harness_error]
+        scored_total = len(scored_records)
+        throughput_coverage = (
+            throughput_response_time / total_response_time
+            if total_response_time > 0
+            else throughput_items / completed
+            if completed
+            else 0.0
+        )
+        throughput_wall_time = wall_time_s * throughput_coverage
         throughput = throughput_metrics(
-            output_tokens=total_tokens,
-            generation_time_s=total_eval_ns / 1e9,
-            request_time_s=total_response_time,
-            wall_time_s=wall_time_s,
+            output_tokens=throughput_tokens,
+            generation_time_s=throughput_eval_ns / 1e9,
+            request_time_s=throughput_response_time,
+            wall_time_s=throughput_wall_time,
         )
         tok_s_per_stream = round(throughput["tok_s_per_stream"], 1)
         tok_s_aggregate = round(throughput["tok_s_aggregate"], 1)
@@ -982,8 +1053,8 @@ class Engine:
             2,
         )
         score = (
-            sum(record.score for record in records) / completed * 100
-            if completed
+            sum(record.score for record in scored_records) / scored_total * 100
+            if scored_total
             else 0.0
         )
         loops = sum(record.loop_state == "looping" for record in records)
@@ -994,15 +1065,29 @@ class Engine:
         recovered = sum(record.recovered_cycle for record in records)
         timeouts = sum(record.timed_out for record in records)
         loop_kills = sum(record.loop_killed for record in records)
+        length_exceeded = sum(record.length_exceeded for record in records)
+        harness_errors = sum(record.harness_error for record in records)
+        failures = sum(record.outcome == "fail" for record in records)
         traced = sum(record.trace_status != "unavailable" for record in records)
-        thinking_times = [
-            record.thinking_time_s for record in records if record.thinking
-        ]
-        answer_times = [
-            record.time_to_first_answer_s
+        latency_records = [
+            record
             for record in records
-            if record.time_to_first_answer_s is not None
+            if not (
+                record.loop_killed
+                or record.timed_out
+                or record.length_exceeded
+                or record.harness_error
+            )
+            and record.time_to_first_answer_s is not None
         ]
+        thinking_times = [record.thinking_time_s for record in latency_records]
+        answer_times = [
+            float(record.time_to_first_answer_s) for record in latency_records
+        ]
+        pi_scaffold = next(
+            (record.pi_scaffold for record in records if record.pi_scaffold), {}
+        )
+        pi_metadata = {f"pi_{key}": value for key, value in pi_scaffold.items()}
 
         result = {
             "model": job.model,
@@ -1019,38 +1104,54 @@ class Engine:
             "score": round(score, 1),
             "passed": passed,
             "total": completed,
+            "scored_total": scored_total,
             # Keep ``tok_s`` as a compatibility alias for consumers of older
             # BenchKit JSON. New displays use the explicitly named metrics.
             "tok_s": tok_s_per_stream,
             "tok_s_per_stream": tok_s_per_stream,
             "tok_s_aggregate": tok_s_aggregate,
             "concurrency_eff": concurrency_eff,
+            "throughput_coverage": round(throughput_coverage * 100, 1),
+            "throughput_items": throughput_items,
+            "throughput_wall_time": round(throughput_wall_time, 3),
             "total_output_tokens": total_tokens,
+            "throughput_output_tokens": throughput_tokens,
             "total_input_tokens": sum(record.input_tokens for record in records),
             "model_turns": sum(record.model_turns for record in records),
             "tool_calls": sum(record.tool_calls for record in records),
             "first_attempt_score": round(
-                sum(record.first_attempt_score for record in records) / completed * 100,
-                1,
-            ),
-            "repair_delta_pp": round(
-                score
-                - sum(record.first_attempt_score for record in records)
-                / completed
+                sum(record.first_attempt_score for record in scored_records)
+                / scored_total
                 * 100,
                 1,
-            ),
+            )
+            if scored_total
+            else 0.0,
+            "repair_delta_pp": round(
+                score
+                - sum(record.first_attempt_score for record in scored_records)
+                / scored_total
+                * 100,
+                1,
+            )
+            if scored_total
+            else 0.0,
             "repair_attempted": sum(
                 record.repair_attempts_used > 0 for record in records
             ),
             "repair_successes": sum(record.repaired for record in records),
-            "sum_generation_time": round(total_eval_ns / 1e9, 3),
-            "sum_request_time": round(total_response_time, 3),
-            "avg_response_time": round(total_response_time / completed, 1),
+            "sum_generation_time": round(throughput_eval_ns / 1e9, 3),
+            "sum_request_time": round(throughput_response_time, 3),
+            "avg_response_time": round(throughput_response_time / throughput_items, 1)
+            if throughput_items
+            else 0.0,
             "total_time": total_time,
             "slice": slice_spec,
             "concurrency": concurrency,
             "errors": errors,
+            "harness_errors": harness_errors,
+            "length_exceeded": length_exceeded,
+            "failures": failures,
             "timeouts": timeouts,
             "loop_kills": loop_kills,
             "loops": loops,
@@ -1071,6 +1172,7 @@ class Engine:
                 {
                     "task_id": record.task_id,
                     "passed": record.passed,
+                    "outcome": record.outcome,
                     "score": round(record.score * 100, 1),
                     "tok_s": record.tok_s,
                     "response_time_s": record.response_time_s,
@@ -1081,9 +1183,12 @@ class Engine:
                     "entry_point": record.entry_point,
                     "thinking": record.thinking,
                     "output_tokens": record.output_tokens,
+                    "tokens_recovered": record.tokens_recovered,
                     "done_reason": record.done_reason,
                     "timed_out": record.timed_out,
                     "loop_killed": record.loop_killed,
+                    "length_exceeded": record.length_exceeded,
+                    "harness_error": record.harness_error,
                     "loop_kill_score": record.loop_kill_score,
                     "loop_killed_at_s": record.loop_killed_at_s,
                     "trace_status": record.trace_status,
@@ -1117,6 +1222,7 @@ class Engine:
                 }
                 for record in records
             ],
+            **pi_metadata,
             **_result_metadata(job),
         }
         return result, skipped
@@ -1241,6 +1347,8 @@ class Engine:
         loop_killed_at_s: float | None = None
         loop_kill_score = 0.0
         current_attempt = 0
+        streamed_thinking_parts: list[str] = []
+        streamed_response_parts: list[str] = []
 
         def on_progress(update: GenerationUpdate) -> None:
             nonlocal analyzer
@@ -1253,6 +1361,8 @@ class Engine:
             nonlocal loop_killed_at_s
             nonlocal loop_kill_score
             nonlocal reasoning_channel_seen
+            nonlocal streamed_response_parts
+            nonlocal streamed_thinking_parts
 
             if self.controls.cancel_requested:
                 raise _GenerationCancelled
@@ -1265,6 +1375,8 @@ class Engine:
                 loop_detected_at = None
                 last_progress_emit = 0.0
                 last_progress_state = ""
+                streamed_thinking_parts = []
+                streamed_response_parts = []
                 self.emit(
                     TaskPhase(
                         index=index,
@@ -1280,6 +1392,8 @@ class Engine:
                     )
                 )
 
+            streamed_thinking_parts.append(update.thinking)
+            streamed_response_parts.append(update.response)
             analyzer.add(thinking=update.thinking, answer=update.response)
             reasoning_channel_seen = (
                 reasoning_channel_seen or update.reasoning_channel_seen
@@ -1355,6 +1469,7 @@ class Engine:
                 )
             )
 
+        request_started = time.perf_counter()
         try:
             generator = self._pi() if job.harness == "pi" else self.client
             if job.repair_attempts:
@@ -1422,8 +1537,30 @@ class Engine:
                 )
             else:
                 error = f"{type(exc).__name__}: {exc}"
+                gen.update(
+                    harness_error=True,
+                    response_time_s=time.perf_counter() - request_started,
+                )
             if not gen.get("cancelled"):
                 errors += 1
+
+        if (
+            gen.get("loop_killed") or gen.get("timed_out") or gen.get("length_exceeded")
+        ) and not int(gen.get("eval_count") or 0):
+            token_count = self._count_streamed_tokens(
+                job.model,
+                streamed_thinking_parts,
+                streamed_response_parts,
+            )
+            if token_count is not None:
+                response_time_s = float(gen.get("response_time_s") or 0.0)
+                gen.update(
+                    eval_count=token_count,
+                    tokens_recovered=True,
+                    tok_s=(
+                        token_count / response_time_s if response_time_s > 0 else 0.0
+                    ),
+                )
 
         return _GeneratedTask(
             position=position,
@@ -1437,6 +1574,31 @@ class Engine:
             first_answer_at=first_answer_at,
             loop_detected_at=loop_detected_at,
         )
+
+    def _count_streamed_tokens(
+        self,
+        model: str,
+        thinking_parts: list[str],
+        response_parts: list[str],
+    ) -> int | None:
+        """Count terminal stream text when the final usage payload never arrived."""
+        tokenize = getattr(self.client, "tokenize", None)
+        if not callable(tokenize):
+            return None
+        total = 0
+        observed = False
+        for content in ("".join(thinking_parts), "".join(response_parts)):
+            if not content:
+                continue
+            try:
+                tokens = tokenize(model, content, add_special=False)
+            except (TypeError, ValueError):
+                return None
+            if tokens is None:
+                return None
+            total += len(tokens)
+            observed = True
+        return total if observed else None
 
     def _finalize_task(
         self,
@@ -1484,6 +1646,8 @@ class Engine:
 
         timed_out = bool(gen.get("timed_out"))
         loop_killed = bool(gen.get("loop_killed"))
+        length_exceeded = bool(gen.get("length_exceeded"))
+        harness_error = bool(gen.get("harness_error"))
         evaluation_score = 0.0
         if loop_killed:
             ok = False
@@ -1503,6 +1667,17 @@ class Engine:
                 errors += 1
             phase = "timed_out"
             activity = "timed out — skipping task"
+        elif length_exceeded:
+            ok = False
+            if not error:
+                error = "generation reached the model output-token limit"
+                errors += 1
+            phase = "length_exceeded"
+            activity = "output-token limit reached — scoring task as failed"
+        elif harness_error:
+            ok = False
+            phase = "harness_error"
+            activity = "harness error — excluding task from score"
         else:
             phase = "evaluating"
             activity = getattr(bench, "evaluation_activity", "evaluating response")
@@ -1520,7 +1695,12 @@ class Engine:
             )
         )
 
-        if not loop_killed and not timed_out:
+        if (
+            not loop_killed
+            and not timed_out
+            and not length_exceeded
+            and not harness_error
+        ):
             if "evaluation_score" in gen:
                 evaluation_score = min(
                     1.0, max(0.0, float(gen.get("evaluation_score") or 0.0))
@@ -1530,6 +1710,7 @@ class Engine:
                 if evaluation_error and not error:
                     error = evaluation_error
                     errors += 1
+                    harness_error = True
             else:
                 evaluation = self._verify_response(bench, task, gen["response"])
                 evaluation_score = evaluation.score
@@ -1537,10 +1718,26 @@ class Engine:
                 if evaluation.error and not error:
                     error = evaluation.error
                     errors += 1
+                    harness_error = True
             if not ok and not error and gen.get("evaluation_error"):
                 ok = False
                 error = str(gen["evaluation_error"])
                 errors += 1
+                harness_error = True
+
+        outcome = (
+            "harness_error"
+            if harness_error
+            else "length_exceeded"
+            if length_exceeded
+            else "loop_killed"
+            if loop_killed
+            else "timeout"
+            if timed_out
+            else "pass"
+            if ok
+            else "fail"
+        )
 
         response_time_s = float(gen.get("response_time_s", 0.0))
         record = TaskRecord(
@@ -1551,20 +1748,27 @@ class Engine:
             response_time_s=round(response_time_s, 2),
             prompt=prompt,
             response=gen.get("response", ""),
+            outcome=outcome,
             perturbation=generated.perturbation,
             score=evaluation_score,
             error=error,
             entry_point=entry_point,
             thinking=gen.get("thinking", ""),
             output_tokens=int(gen.get("eval_count", 0)),
+            tokens_recovered=bool(gen.get("tokens_recovered")),
             done_reason=gen.get("done_reason", ""),
             timed_out=timed_out,
             loop_killed=loop_killed,
+            length_exceeded=length_exceeded,
+            harness_error=harness_error,
             loop_kill_score=float(gen.get("loop_kill_score", 0.0)),
             loop_killed_at_s=gen.get("loop_killed_at_s"),
             trace_status=gen.get("trace_status", "unavailable"),
             thinking_time_s=round(
-                (first_answer_at if first_answer_at is not None else response_time_s)
+                min(
+                    first_answer_at if first_answer_at is not None else response_time_s,
+                    response_time_s,
+                )
                 if gen.get("thinking")
                 else 0.0,
                 2,
@@ -1594,6 +1798,7 @@ class Engine:
             model_turns=int(gen.get("model_turns") or 1),
             tool_calls=int(gen.get("tool_calls") or 0),
             tool_trace=list(gen.get("tool_trace") or []),
+            pi_scaffold=dict(gen.get("pi_scaffold") or {}),
             attempts=list(gen.get("attempts") or []),
             repair_attempts_used=int(gen.get("repair_attempts_used") or 0),
             repair_feedback=list(gen.get("repair_feedback") or []),

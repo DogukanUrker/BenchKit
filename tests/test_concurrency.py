@@ -118,6 +118,78 @@ class ProgressParallelClient(ParallelClient):
         return super().generate(model, prompt, **kwargs)
 
 
+class MixedCoverageClient:
+    timeout = 1.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, model: str, prompt: str, on_progress=None, **_kwargs: object):
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                **_generation(),
+                "eval_count": 10,
+                "eval_duration_ns": 2_000_000_000,
+                "response_time_s": 1.0,
+            }
+        if on_progress is not None:
+            on_progress(GenerationUpdate(response="partial output", elapsed_s=3.0))
+        return {
+            **_generation(),
+            "response": "partial output",
+            "eval_count": 0,
+            "eval_duration_ns": 0,
+            "response_time_s": 3.0,
+            "done_reason": "timeout",
+            "timed_out": True,
+        }
+
+    def tokenize(
+        self, model: str, content: str, *, add_special: bool = True
+    ) -> list[int]:
+        return list(range(len(content.split()) + int(add_special)))
+
+
+class LatencyCohortClient:
+    timeout = 20.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, model: str, prompt: str, on_progress=None, **_kwargs: object):
+        self.calls += 1
+        if self.calls == 1:
+            on_progress(
+                GenerationUpdate(
+                    thinking="reasoning",
+                    elapsed_s=4.0,
+                    reasoning_channel_seen=True,
+                )
+            )
+            on_progress(
+                GenerationUpdate(
+                    response="answer",
+                    elapsed_s=10.0,
+                    reasoning_channel_seen=True,
+                )
+            )
+            thinking = "reasoning"
+            response_time = 12.0
+        else:
+            on_progress(GenerationUpdate(response="answer", elapsed_s=2.0))
+            thinking = ""
+            response_time = 3.0
+        return {
+            **_generation(),
+            "thinking": thinking,
+            "response": "answer",
+            "eval_count": 1,
+            "eval_duration_ns": 1_000_000_000,
+            "response_time_s": response_time,
+        }
+
+
 class CapacityDiscoveryTests(unittest.TestCase):
     def test_model_metadata_is_used_as_a_capacity_cap(self) -> None:
         from benchkit.client import InferenceClient
@@ -273,6 +345,48 @@ class ThroughputMetricTests(unittest.TestCase):
 
 
 class ConcurrentEngineTests(unittest.TestCase):
+    def test_thinking_and_answer_medians_use_the_same_task_cohort(self) -> None:
+        engine = Engine(
+            client=LatencyCohortClient(),
+            jobs=[JobSpec("model", "quickbench", "2")],
+        )
+
+        with patch.object(
+            engine,
+            "_verify_response",
+            return_value=Mock(score=1.0, passed=True, error=""),
+        ):
+            result = engine.run()[0]
+
+        self.assertEqual(result["median_thinking_time"], 5.0)
+        self.assertEqual(result["median_time_to_answer"], 6.0)
+        self.assertLessEqual(
+            result["median_thinking_time"], result["median_time_to_answer"]
+        )
+
+    def test_terminal_items_are_excluded_from_timing_aggregates_with_coverage(
+        self,
+    ) -> None:
+        client = MixedCoverageClient()
+        engine = Engine(
+            client=client,
+            jobs=[JobSpec("model", "quickbench", "2")],
+        )
+
+        with patch.object(
+            engine,
+            "_verify_response",
+            return_value=Mock(score=1.0, passed=True, error=""),
+        ):
+            result = engine.run()[0]
+
+        self.assertEqual(result["throughput_items"], 1)
+        self.assertEqual(result["throughput_coverage"], 25.0)
+        self.assertEqual(result["sum_generation_time"], 2.0)
+        self.assertEqual(result["sum_request_time"], 1.0)
+        self.assertEqual(result["avg_response_time"], 1.0)
+        self.assertTrue(result["tasks"][1]["tokens_recovered"])
+
     def test_pi_uses_normal_discovered_capacity(self) -> None:
         client = ParallelClient({"model": 4})
         engine = Engine(client=client, jobs=[])

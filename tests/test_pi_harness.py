@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from benchkit._pi_proxy import _models_payload, _upstream_target
+from benchkit._pi_proxy import _capture_scaffold, _models_payload, _upstream_target
 from benchkit.cli import _headless_jobs, _parse_args
 from benchkit.client import _openai_metrics
 from benchkit.engine import Engine, JobSpec, annotate_harness_effect
-from benchkit.pi_agent import _RpcTrace
+from benchkit.evaluation import EvaluationResult
+from benchkit.pi_agent import PiAgentRunner, _RpcTrace
 from benchkit.sandbox import (
     PI_DOCKERFILE,
     PI_PACKAGE,
@@ -152,6 +156,39 @@ class LatestPiImageTests(unittest.TestCase):
 
 
 class InferenceProxyTests(unittest.TestCase):
+    def test_proxy_captures_exact_system_prompt_and_available_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "scaffold.json"
+            with patch("benchkit._pi_proxy.SCAFFOLD_PATH", str(destination)):
+                _capture_scaffold(
+                    {
+                        "messages": [
+                            {"role": "system", "content": "Stock Pi prompt"},
+                            {"role": "user", "content": "benchmark task"},
+                        ],
+                        "tools": [
+                            {
+                                "type": "function",
+                                "function": {"name": "read"},
+                            },
+                            {
+                                "type": "function",
+                                "function": {"name": "bash"},
+                            },
+                        ],
+                        "max_completion_tokens": 16384,
+                    }
+                )
+
+            scaffold = json.loads(destination.read_text())
+
+        self.assertEqual(scaffold["system_prompt"], "Stock Pi prompt")
+        self.assertEqual(scaffold["system_prompt_chars"], 15)
+        self.assertEqual(scaffold["tools_available"], ["read", "bash"])
+        self.assertEqual(scaffold["max_output_tokens"], 16384)
+        self.assertEqual(scaffold["max_output_tokens_field"], "max_completion_tokens")
+        self.assertEqual(len(scaffold["system_prompt_sha256"]), 64)
+
     def test_proxy_exposes_only_the_selected_model(self) -> None:
         with patch.dict(os.environ, {"BENCHKIT_MODEL": "selected/model"}):
             payload = json.loads(_models_payload())
@@ -177,6 +214,29 @@ class InferenceProxyTests(unittest.TestCase):
 
 
 class PiRpcTraceTests(unittest.TestCase):
+    def test_trace_measures_assistant_generation_separately(self) -> None:
+        trace = _RpcTrace()
+
+        with patch("benchkit.pi_agent.time.monotonic", side_effect=[10.0, 12.5]):
+            trace.handle(
+                {
+                    "type": "message_start",
+                    "message": {"role": "assistant"},
+                }
+            )
+            trace.handle(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "answer"}],
+                        "usage": {"output": 1},
+                    },
+                }
+            )
+
+        self.assertEqual(trace.generation_time_s, 2.5)
+
     def test_trace_keeps_native_tool_calls_and_all_turn_usage(self) -> None:
         trace = _RpcTrace()
         trace.handle(
@@ -228,6 +288,7 @@ class PiRpcTraceTests(unittest.TestCase):
         )
         self.assertFalse(trace.tool_trace[0]["is_error"])
         self.assertEqual(trace.tool_trace[0]["output"], "42\n")
+        self.assertEqual(trace.tool_calls_started, 1)
 
     def test_direct_metrics_keep_prompt_tokens_for_fair_cost_comparison(self) -> None:
         metrics = _openai_metrics(
@@ -241,8 +302,194 @@ class PiRpcTraceTests(unittest.TestCase):
         self.assertEqual(metrics["input_tokens"], 120)
         self.assertEqual(metrics["eval_count"], 30)
 
+    def test_reasoning_only_length_stop_returns_partial_generation(self) -> None:
+        events = [
+            {
+                "type": "message_start",
+                "message": {"role": "assistant"},
+            },
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {
+                    "type": "thinking_delta",
+                    "delta": "partial reasoning",
+                },
+            },
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "usage": {"input": 1418, "output": 16384},
+                    "stopReason": "length",
+                },
+            },
+            {"type": "agent_settled"},
+            {
+                "id": "benchkit-stats-0",
+                "type": "response",
+                "data": {
+                    "tokens": {"input": 1418, "output": 16384},
+                    "assistantMessages": 1,
+                },
+            },
+            {
+                "id": "benchkit-final-0",
+                "type": "response",
+                "data": {"text": None},
+            },
+        ]
+
+        class FakeProcess:
+            stdin = io.StringIO()
+            stdout = io.StringIO("".join(json.dumps(event) + "\n" for event in events))
+            stderr = io.StringIO()
+
+            @staticmethod
+            def poll() -> int:
+                return 0
+
+        class FakeEnvironment:
+            def __init__(self, *_args: object, **_kwargs: object) -> None:
+                self.process = FakeProcess()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def start_pi(self) -> FakeProcess:
+                return self.process
+
+            @staticmethod
+            def pi_scaffold() -> dict:
+                return {}
+
+        runner = PiAgentRunner(
+            client=SimpleNamespace(),
+            image=SimpleNamespace(
+                version="0.84.1",
+                prepare=Mock(return_value="0.84.1"),
+                cleanup=Mock(),
+            ),
+        )
+
+        with patch("benchkit.pi_agent.DockerTaskEnvironment", FakeEnvironment):
+            generation = runner.generate("model", "question")
+
+        self.assertTrue(generation["length_exceeded"])
+        self.assertEqual(generation["done_reason"], "length")
+        self.assertEqual(generation["response"], "")
+        self.assertEqual(generation["thinking"], "partial reasoning")
+        self.assertEqual(generation["eval_count"], 16384)
+        self.assertEqual(generation["input_tokens"], 1418)
+        self.assertGreater(generation["response_time_s"], 0)
+
 
 class HarnessPairingTests(unittest.TestCase):
+    def test_genuine_harness_errors_are_excluded_from_score(self) -> None:
+        runner = Mock(version="test")
+        runner.generate.side_effect = [
+            {
+                "thinking": "",
+                "response": "pass",
+                "trace_status": "unavailable",
+                "tok_s": 10.0,
+                "eval_count": 1,
+                "eval_duration_ns": 100_000_000,
+                "response_time_s": 0.1,
+                "done_reason": "stop",
+                "timed_out": False,
+                "cancelled": False,
+                "pi_scaffold": {
+                    "system_prompt": "Stock Pi prompt",
+                    "system_prompt_sha256": "abc123",
+                    "system_prompt_chars": 15,
+                    "system_prompt_tokens": 3,
+                    "tools_available": ["read", "bash", "edit", "write"],
+                },
+            },
+            RuntimeError("connection refused"),
+        ]
+        engine = Engine(
+            client=SimpleNamespace(provider="openai", timeout=1.0),
+            jobs=[JobSpec("model", "quickbench", "2", harness="pi")],
+        )
+        engine._pi_runner = runner
+
+        with patch.object(
+            engine,
+            "_verify_response",
+            return_value=EvaluationResult(score=1.0),
+        ):
+            result = engine.run()[0]
+
+        self.assertEqual(result["passed"], 1)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["scored_total"], 1)
+        self.assertEqual(result["harness_errors"], 1)
+        self.assertEqual(result["score"], 100.0)
+        self.assertEqual(result["tasks"][1]["outcome"], "harness_error")
+        self.assertTrue(result["tasks"][1]["harness_error"])
+        self.assertEqual(result["pi_system_prompt"], "Stock Pi prompt")
+        self.assertEqual(
+            result["pi_tools_available"], ["read", "bash", "edit", "write"]
+        )
+
+    def test_length_exceeded_is_a_scored_failure_with_partial_metrics(self) -> None:
+        runner = Mock(version="test")
+        runner.generate.side_effect = [
+            {
+                "thinking": "",
+                "response": "pass",
+                "trace_status": "unavailable",
+                "tok_s": 10.0,
+                "eval_count": 1,
+                "eval_duration_ns": 100_000_000,
+                "response_time_s": 0.1,
+                "done_reason": "stop",
+            },
+            {
+                "thinking": "truncated reasoning",
+                "response": "",
+                "trace_status": "observed",
+                "tok_s": 27.3,
+                "eval_count": 16384,
+                "eval_duration_ns": 600_000_000_000,
+                "response_time_s": 610.0,
+                "done_reason": "length",
+                "length_exceeded": True,
+                "input_tokens": 1418,
+            },
+        ]
+        engine = Engine(
+            client=SimpleNamespace(provider="openai", timeout=1.0),
+            jobs=[JobSpec("model", "quickbench", "2", harness="pi")],
+        )
+        engine._pi_runner = runner
+
+        with patch.object(
+            engine,
+            "_verify_response",
+            return_value=EvaluationResult(score=1.0),
+        ):
+            result = engine.run()[0]
+
+        self.assertEqual(result["passed"], 1)
+        self.assertEqual(result["scored_total"], 2)
+        self.assertEqual(result["score"], 50.0)
+        self.assertEqual(result["length_exceeded"], 1)
+        self.assertEqual(result["harness_errors"], 0)
+        self.assertEqual(result["throughput_items"], 2)
+        task = result["tasks"][1]
+        self.assertEqual(task["outcome"], "length_exceeded")
+        self.assertTrue(task["length_exceeded"])
+        self.assertFalse(task["harness_error"])
+        self.assertEqual(task["output_tokens"], 16384)
+        self.assertEqual(task["thinking"], "truncated reasoning")
+        self.assertEqual(task["response_time_s"], 610.0)
+
     def test_engine_cleans_the_image_after_a_failed_pi_job(self) -> None:
         runner = Mock()
         engine = Engine(
@@ -286,7 +533,12 @@ class HarnessPairingTests(unittest.TestCase):
             **common,
             "harness": "direct",
             "tasks": [
-                {"task_id": "a", "score": 0.0, "passed": False},
+                {
+                    "task_id": "a",
+                    "score": 0.0,
+                    "passed": False,
+                    "loop_killed": True,
+                },
                 {"task_id": "b", "score": 100.0, "passed": True},
             ],
         }
@@ -304,8 +556,11 @@ class HarnessPairingTests(unittest.TestCase):
         self.assertEqual(pi["harness_paired_total"], 2)
         self.assertEqual(pi["direct_score"], 50.0)
         self.assertEqual(pi["harness_score"], 100.0)
-        self.assertEqual(pi["harness_delta_pp"], 50.0)
-        self.assertEqual(pi["harness_first_delta_pp"], 50.0)
+        self.assertEqual(pi["harness_score_delta_pp"], 50.0)
+        self.assertEqual(pi["direct_loop_kill_rate"], 50.0)
+        self.assertEqual(pi["harness_loop_kill_rate"], 0.0)
+        self.assertEqual(pi["loop_kill_delta_pp"], -50.0)
+        self.assertEqual(pi["harness_first_score_delta_pp"], 50.0)
         self.assertEqual(pi["harness_gains"], 1)
         self.assertEqual(pi["harness_regressions"], 0)
 
@@ -344,8 +599,55 @@ class HarnessPairingTests(unittest.TestCase):
 
         annotate_harness_effect([direct, pi])
 
-        self.assertEqual(pi["harness_first_delta_pp"], 100.0)
-        self.assertEqual(pi["harness_delta_pp"], 0.0)
+        self.assertEqual(pi["harness_first_score_delta_pp"], 100.0)
+        self.assertEqual(pi["harness_score_delta_pp"], 0.0)
+
+    def test_pair_metrics_drop_harness_errors_on_either_side(self) -> None:
+        common = {
+            "model": "model",
+            "benchmark": "quickbench",
+            "variant": None,
+            "slice": "3",
+        }
+        direct = {
+            **common,
+            "harness": "direct",
+            "tasks": [
+                {"task_id": "a", "score": 100.0, "passed": True},
+                {
+                    "task_id": "b",
+                    "score": 0.0,
+                    "passed": False,
+                    "timed_out": True,
+                },
+                {"task_id": "c", "score": 100.0, "passed": True},
+            ],
+        }
+        pi = {
+            **common,
+            "harness": "pi",
+            "tasks": [
+                {
+                    "task_id": "a",
+                    "score": 0.0,
+                    "passed": False,
+                    "harness_error": True,
+                },
+                {
+                    "task_id": "b",
+                    "score": 0.0,
+                    "passed": False,
+                    "length_exceeded": True,
+                },
+                {"task_id": "c", "score": 100.0, "passed": True},
+            ],
+        }
+
+        annotate_harness_effect([direct, pi])
+
+        self.assertEqual(pi["harness_paired_total"], 2)
+        self.assertEqual(pi["direct_score"], 50.0)
+        self.assertEqual(pi["harness_score"], 50.0)
 
 
 if __name__ == "__main__":

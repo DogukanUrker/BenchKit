@@ -132,6 +132,8 @@ def combine_attempts(
                 "response_time_s": round(float(gen.get("response_time_s") or 0.0), 3),
                 "model_turns": int(gen.get("model_turns") or 1),
                 "tool_calls": int(gen.get("tool_calls") or 0),
+                "done_reason": str(gen.get("done_reason") or ""),
+                "length_exceeded": bool(gen.get("length_exceeded")),
             }
         )
 

@@ -83,16 +83,16 @@ def save(
         f.write("# BenchKit Results\n\n")
         f.write(f"**Date:** {ts}\n\n")
         f.write(
-            "| Model | Harness | Benchmark | Score | Harness Δ | Repair Δ | Fixed | Delta | Regressions | Passed | Total | Parallel | Loops | Killed | Trace | Agg tok/s | Stream tok/s | Effective | Avg Resp | Wall Time |\n"
+            "| Model | Harness | Benchmark | Score | Harness score Δ | Loop-kill Δ | Repair Δ | Fixed | Delta | Regressions | Passed | Scored | Total | Fail | Loop killed | Timeout | Length exceeded | Harness error | Tools used/available | Parallel | Trace | Throughput coverage | Agg tok/s | Stream tok/s | Effective | Avg Resp | Wall Time |\n"
         )
         f.write(
-            "|-------|---------|-----------|------:|----------:|---------:|------:|------:|------------:|-------:|------:|---------:|------:|-------:|------:|----------:|-------------:|----------:|---------:|----------:|\n"
+            "|-------|---------|-----------|------:|----------------:|------------:|---------:|------:|------:|------------:|-------:|-------:|------:|-----:|------------:|--------:|----------------:|--------------:|---------------------:|---------:|------:|--------------------:|----------:|-------------:|----------:|---------:|----------:|\n"
         )
         for result in results:
             benchmark_label = result.get("benchmark_label", result["benchmark"])
             delta = result.get("score_delta_pp")
             delta_text = f"{float(delta):+.1f}pp" if delta is not None else "—"
-            harness_delta = result.get("harness_delta_pp")
+            harness_delta = result.get("harness_score_delta_pp")
             harness_delta_text = (
                 f"{float(harness_delta):+.1f}pp" if harness_delta is not None else "—"
             )
@@ -112,16 +112,32 @@ def save(
                 if result.get("perturbation")
                 else "—"
             )
+            loop_kill_delta = result.get("loop_kill_delta_pp")
+            loop_kill_delta_text = (
+                f"{float(loop_kill_delta):+.1f}pp"
+                if loop_kill_delta is not None
+                else "—"
+            )
+            tools_available = len(result.get("pi_tools_available") or [])
+            tools_text = (
+                f"{result.get('tool_calls', 0)}/{tools_available}"
+                if result.get("harness") == "pi"
+                else "—"
+            )
             f.write(
                 f"| {result['model']} | {result.get('harness_label', 'Direct')} "
                 f"| {benchmark_label} | {result['score']}% "
-                f"| {harness_delta_text} | {repair_delta_text} | {repaired_text} "
+                f"| {harness_delta_text} | {loop_kill_delta_text} "
+                f"| {repair_delta_text} | {repaired_text} "
                 f"| {delta_text} | {regressions} "
-                f"| {result['passed']} | {result['total']} "
+                f"| {result['passed']} | {result.get('scored_total', result['total'])} "
+                f"| {result['total']} | {result.get('failures', 0)} "
+                f"| {result.get('loop_kills', 0)} | {result.get('timeouts', 0)} "
+                f"| {result.get('length_exceeded', 0)} "
+                f"| {result.get('harness_errors', 0)} | {tools_text} "
                 f"| {result.get('concurrency', 1)} "
-                f"| {result.get('loop_rate', 0)}% "
-                f"| {result.get('loop_kills', 0)} "
                 f"| {result.get('trace_coverage', 0)}% "
+                f"| {result.get('throughput_coverage', 100)}% "
                 f"| {aggregate_tok_s(result):.1f} "
                 f"| {stream_tok_s(result):.1f} "
                 f"| {effective_concurrency(result):.2f}x "
@@ -130,9 +146,14 @@ def save(
             )
 
         f.write(
-            "\n**Throughput:** Agg tok/s is total output tokens divided by job "
-            "wall time. Stream tok/s uses summed server decode time. Effective "
-            "concurrency is summed request time divided by wall time.\n"
+            "\n**Throughput:** Agg tok/s is covered output tokens divided by job "
+            "covered wall time. Stream tok/s uses covered server decode time. "
+            "Effective concurrency is summed request time divided by covered wall "
+            "time. Throughput coverage is the share of request wall time represented "
+            "by completed generations; loop kills, timeouts and harness errors retain "
+            "their task token counts but are excluded when complete timing is not "
+            "available. Length-exceeded items are included when their token and "
+            "timing payload is complete.\n"
         )
 
         harness_pairs = [
@@ -141,12 +162,12 @@ def save(
             if result.get("harness_paired_total") is not None
         ]
         if harness_pairs:
-            f.write("\n## Harness effect\n\n")
+            f.write("\n## Harness score comparison\n\n")
             f.write(
-                "| Model | Benchmark | Feedback | Paired | Direct first | Pi first | Initial Δ | Direct final | Pi final | Final Δ | Gains | Regressions | Pi version |\n"
+                "| Model | Benchmark | Feedback | Paired | Direct first | Pi first | Initial score Δ | Direct final | Pi final | Final score Δ | Direct loop kill | Pi loop kill | Loop-kill Δ | Gains | Regressions | Pi version |\n"
             )
             f.write(
-                "|-------|-----------|----------|-------:|-------------:|---------:|----------:|-------------:|---------:|--------:|------:|------------:|------------|\n"
+                "|-------|-----------|----------|-------:|-------------:|---------:|----------------:|-------------:|---------:|--------------:|-----------------:|-------------:|------------:|------:|------------:|------------|\n"
             )
             for result in harness_pairs:
                 f.write(
@@ -156,10 +177,13 @@ def save(
                     f"| {result.get('harness_paired_total', 0)} "
                     f"| {result.get('direct_first_score', 0):.1f}% "
                     f"| {result.get('harness_first_score', 0):.1f}% "
-                    f"| {result.get('harness_first_delta_pp', 0):+.1f}pp "
+                    f"| {result.get('harness_first_score_delta_pp', 0):+.1f}pp "
                     f"| {result.get('direct_score', 0):.1f}% "
                     f"| {result.get('harness_score', 0):.1f}% "
-                    f"| {result.get('harness_delta_pp', 0):+.1f}pp "
+                    f"| {result.get('harness_score_delta_pp', 0):+.1f}pp "
+                    f"| {result.get('direct_loop_kill_rate', 0):.1f}% "
+                    f"| {result.get('harness_loop_kill_rate', 0):.1f}% "
+                    f"| {result.get('loop_kill_delta_pp', 0):+.1f}pp "
                     f"| {result.get('harness_gains', 0)} "
                     f"| {result.get('harness_regressions', 0)} "
                     f"| {result.get('harness_version', 'latest')} |\n"
@@ -218,6 +242,25 @@ def save(
             f.write(
                 f"## {result['model']} / {harness}{version_text} / {benchmark_label}\n\n"
             )
+            if result.get("harness") == "pi":
+                tools = ", ".join(result.get("pi_tools_available") or []) or "none"
+                f.write(
+                    "**Pi scaffold:** "
+                    f"system prompt `{result.get('pi_system_prompt_sha256', 'unavailable')}` "
+                    f"· {result.get('pi_system_prompt_tokens', 'unknown')} tokens "
+                    f"· {result.get('pi_system_prompt_chars', 0)} chars "
+                    f"· native tools available: {tools}\n\n"
+                )
+                if result.get("pi_max_output_tokens"):
+                    f.write(
+                        "**Pi output limit:** "
+                        f"{result['pi_max_output_tokens']} tokens via "
+                        f"`{result.get('pi_max_output_tokens_field', 'unknown')}`\n\n"
+                    )
+                if result.get("pi_system_prompt"):
+                    f.write("**Pi system prompt:**\n\n~~~text\n")
+                    f.write(str(result["pi_system_prompt"]).rstrip())
+                    f.write("\n~~~\n\n")
             for task in result["tasks"]:
                 task_id = task["task_id"]
                 entry = task.get("entry_point")
@@ -227,6 +270,10 @@ def save(
                     if task.get("loop_killed")
                     else "⏱️ TIMEOUT"
                     if task.get("timed_out")
+                    else "📏 LENGTH EXCEEDED"
+                    if task.get("length_exceeded")
+                    else "⚠️ HARNESS ERROR"
+                    if task.get("harness_error")
                     else "⚠️ ERROR"
                     if task.get("error")
                     else "✅ PASS"

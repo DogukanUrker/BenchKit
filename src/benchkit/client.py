@@ -1029,7 +1029,13 @@ class InferenceClient:
             "cancelled": generation_cancelled,
         }
 
-    def tokenize(self, model: str, content: str) -> list[int] | None:
+    def tokenize(
+        self,
+        model: str,
+        content: str,
+        *,
+        add_special: bool = True,
+    ) -> list[int] | None:
         """Tokenize text through a llama.cpp-compatible native endpoint.
 
         The endpoint is optional. Returning ``None`` lets performance profiling
@@ -1045,7 +1051,7 @@ class InferenceClient:
                 json={
                     "model": model,
                     "content": content,
-                    "add_special": True,
+                    "add_special": add_special,
                 },
                 timeout=min(self.timeout, 60),
             )

@@ -151,6 +151,7 @@ class _LiveStats:
     passed: int = 0
     failed: int = 0
     errors: int = 0
+    harness_errors: int = 0
     loops: int = 0
     points: float = 0.0
 
@@ -162,6 +163,7 @@ class _LiveStats:
         else:
             self.failed += 1
         self.points += record.score if record.score > 0 or not record.passed else 1.0
+        self.harness_errors += int(record.harness_error)
         self.loops += int(record.loop_state == "looping")
 
     def fields(self, *, live_looping: bool = False) -> dict[str, int]:
@@ -178,7 +180,8 @@ class _LiveStats:
 
     @property
     def score(self) -> float | None:
-        return self.points / self.completed * 100 if self.completed else None
+        scored = self.completed - self.harness_errors
+        return self.points / scored * 100 if scored else None
 
 
 def _score_text(score: float | None, width: int = 6) -> Text:
@@ -517,6 +520,8 @@ class _Reporter:
             mark, style, word = glyphs.error, "magenta", "LOOP KILLED"
         elif record.timed_out:
             mark, style, word = glyphs.error, "yellow", "TIMEOUT"
+        elif record.length_exceeded:
+            mark, style, word = glyphs.error, "yellow", "LENGTH LIMIT"
         elif record.error:
             mark, style, word = glyphs.error, "yellow", "ERROR"
         else:
@@ -574,7 +579,12 @@ class _Reporter:
             self.state.recent.append(line)
             # Anything that is not an ordinary miss is worth keeping in
             # scrollback, since the dashboard window scrolls it away.
-            if record.error or record.timed_out or record.loop_killed:
+            if (
+                record.error
+                or record.timed_out
+                or record.loop_killed
+                or record.length_exceeded
+            ):
                 self.log(line)
         if self.verbose:
             self._verbose_task(record)

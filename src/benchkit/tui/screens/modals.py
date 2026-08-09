@@ -146,6 +146,8 @@ class TaskDetailScreen(ModalScreen[None]):
             status, style = "LOOP KILLED", "b red"
         elif self.task_data.get("timed_out"):
             status, style = "TIMEOUT", "b yellow"
+        elif self.task_data.get("length_exceeded"):
+            status, style = "LENGTH EXCEEDED", "b yellow"
         elif error:
             status, style = "ERROR", "b yellow"
         elif passed:

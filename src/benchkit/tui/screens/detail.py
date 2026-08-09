@@ -79,11 +79,12 @@ class JobDetailScreen(Screen[None]):
                 f"{result.get('regressions', 0)} regression(s) · "
                 f"seed {result.get('perturbation_seed', 42)}"
             )
-        if result.get("harness_delta_pp") is not None:
+        if result.get("harness_score_delta_pp") is not None:
             score_hint += (
-                f" · harness Δ {result['harness_delta_pp']:+.1f} pp"
+                f" · harness score Δ {result['harness_score_delta_pp']:+.1f} pp"
+                f" · loop-kill Δ {result.get('loop_kill_delta_pp', 0):+.1f} pp"
                 + (
-                    f" (initial {result.get('harness_first_delta_pp', 0):+.1f})"
+                    f" (initial {result.get('harness_first_score_delta_pp', 0):+.1f})"
                     if result.get("repair_attempts")
                     else ""
                 )
@@ -226,6 +227,8 @@ def _result_cell(task: dict, dark: bool = True) -> Text:
         if task.get("loop_killed")
         else "TIMEOUT"
         if task.get("timed_out")
+        else "LENGTH"
+        if task.get("length_exceeded")
         else "ERROR"
         if error
         else "FIXED"

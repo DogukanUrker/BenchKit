@@ -46,7 +46,7 @@ def _delta_cell(result: dict) -> Text | str:
 
 
 def _harness_delta_cell(result: dict) -> Text | str:
-    value = result.get("harness_delta_pp")
+    value = result.get("harness_score_delta_pp")
     if value is None:
         return "—"
     delta = float(value)
@@ -66,7 +66,7 @@ SORT_KEYS = {
     "model": lambda r: (r["model"], r["benchmark"]),
     "benchmark": lambda r: (_benchmark_label(r), -r["score"]),
     "harness": lambda r: (r.get("harness", "direct"), -r["score"]),
-    "harness_delta": lambda r: -float(r.get("harness_delta_pp", 0)),
+    "harness_delta": lambda r: -float(r.get("harness_score_delta_pp", 0)),
     "repair_delta": lambda r: -float(r.get("repair_delta_pp", 0)),
     "score": lambda r: -r["score"],
     "delta": lambda r: -float(r.get("score_delta_pp", 0)),
@@ -103,7 +103,7 @@ class ResultsScreen(Screen[None]):
             result.get("perturbation") for result in self.results
         )
         self.has_harness_pairs = any(
-            result.get("harness_delta_pp") is not None for result in self.results
+            result.get("harness_score_delta_pp") is not None for result in self.results
         )
         self.has_repairs = any(
             result.get("repair_attempts", 0) for result in self.results
@@ -140,7 +140,7 @@ class ResultsScreen(Screen[None]):
         table.add_column("Score", key="score", width=8)
         table.add_column("", key="bar", width=14)
         if self.has_harness_pairs:
-            table.add_column("Harness Δ", key="harness_delta", width=10)
+            table.add_column("Harness score Δ", key="harness_delta", width=15)
         if self.has_repairs:
             table.add_column("Repair Δ", key="repair_delta", width=9)
             table.add_column("Fixed", key="repair_fixed", width=8)
@@ -148,8 +148,7 @@ class ResultsScreen(Screen[None]):
             table.add_column("Δ pp", key="delta", width=7)
             table.add_column("Regress", key="regressions", width=9)
         table.add_column("Passed", key="passed", width=10)
-        table.add_column("Loops", key="loops", width=8)
-        table.add_column("Errors", key="errors", width=7)
+        table.add_column("Failures F/L/T/Len/H", key="errors", width=21)
         if self.has_parallel:
             table.add_column("Parallel", key="parallel", width=8)
             table.add_column("Agg tok/s", key="aggregate", width=10)
@@ -230,13 +229,11 @@ class ResultsScreen(Screen[None]):
                 )
             cells.extend(
                 [
-                    f"{result['passed']}/{result['total']}",
-                    (
-                        f"{result.get('loop_rate', 0):.1f}%"
-                        if result.get("loops", 0)
-                        else "—"
-                    ),
-                    str(result.get("errors", 0)) if result.get("errors") else "—",
+                    f"{result['passed']}/{result.get('scored_total', result['total'])}",
+                    f"{result.get('failures', 0)}/{result.get('loop_kills', 0)}/"
+                    f"{result.get('timeouts', 0)}/"
+                    f"{result.get('length_exceeded', 0)}/"
+                    f"{result.get('harness_errors', 0)}",
                 ]
             )
             if self.has_parallel:
