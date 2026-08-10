@@ -1043,25 +1043,40 @@ class InferenceClient:
         """
         if self.provider != "openai":
             return None
-        try:
-            response = self._request(
-                "POST",
-                f"{_without_v1(self.host)}/tokenize",
-                headers=self._headers(),
-                json={
-                    "model": model,
-                    "content": content,
-                    "add_special": add_special,
-                },
-                timeout=min(self.timeout, 60),
-            )
-            tokens = response.json().get("tokens")
-            if isinstance(tokens, list) and all(
-                isinstance(token, int) for token in tokens
-            ):
-                return tokens
-        except (httpx.HTTPError, ValueError, TypeError):
-            pass
+        root = _without_v1(self.host)
+        attempts = [f"{root}/tokenize"]
+        info = self._models_by_name.get(model, {})
+        owner = str(info.get("owned_by") or "").strip().lower()
+        meta = info.get("meta") or {}
+        is_llama_swap = owner in {"llama-swap", "llamaswap"} or (
+            isinstance(meta, dict) and "llamaswap" in meta
+        )
+        if is_llama_swap:
+            upstream = f"{root}/upstream/{quote(model, safe='/')}"
+            attempts.append(f"{upstream}/tokenize")
+
+        body = {
+            "model": model,
+            "content": content,
+            "add_special": add_special,
+        }
+        for url in attempts:
+            try:
+                response = self._request(
+                    "POST",
+                    url,
+                    headers=self._headers(),
+                    json=body,
+                    timeout=min(self.timeout, 60),
+                )
+                payload = response.json()
+                tokens = payload.get("tokens") if isinstance(payload, dict) else None
+                if isinstance(tokens, list) and all(
+                    isinstance(token, int) for token in tokens
+                ):
+                    return tokens
+            except (httpx.HTTPError, ValueError, TypeError):
+                continue
         return None
 
     def profile_completion(

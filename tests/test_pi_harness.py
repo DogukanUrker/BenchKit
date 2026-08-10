@@ -386,6 +386,90 @@ class PiRpcTraceTests(unittest.TestCase):
         self.assertEqual(generation["input_tokens"], 1418)
         self.assertGreater(generation["response_time_s"], 0)
 
+    def test_scaffold_tokens_use_the_exact_captured_prompt(self) -> None:
+        events = [
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "answer"}],
+                    "usage": {"input": 10, "output": 1},
+                    "stopReason": "stop",
+                },
+            },
+            {"type": "agent_settled"},
+            {
+                "id": "benchkit-stats-0",
+                "type": "response",
+                "data": {
+                    "tokens": {"input": 10, "output": 1},
+                    "assistantMessages": 1,
+                },
+            },
+            {
+                "id": "benchkit-final-0",
+                "type": "response",
+                "data": {"text": "answer"},
+            },
+        ]
+
+        class FakeProcess:
+            stdin = io.StringIO()
+            stdout = io.StringIO("".join(json.dumps(event) + "\n" for event in events))
+            stderr = io.StringIO()
+
+            @staticmethod
+            def poll() -> int:
+                return 0
+
+        class FakeEnvironment:
+            def __init__(self, *_args: object, **_kwargs: object) -> None:
+                self.process = FakeProcess()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def start_pi(self) -> FakeProcess:
+                return self.process
+
+            @staticmethod
+            def pi_scaffold() -> dict:
+                return {
+                    "system_prompt": "Exact stock Pi scaffold",
+                    "system_prompt_sha256": "abc123",
+                    "system_prompt_chars": 23,
+                    "max_output_tokens": 16384,
+                    "max_output_tokens_field": "max_completion_tokens",
+                    "tools_available": ["read", "bash", "edit", "write"],
+                }
+
+        client = SimpleNamespace(tokenize=Mock(return_value=[1, 2, 3, 4, 5]))
+        runner = PiAgentRunner(
+            client=client,
+            image=SimpleNamespace(
+                version="0.84.1",
+                prepare=Mock(return_value="0.84.1"),
+                cleanup=Mock(),
+            ),
+        )
+
+        with patch("benchkit.pi_agent.DockerTaskEnvironment", FakeEnvironment):
+            generation = runner.generate("org/model", "question")
+
+        client.tokenize.assert_called_once_with(
+            "org/model", "Exact stock Pi scaffold", add_special=False
+        )
+        scaffold = generation["pi_scaffold"]
+        self.assertEqual(scaffold["system_prompt_tokens"], 5)
+        self.assertEqual(scaffold["system_prompt"], "Exact stock Pi scaffold")
+        self.assertEqual(scaffold["system_prompt_chars"], 23)
+        self.assertEqual(scaffold["system_prompt_sha256"], "abc123")
+        self.assertEqual(scaffold["max_output_tokens"], 16384)
+        self.assertEqual(scaffold["tools_available"], ["read", "bash", "edit", "write"])
+
 
 class HarnessPairingTests(unittest.TestCase):
     def test_genuine_harness_errors_are_excluded_from_score(self) -> None:

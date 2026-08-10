@@ -1,5 +1,8 @@
 """Report semantics regressions."""
 
+import csv
+import json
+
 from benchkit.report import save
 
 
@@ -73,12 +76,21 @@ def test_markdown_exposes_score_denominator_failure_modes_and_pi_scaffold(
 
     output = save([result])
     markdown = (output / "results.md").read_text()
+    report_json = json.loads((output / "results.json").read_text())
+    with open(output / "results.csv", newline="") as report_file:
+        report_csv = next(csv.DictReader(report_file))
+    report_html = (output / "results.html").read_text()
 
     assert "Harness score Δ" in markdown
     assert "Fail | Loop killed | Timeout | Length exceeded | Harness error" in markdown
     assert "| 1 | 2 | 3 | 0 | 0 | 0 | 1 | 1 | 0/4 |" in markdown
     assert "native tools available: read, bash, edit, write" in markdown
+    assert "abc123` · 5 tokens · 23 chars" in markdown
     assert "Exact stock Pi scaffold" in markdown
     assert "16384 tokens via `max_completion_tokens`" in markdown
     assert "LENGTH EXCEEDED" in markdown
     assert "HARNESS ERROR" in markdown
+    assert report_json[0]["pi_system_prompt_tokens"] == 5
+    assert report_csv["pi_system_prompt_tokens"] == "5"
+    assert '"pi_system_prompt_tokens": 5' in report_html
+    assert "Pi scaffold · ${number(row.pi_system_prompt_tokens)} tokens" in report_html

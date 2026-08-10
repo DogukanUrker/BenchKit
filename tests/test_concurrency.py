@@ -292,6 +292,84 @@ class CapacityDiscoveryTests(unittest.TestCase):
             self.assertEqual(client.max_parallel_requests("model"), 3)
 
 
+class TokenizerRoutingTests(unittest.TestCase):
+    def test_llama_swap_tokenize_falls_back_to_selected_model_upstream(self) -> None:
+        from benchkit.client import InferenceClient
+
+        client = InferenceClient("http://swap/v1", "openai")
+        client.provider = "openai"
+        client._models_by_name = {
+            "org/model y": {
+                "owned_by": "llama-swap",
+                "meta": {"llamaswap": {"type": "model"}},
+            }
+        }
+        tokenized = Mock()
+        tokenized.json.return_value = {"tokens": [11, 22, 33]}
+
+        with patch.object(
+            client,
+            "_request",
+            side_effect=[
+                _http_error(404, "http://swap/tokenize"),
+                tokenized,
+            ],
+        ) as request:
+            tokens = client.tokenize("org/model y", "exact scaffold", add_special=False)
+
+        self.assertEqual(tokens, [11, 22, 33])
+        self.assertEqual(
+            [call.args[1] for call in request.call_args_list],
+            [
+                "http://swap/tokenize",
+                "http://swap/upstream/org/model%20y/tokenize",
+            ],
+        )
+        self.assertEqual(
+            request.call_args.kwargs["json"],
+            {
+                "model": "org/model y",
+                "content": "exact scaffold",
+                "add_special": False,
+            },
+        )
+
+    def test_missing_llama_swap_tokenizer_endpoints_return_none(self) -> None:
+        from benchkit.client import InferenceClient
+
+        client = InferenceClient("http://swap", "openai")
+        client.provider = "openai"
+        client._models_by_name = {"model": {"owned_by": "llama-swap", "meta": {}}}
+
+        with patch.object(
+            client,
+            "_request",
+            side_effect=[
+                _http_error(404, "http://swap/tokenize"),
+                _http_error(404, "http://swap/upstream/model/tokenize"),
+            ],
+        ) as request:
+            tokens = client.tokenize("model", "scaffold", add_special=False)
+
+        self.assertIsNone(tokens)
+        self.assertEqual(request.call_count, 2)
+
+    def test_generic_openai_tokenizer_keeps_using_the_root_route(self) -> None:
+        from benchkit.client import InferenceClient
+
+        client = InferenceClient("http://generic/v1", "openai")
+        client.provider = "openai"
+        client._models_by_name = {"model": {"owned_by": "provider"}}
+        response = Mock()
+        response.json.return_value = {"tokens": [1, 2]}
+
+        with patch.object(client, "_request", return_value=response) as request:
+            self.assertEqual(client.tokenize("model", "text"), [1, 2])
+
+        request.assert_called_once()
+        self.assertEqual(request.call_args.args[1], "http://generic/tokenize")
+
+
 class ThroughputMetricTests(unittest.TestCase):
     def test_parallel_metrics_separate_stream_speed_from_total_throughput(
         self,
