@@ -25,6 +25,7 @@ from benchkit.engine import (
     slice_task_count,
     task_count,
 )
+from benchkit.history import serve_history
 from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
 from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
 from benchkit.perf_report import save_profile
@@ -44,8 +45,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=("perf",),
-        help="Run a dedicated model performance profile",
+        choices=("perf", "history"),
+        help="Run a performance profile or browse historical results",
     )
     parser.add_argument(
         "perf_model",
@@ -156,6 +157,28 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--config-note",
         default="",
         help="Perf: optional hardware or server configuration note",
+    )
+    parser.add_argument(
+        "--results-dir",
+        action="append",
+        default=None,
+        metavar="PATH",
+        help=(
+            "History: results directory to scan; repeat to combine archives "
+            "(default: ./results)"
+        ),
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="History: print the local URL without opening a browser",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        metavar="PORT",
+        help="History: local dashboard port; 0 chooses a free port (default: 0)",
     )
     return parser.parse_args(argv)
 
@@ -709,6 +732,17 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "perf":
         _perf(args)
+        return
+
+    if args.command == "history":
+        if not 0 <= args.port <= 65535:
+            console.print("[red]--port must be between 0 and 65535.[/red]")
+            sys.exit(1)
+        serve_history(
+            args.results_dir or ["results"],
+            port=args.port,
+            open_browser=not args.no_open,
+        )
         return
 
     if args.headless:

@@ -477,6 +477,32 @@ pass/fail composition, total runtime and a score matrix — followed by every
 task's prompt, available reasoning, response and loop signals. No server or
 external web assets are required.
 
+### Browse historical runs
+
+Open a local dashboard over every completed report in `results/`:
+
+```bash
+uv run benchkit history
+```
+
+The history view keeps every recorded score as a separate run and exposes its
+harness, slice, loop signals, repairs, timeouts, throughput and available
+task-level diagnostics. It also reads dedicated `perf.json` profiles. Reports
+from older BenchKit versions remain usable; fields that did not exist yet are
+shown as not captured rather than zero.
+
+Repeat `--results-dir` to combine archives without copying them into one folder:
+
+```bash
+uv run benchkit history \
+  --results-dir ./results \
+  --results-dir ~/benchkit-hub-results
+```
+
+The dashboard binds only to localhost. Use `--no-open` to print its URL without
+launching a browser, or `--port PORT` to choose a fixed local port. Reloading the
+page rescans the selected directories.
+
 ## Adding a benchmark
 
 Create a file in `src/benchkit/benchmarks/` that implements three methods:
