@@ -361,11 +361,13 @@ The per-task generation timeout defaults to 300 seconds and can be changed with
 Transient API failures — `502`/`503`/`504` from a gateway or model swapper,
 `429` rate limits from a busy `llama-server` or a hosted API, and dropped
 connections — are retried automatically with exponential backoff (3 attempts,
-0.5s doubling up to 8s, plus jitter). When the server answers with a
+or 6 for DNS/connect failures, with 0.5s doubling up to 8s, plus jitter). When
+the server answers with a
 `Retry-After` header (seconds or an HTTP-date) that wait is honoured instead of
 the computed backoff, capped at 60s. Tune it with `BENCHKIT_RETRIES`,
+`BENCHKIT_CONNECT_RETRIES`,
 `BENCHKIT_RETRY_BASE_DELAY`, `BENCHKIT_RETRY_MAX_DELAY`, and
-`BENCHKIT_RETRY_MAX_WAIT`; set `BENCHKIT_RETRIES=1` to disable retries.
+`BENCHKIT_RETRY_MAX_WAIT`; set both retry counts to `1` to disable retries.
 Client errors such as `400`/`404`/`422` are never retried, and a generation that
 already streamed tokens is reported instead of replayed so partial output is
 never duplicated.

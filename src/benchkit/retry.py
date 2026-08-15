@@ -91,6 +91,10 @@ class RetryPolicy:
     """Exponential backoff with jitter, capped at ``max_delay``."""
 
     attempts: int = 3
+    # DNS failures and refused/reset connections often outlive the short retry
+    # window used for an overloaded server response. Give failures that happen
+    # before a connection is established a separate, longer budget.
+    connect_attempts: int = 6
     base_delay: float = 0.5
     max_delay: float = 8.0
     jitter: float = 0.25
@@ -102,6 +106,7 @@ class RetryPolicy:
     def from_env(cls) -> RetryPolicy:
         return cls(
             attempts=max(1, _env_int("BENCHKIT_RETRIES", 3)),
+            connect_attempts=max(1, _env_int("BENCHKIT_CONNECT_RETRIES", 6)),
             base_delay=max(0.0, _env_float("BENCHKIT_RETRY_BASE_DELAY", 0.5)),
             max_delay=max(0.0, _env_float("BENCHKIT_RETRY_MAX_DELAY", 8.0)),
             max_retry_after=max(0.0, _env_float("BENCHKIT_RETRY_MAX_WAIT", 60.0)),
@@ -136,11 +141,17 @@ def run_with_retries(
     on_retry: RetryNotice | None = None,
 ) -> T:
     """Call ``operation`` until it succeeds or its failure stops being transient."""
-    for attempt in range(1, policy.attempts + 1):
+    max_attempts = max(policy.attempts, policy.connect_attempts)
+    for attempt in range(1, max_attempts + 1):
         try:
             return operation()
         except Exception as exc:  # re-raised below when not retryable
-            if attempt >= policy.attempts or not retryable(exc):
+            attempt_limit = (
+                policy.connect_attempts
+                if isinstance(exc, httpx.ConnectError)
+                else policy.attempts
+            )
+            if attempt >= attempt_limit or not retryable(exc):
                 raise
             if cancel_event is not None and cancel_event.is_set():
                 raise

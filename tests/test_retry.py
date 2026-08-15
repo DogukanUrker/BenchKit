@@ -31,6 +31,33 @@ def test_rate_limit_is_retryable():
     assert not is_retryable(_status_error(422))
 
 
+def test_dns_connect_error_uses_longer_retry_budget():
+    policy = RetryPolicy(attempts=3, connect_attempts=6, base_delay=0.0, jitter=0.0)
+    calls = {"n": 0}
+
+    def operation() -> str:
+        calls["n"] += 1
+        if calls["n"] < 6:
+            raise httpx.ConnectError("[Errno -3] Temporary failure in name resolution")
+        return "ok"
+
+    assert run_with_retries(policy, operation) == "ok"
+    assert calls["n"] == 6
+
+
+def test_non_connect_transport_error_keeps_standard_retry_budget():
+    policy = RetryPolicy(attempts=3, connect_attempts=6, base_delay=0.0, jitter=0.0)
+    calls = {"n": 0}
+
+    def operation() -> str:
+        calls["n"] += 1
+        raise httpx.ReadError("connection dropped")
+
+    with pytest.raises(httpx.ReadError):
+        run_with_retries(policy, operation)
+    assert calls["n"] == 3
+
+
 def test_retry_after_seconds_reads_delta():
     assert retry_after_seconds(_status_error(429, {"Retry-After": "2.5"})) == 2.5
 
