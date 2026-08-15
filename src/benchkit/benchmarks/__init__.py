@@ -1,5 +1,6 @@
 """Available benchmarks."""
 
+from benchkit.benchmarks.aider_polyglot import AiderPolyglot
 from benchkit.benchmarks.arc import ARC
 from benchkit.benchmarks.boolq import BoolQ
 from benchkit.benchmarks.evalplus import HumanEvalPlus, MBPPPlus
@@ -20,6 +21,7 @@ from benchkit.benchmarks.winogrande import WinoGrande
 
 REGISTRY: dict[str, type] = {
     # Generative suites first, then the multiple-choice ones.
+    "aider-polyglot": AiderPolyglot,
     "quickbench": QuickBench,
     "humaneval": HumanEval,
     "humaneval-plus": HumanEvalPlus,
@@ -51,6 +53,7 @@ REGISTRY: dict[str, type] = {
 # near the 25% floor, so it separates them just as poorly. Filtering out
 # `low-signal` leaves the benchmarks that actually spread this size band.
 TAGS: dict[str, tuple[str, ...]] = {
+    "aider-polyglot": ("code", "generative", "agent", "polyglot"),
     "quickbench": ("code", "generative", "smoke"),
     "humaneval": ("code", "generative"),
     "humaneval-plus": ("code", "generative"),

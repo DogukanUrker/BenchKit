@@ -214,6 +214,32 @@ BENCHKIT_SANDBOX_CPUS=2
 BENCHKIT_SANDBOX_PIDS=256
 ```
 
+### Aider Polyglot with the Pi agent
+
+`aider-polyglot` runs the complete pinned set of 225 Aider Polyglot exercises
+across C++, Go, Java, JavaScript, Python and Rust. It requires `--harness pi`:
+
+```bash
+uv run benchkit --headless --models MODEL \
+  --benchmarks aider-polyglot:5 --harness pi --verbose
+```
+
+An unsliced run expands into one reported job per language. The first run builds
+the reusable `benchkit-pi-aider-polyglot:latest` image with every toolchain,
+language dependency and the task corpus pinned at commit
+`7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f`; later runs reuse Docker's cached
+layers. Every exercise still receives a new network-isolated task container.
+Pi reads the bundled instructions and tests, edits the starter project, and can
+run tests repeatedly through its native tools. After Pi settles, BenchKit runs
+the language's test command independently and records its output, exit code and
+workspace patch alongside tokens, turns and the complete native tool trace.
+
+This condition uses Aider's task corpus with the stock Pi agent protocol. It
+does not measure Aider's whole-file or diff response formats and is therefore
+not directly comparable to the official Aider edit-format leaderboard. Use
+`--repair-attempts 1` to give Pi one additional turn containing the failed test
+output in the same workspace.
+
 `--demo` remains direct-only because it has no real inference endpoint for Pi's
 multi-turn requests. Pi's total input/output tokens, assistant turns, native
 tool count, tool names/arguments/errors, and resolved Pi version are retained

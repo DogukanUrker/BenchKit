@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from numbers import Real
 
 from benchkit.benchmarks.base import Task
@@ -15,6 +15,7 @@ class EvaluationResult:
     score: float
     feedback: str = ""
     error: str = ""
+    details: dict = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -42,6 +43,7 @@ def evaluate_response(bench: object, task: Task, response: str) -> EvaluationRes
             score=_score(raw.score),
             feedback=raw.feedback.strip(),
             error=raw.error.strip(),
+            details=dict(raw.details),
         )
     else:
         result = EvaluationResult(score=_score(raw))
@@ -58,7 +60,11 @@ def evaluate_response(bench: object, task: Task, response: str) -> EvaluationRes
             "The verifier marked the previous answer incorrect. Re-check the "
             "reasoning and replace it with a corrected answer."
         )
-    return EvaluationResult(score=result.score, feedback=feedback)
+    return EvaluationResult(
+        score=result.score,
+        feedback=feedback,
+        details=dict(result.details),
+    )
 
 
 def repair_message(feedback: str, attempt: int, total: int) -> str:
@@ -159,6 +165,7 @@ def combine_attempts(
         evaluation_score=final_evaluation.score,
         evaluation_feedback=final_evaluation.feedback,
         evaluation_error=final_evaluation.error,
+        evaluation_details=dict(final_evaluation.details),
         repaired=(not first_evaluation.passed and final_evaluation.passed),
         trace_status=(
             "observed"

@@ -151,6 +151,9 @@ class PiAgentRunner:
         cancel_event: threading.Event | None = None,
         verifier: Callable[[str], EvaluationResult] | None = None,
         repair_attempts: int = 0,
+        workspace_setup: Callable[[DockerTaskEnvironment], None] | None = None,
+        workspace_verifier: Callable[[DockerTaskEnvironment], EvaluationResult]
+        | None = None,
     ) -> dict:
         self.prepare()
         started = time.perf_counter()
@@ -171,6 +174,8 @@ class PiAgentRunner:
 
         try:
             with DockerTaskEnvironment(self.client, model, self.image) as environment:
+                if workspace_setup is not None:
+                    workspace_setup(environment)
                 process = environment.start_pi()
                 assert process.stdin is not None
                 assert process.stdout is not None
@@ -373,14 +378,19 @@ class PiAgentRunner:
                     }
                     generation_results.append(generation)
 
-                    if verifier is None:
+                    active_verifier = (
+                        (lambda _response: workspace_verifier(environment))
+                        if workspace_verifier is not None
+                        else verifier
+                    )
+                    if active_verifier is None:
                         break
                     terminal = cancelled or timed_out or length_exceeded
                     verification_started = time.perf_counter()
                     evaluation = (
                         EvaluationResult(score=0.0)
                         if terminal
-                        else verifier(trace.final_response)
+                        else active_verifier(trace.final_response)
                     )
                     verification_time += time.perf_counter() - verification_started
                     attempts.append((generation, evaluation))

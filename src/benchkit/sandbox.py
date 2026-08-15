@@ -16,7 +16,9 @@ from urllib.parse import urlsplit, urlunsplit
 from benchkit.client import InferenceClient, _openai_base
 
 PI_IMAGE = "benchkit-pi:latest"
+AIDER_PI_IMAGE = "benchkit-pi-aider-polyglot:latest"
 PI_PACKAGE = "@earendil-works/pi-coding-agent@latest"
+AIDER_POLYGLOT_COMMIT = "7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f"
 _PROXY_SOURCE = Path(__file__).with_name("_pi_proxy.py")
 
 PI_DOCKERFILE = f"""\
@@ -34,6 +36,59 @@ RUN mkdir -p /workspace /home/node/.pi/agent \\
 USER node
 WORKDIR /workspace
 ENV PI_OFFLINE=1 PI_TELEMETRY=0
+CMD ["sleep", "infinity"]
+"""
+
+AIDER_PI_DOCKERFILE = f"""\
+FROM node:24-bookworm
+
+RUN apt-get update \\
+    && apt-get install -y --no-install-recommends \\
+       bash ca-certificates cmake curl g++ git openjdk-17-jdk \\
+       python3 ripgrep unzip \\
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install -g {PI_PACKAGE}
+ARG TARGETARCH
+RUN curl -fsSL "https://go.dev/dl/go1.21.5.linux-${{TARGETARCH}}.tar.gz" \\
+      -o /tmp/go.tar.gz \\
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \\
+    && rm /tmp/go.tar.gz
+ENV PATH="/usr/local/go/bin:$PATH" RUSTUP_HOME="/opt/rustup" \\
+    CARGO_HOME="/opt/cargo-home"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \\
+    | sh -s -- -y --no-modify-path
+RUN mkdir -p /opt/javascript-deps \\
+    && cd /opt/javascript-deps \\
+    && npm init -y \\
+    && npm install jest @babel/core@7.25.2 \\
+       @exercism/babel-preset-javascript@0.2.1 \\
+       @exercism/eslint-config-javascript@0.6.0 @types/jest@29.5.12 \\
+       @types/node@20.12.12 babel-jest@29.6.4 core-js@3.37.1 eslint@8.49.0
+RUN curl -fsSL https://services.gradle.org/distributions/gradle-8.10.2-bin.zip \\
+      -o /tmp/gradle.zip \\
+    && unzip -q /tmp/gradle.zip -d /opt \\
+    && rm /tmp/gradle.zip
+ENV PATH="/opt/gradle-8.10.2/bin:/opt/javascript-deps/node_modules/.bin:/opt/cargo-home/bin:$PATH" \\
+    NODE_PATH="/opt/javascript-deps/node_modules" \\
+    GOPATH="/opt/go" GRADLE_USER_HOME="/opt/gradle-cache"
+RUN git clone https://github.com/Aider-AI/polyglot-benchmark.git \\
+      /opt/aider-polyglot \\
+    && git -C /opt/aider-polyglot checkout {AIDER_POLYGLOT_COMMIT} \\
+    && find /opt/aider-polyglot -name Cargo.toml -execdir cargo fetch \\; \\
+    && find /opt/aider-polyglot/go/exercises/practice -name go.mod \\
+       -execdir go mod download \\; \\
+    && find /opt/aider-polyglot/java/exercises/practice -name build.gradle \\
+       -execdir gradle dependencies --no-daemon \\;
+
+COPY inference_proxy.py /opt/benchkit/inference_proxy.py
+RUN mkdir -p /workspace /home/node/.pi/agent \\
+    && chown -R node:node /workspace /home/node/.pi /opt/cargo-home \\
+       /opt/rustup /opt/go /opt/gradle-cache \\
+    && chmod -R a+rX /opt/aider-polyglot
+
+USER node
+WORKDIR /workspace
+ENV PI_OFFLINE=1 PI_TELEMETRY=0 CARGO_NET_OFFLINE=true
 CMD ["sleep", "infinity"]
 """
 
@@ -100,6 +155,9 @@ class LatestPiImage:
 
     docker: str = field(default_factory=_docker_binary)
     image: str = PI_IMAGE
+    dockerfile: str = PI_DOCKERFILE
+    no_cache: bool = True
+    transient: bool = True
     version: str = ""
     _ready: bool = field(default=False, init=False, repr=False)
     _lock: threading.Lock = field(
@@ -118,23 +176,16 @@ class LatestPiImage:
             )
             with tempfile.TemporaryDirectory(prefix="benchkit-pi-build-") as directory:
                 context = Path(directory)
-                (context / "Dockerfile").write_text(PI_DOCKERFILE, encoding="utf-8")
+                (context / "Dockerfile").write_text(self.dockerfile, encoding="utf-8")
                 (context / "inference_proxy.py").write_text(
                     _PROXY_SOURCE.read_text(encoding="utf-8"),
                     encoding="utf-8",
                 )
-                _run(
-                    [
-                        self.docker,
-                        "build",
-                        "--pull",
-                        "--no-cache",
-                        "--tag",
-                        self.image,
-                        str(context),
-                    ],
-                    timeout=900,
-                )
+                command = [self.docker, "build", "--pull"]
+                if self.no_cache:
+                    command.append("--no-cache")
+                command.extend(["--tag", self.image, str(context)])
+                _run(command, timeout=1800)
             result = _run(
                 [self.docker, "run", "--rm", self.image, "pi", "--version"],
                 timeout=30,
@@ -145,7 +196,7 @@ class LatestPiImage:
 
     def cleanup(self) -> None:
         """Remove the transient Pi image after its benchmark run."""
-        if not self._ready:
+        if not self._ready or not self.transient:
             return
         _run(
             [self.docker, "image", "rm", "--force", self.image],
@@ -153,6 +204,16 @@ class LatestPiImage:
         )
         self._ready = False
         self.version = ""
+
+
+def aider_pi_image() -> LatestPiImage:
+    """Return an image definition containing every Aider Polyglot toolchain."""
+    return LatestPiImage(
+        image=AIDER_PI_IMAGE,
+        dockerfile=AIDER_PI_DOCKERFILE,
+        no_cache=False,
+        transient=False,
+    )
 
 
 @dataclass
