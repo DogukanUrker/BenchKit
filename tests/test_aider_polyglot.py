@@ -226,7 +226,9 @@ class AiderPolyglotTests(unittest.TestCase):
         )
 
     def test_aider_sandbox_allows_the_bank_account_thread_suite(self) -> None:
-        self.assertEqual(AiderPolyglot().pi_image().pids_limit, 2048)
+        image = AiderPolyglot().pi_image()
+        self.assertEqual(image.pids_limit, 2048)
+        self.assertTrue(image.transient)
 
     def test_java_verifier_uses_utf8_for_unicode_exercises(self) -> None:
         self.assertEqual(

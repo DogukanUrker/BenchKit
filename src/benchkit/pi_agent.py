@@ -9,13 +9,18 @@ import queue
 import subprocess
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from benchkit.client import GenerationUpdate, InferenceClient
 from benchkit.evaluation import EvaluationResult, combine_attempts, repair_message
-from benchkit.sandbox import DockerTaskEnvironment, LatestPiImage
+from benchkit.sandbox import (
+    DockerTaskEnvironment,
+    LatestPiImage,
+    cleanup_owned_resources,
+)
 
 
 def _message_blocks(message: object, kind: str, field: str) -> str:
@@ -132,6 +137,7 @@ class PiAgentRunner:
 
     client: InferenceClient
     image: LatestPiImage = field(default_factory=LatestPiImage)
+    owner_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     @property
     def version(self) -> str:
@@ -141,7 +147,10 @@ class PiAgentRunner:
         return self.image.prepare()
 
     def cleanup(self) -> None:
-        self.image.cleanup()
+        try:
+            cleanup_owned_resources(self.image.docker, self.owner_id)
+        finally:
+            self.image.cleanup()
 
     def generate(
         self,
@@ -173,7 +182,12 @@ class PiAgentRunner:
         verification_time = 0.0
 
         try:
-            with DockerTaskEnvironment(self.client, model, self.image) as environment:
+            with DockerTaskEnvironment(
+                self.client,
+                model,
+                self.image,
+                owner_id=self.owner_id,
+            ) as environment:
                 if workspace_setup is not None:
                     workspace_setup(environment)
                 process = environment.start_pi()

@@ -160,6 +160,33 @@ def _docker_upstream(url: str) -> str:
     return urlunsplit((parsed.scheme, replacement, parsed.path, parsed.query, ""))
 
 
+def cleanup_owned_resources(docker: str, owner_id: str) -> None:
+    """Remove every container and network belonging to one Pi runner."""
+    label = f"benchkit.owner={owner_id}"
+    containers = _run(
+        [docker, "ps", "--all", "--quiet", "--filter", f"label={label}"],
+        timeout=30,
+        check=False,
+    ).stdout.split()
+    if containers:
+        _run(
+            [docker, "rm", "--force", *containers],
+            timeout=30,
+            check=False,
+        )
+    networks = _run(
+        [docker, "network", "ls", "--quiet", "--filter", f"label={label}"],
+        timeout=30,
+        check=False,
+    ).stdout.split()
+    if networks:
+        _run(
+            [docker, "network", "rm", *networks],
+            timeout=30,
+            check=False,
+        )
+
+
 @dataclass
 class LatestPiImage:
     """Build the stock Pi image once per run, resolving npm's latest release."""
@@ -224,7 +251,7 @@ def aider_pi_image() -> LatestPiImage:
         image=AIDER_PI_IMAGE,
         dockerfile=AIDER_PI_DOCKERFILE,
         no_cache=False,
-        transient=False,
+        transient=True,
         # cpp/bank-account creates 1,000 simultaneous std::threads. Linux
         # accounts threads against Docker's PID cgroup, so the generic Pi
         # sandbox limit of 256 makes the official test suite impossible.
@@ -240,6 +267,7 @@ class DockerTaskEnvironment:
     model: str
     image: LatestPiImage
     docker: str = field(default_factory=_docker_binary)
+    owner_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     workdir: str = "/workspace"
     task_name: str = field(default_factory=lambda: f"benchkit-{uuid.uuid4().hex[:12]}")
     network_name: str = field(init=False)
@@ -265,13 +293,29 @@ class DockerTaskEnvironment:
         if not self.image.version:
             raise SandboxError("Pi image must be prepared before starting a task")
         try:
-            _run([self.docker, "network", "create", "--internal", self.network_name])
+            resource_labels = [
+                "--label",
+                "benchkit.managed=true",
+                "--label",
+                f"benchkit.owner={self.owner_id}",
+            ]
+            _run(
+                [
+                    self.docker,
+                    "network",
+                    "create",
+                    "--internal",
+                    *resource_labels,
+                    self.network_name,
+                ]
+            )
             proxy_args = [
                 self.docker,
                 "run",
                 "--detach",
                 "--name",
                 self.proxy_name,
+                *resource_labels,
                 "--network",
                 self.network_name,
                 "--network-alias",
@@ -311,6 +355,7 @@ class DockerTaskEnvironment:
                     "--detach",
                     "--name",
                     self.container_name,
+                    *resource_labels,
                     "--network",
                     self.network_name,
                     "--cap-drop",
