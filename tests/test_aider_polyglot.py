@@ -215,6 +215,9 @@ class AiderPolyglotTests(unittest.TestCase):
             AIDER_PI_DOCKERFILE,
         )
 
+    def test_aider_sandbox_allows_the_bank_account_thread_suite(self) -> None:
+        self.assertEqual(AiderPolyglot().pi_image().pids_limit, 2048)
+
 
 if __name__ == "__main__":
     unittest.main()

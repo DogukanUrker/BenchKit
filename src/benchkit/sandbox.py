@@ -158,6 +158,7 @@ class LatestPiImage:
     dockerfile: str = PI_DOCKERFILE
     no_cache: bool = True
     transient: bool = True
+    pids_limit: int = 256
     version: str = ""
     _ready: bool = field(default=False, init=False, repr=False)
     _lock: threading.Lock = field(
@@ -213,6 +214,10 @@ def aider_pi_image() -> LatestPiImage:
         dockerfile=AIDER_PI_DOCKERFILE,
         no_cache=False,
         transient=False,
+        # cpp/bank-account creates 1,000 simultaneous std::threads. Linux
+        # accounts threads against Docker's PID cgroup, so the generic Pi
+        # sandbox limit of 256 makes the official test suite impossible.
+        pids_limit=2048,
     )
 
 
@@ -287,7 +292,7 @@ class DockerTaskEnvironment:
 
             memory = os.environ.get("BENCHKIT_SANDBOX_MEMORY", "2g")
             cpus = os.environ.get("BENCHKIT_SANDBOX_CPUS", "2")
-            pids = os.environ.get("BENCHKIT_SANDBOX_PIDS", "256")
+            pids = os.environ.get("BENCHKIT_SANDBOX_PIDS", str(self.image.pids_limit))
             _run(
                 [
                     self.docker,

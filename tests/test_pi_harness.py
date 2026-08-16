@@ -27,6 +27,9 @@ from benchkit.sandbox import (
 
 
 class LatestPiImageTests(unittest.TestCase):
+    def test_generic_pi_sandbox_keeps_the_restricted_pid_limit(self) -> None:
+        self.assertEqual(LatestPiImage(docker="docker").pids_limit, 256)
+
     def test_package_deliberately_tracks_npm_latest(self) -> None:
         self.assertEqual(PI_PACKAGE, "@earendil-works/pi-coding-agent@latest")
         self.assertIn(f"npm install -g {PI_PACKAGE}", PI_DOCKERFILE)
