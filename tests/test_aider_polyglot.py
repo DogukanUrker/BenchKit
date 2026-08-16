@@ -11,6 +11,7 @@ from unittest.mock import patch
 from benchkit.benchmarks.aider_polyglot import (
     _EXPECTED_COUNTS,
     _LANGUAGES,
+    _TEST_COMMANDS,
     AiderPolyglot,
 )
 from benchkit.benchmarks.base import Task
@@ -20,10 +21,13 @@ from benchkit.sandbox import AIDER_PI_DOCKERFILE, AIDER_POLYGLOT_COMMIT
 class FakeEnvironment:
     def __init__(self, results: list[subprocess.CompletedProcess[str]] | None = None):
         self.commands: list[list[str]] = []
+        self.calls: list[tuple[list[str], dict]] = []
+        self.workdir = "/workspace"
         self.results = list(results or [])
 
-    def exec(self, command, **_kwargs):
+    def exec(self, command, **kwargs):
         self.commands.append(command)
+        self.calls.append((command, kwargs))
         if self.results:
             return self.results.pop(0)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -64,16 +68,40 @@ class AiderPolyglotTests(unittest.TestCase):
 
         AiderPolyglot().prepare_workspace(task, environment)
 
+        self.assertEqual(environment.workdir, "/workspace/book-store")
+        self.assertEqual(environment.commands[0], ["mkdir", "-p", environment.workdir])
         self.assertEqual(
-            environment.commands[0],
+            environment.commands[1],
             [
                 "cp",
                 "-a",
                 "/opt/aider-polyglot/go/exercises/practice/book-store/.",
-                "/workspace/",
+                "/workspace/book-store/",
             ],
         )
-        self.assertIn(["git", "-C", "/workspace", "add", "."], environment.commands)
+        self.assertIn(
+            ["git", "-C", "/workspace/book-store", "add", "."],
+            environment.commands,
+        )
+
+    def test_cpp_workspace_preserves_exercise_name_for_cmake(self) -> None:
+        environment = FakeEnvironment()
+        task = Task("cpp/allergies", "", {"language": "cpp", "exercise": "allergies"})
+
+        benchmark = AiderPolyglot()
+        benchmark.prepare_workspace(task, environment)
+        environment.results = [
+            subprocess.CompletedProcess(["git", "diff"], 0, "", ""),
+            subprocess.CompletedProcess(["git", "diff"], 0, "", ""),
+            subprocess.CompletedProcess(["cmake"], 0, "tests passed", ""),
+        ]
+        result = benchmark.verify_workspace(task, environment)
+
+        self.assertTrue(result.passed)
+        self.assertEqual(environment.workdir, "/workspace/allergies")
+        test_command, test_options = environment.calls[-1]
+        self.assertEqual(test_command, _TEST_COMMANDS["cpp"])
+        self.assertEqual(test_options["workdir"], "/workspace/allergies")
 
     def test_workspace_verifier_returns_tests_and_patch(self) -> None:
         environment = FakeEnvironment(
@@ -114,7 +142,7 @@ class AiderPolyglotTests(unittest.TestCase):
             [
                 "git",
                 "-C",
-                "/workspace",
+                "/workspace/pov",
                 "checkout",
                 "HEAD",
                 "--",

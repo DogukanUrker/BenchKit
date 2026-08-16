@@ -224,6 +224,7 @@ class DockerTaskEnvironment:
     model: str
     image: LatestPiImage
     docker: str = field(default_factory=_docker_binary)
+    workdir: str = "/workspace"
     task_name: str = field(default_factory=lambda: f"benchkit-{uuid.uuid4().hex[:12]}")
     network_name: str = field(init=False)
     proxy_name: str = field(init=False)
@@ -357,7 +358,7 @@ class DockerTaskEnvironment:
                 "exec",
                 "--interactive",
                 "--workdir",
-                "/workspace",
+                self.workdir,
                 self.container_name,
                 "pi",
                 "--mode",
@@ -400,12 +401,19 @@ class DockerTaskEnvironment:
         self,
         command: list[str],
         *,
+        workdir: str | None = None,
         input_text: str | None = None,
         timeout: float | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         return _run(
-            [self.docker, "exec", self.container_name, *command],
+            [
+                self.docker,
+                "exec",
+                *(["--workdir", workdir] if workdir is not None else []),
+                self.container_name,
+                *command,
+            ],
             input_text=input_text,
             timeout=timeout,
             check=check,

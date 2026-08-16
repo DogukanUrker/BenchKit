@@ -145,38 +145,42 @@ class AiderPolyglot:
         environment: DockerTaskEnvironment,
     ) -> None:
         language, exercise = self._coordinates(task)
+        workspace = f"/workspace/{exercise}"
+        environment.workdir = workspace
         source = f"/opt/aider-polyglot/{language}/exercises/practice/{exercise}/."
-        environment.exec(["cp", "-a", source, "/workspace/"])
-        environment.exec(["git", "init", "-q", "/workspace"])
-        environment.exec(["git", "-C", "/workspace", "config", "user.name", "BenchKit"])
+        environment.exec(["mkdir", "-p", workspace])
+        environment.exec(["cp", "-a", source, f"{workspace}/"])
+        environment.exec(["git", "init", "-q", workspace])
+        environment.exec(["git", "-C", workspace, "config", "user.name", "BenchKit"])
         environment.exec(
             [
                 "git",
                 "-C",
-                "/workspace",
+                workspace,
                 "config",
                 "user.email",
                 "benchkit@localhost",
             ]
         )
-        environment.exec(["git", "-C", "/workspace", "add", "."])
-        environment.exec(["git", "-C", "/workspace", "commit", "-q", "-m", "baseline"])
+        environment.exec(["git", "-C", workspace, "add", "."])
+        environment.exec(["git", "-C", workspace, "commit", "-q", "-m", "baseline"])
 
     def verify_workspace(
         self,
         task: Task,
         environment: DockerTaskEnvironment,
     ) -> EvaluationResult:
-        language, _exercise = self._coordinates(task)
+        language, exercise = self._coordinates(task)
+        workspace = f"/workspace/{exercise}"
         command = _TEST_COMMANDS[language]
         try:
             patch = environment.exec(
-                ["git", "-C", "/workspace", "diff", "--no-ext-diff"],
+                ["git", "-C", workspace, "diff", "--no-ext-diff"],
                 timeout=30,
                 check=False,
             ).stdout
             changed = environment.exec(
-                ["git", "-C", "/workspace", "diff", "--name-only"],
+                ["git", "-C", workspace, "diff", "--name-only"],
                 timeout=30,
                 check=False,
             ).stdout.splitlines()
@@ -188,7 +192,7 @@ class AiderPolyglot:
                     [
                         "git",
                         "-C",
-                        "/workspace",
+                        workspace,
                         "checkout",
                         "HEAD",
                         "--",
@@ -196,7 +200,12 @@ class AiderPolyglot:
                     ],
                     timeout=30,
                 )
-            completed = environment.exec(command, timeout=180, check=False)
+            completed = environment.exec(
+                command,
+                workdir=workspace,
+                timeout=180,
+                check=False,
+            )
         except Exception as exc:
             return EvaluationResult(
                 0.0,

@@ -112,6 +112,40 @@ class LatestPiImageTests(unittest.TestCase):
         self.assertNotIn("--tools", command)
         self.assertNotIn("--system-prompt", command)
 
+    def test_pi_and_commands_can_run_in_task_specific_workdir(self) -> None:
+        client = SimpleNamespace(host="http://local", api_key=None, provider="openai")
+        image = LatestPiImage(docker="docker", version="test")
+        environment = DockerTaskEnvironment(
+            client,
+            "model",
+            image,
+            docker="docker",
+            workdir="/workspace/allergies",
+        )
+        environment._started = True
+
+        with (
+            patch("benchkit.sandbox.subprocess.Popen") as popen,
+            patch("benchkit.sandbox._run") as run,
+        ):
+            environment.start_pi()
+            environment.exec(["cmake", "-S", "."], workdir=environment.workdir)
+
+        self.assertEqual(
+            popen.call_args.args[0][3:5],
+            ["--workdir", "/workspace/allergies"],
+        )
+        self.assertEqual(
+            run.call_args.args[0][:5],
+            [
+                "docker",
+                "exec",
+                "--workdir",
+                "/workspace/allergies",
+                environment.container_name,
+            ],
+        )
+
     def test_task_container_has_no_host_mount_or_direct_egress(self) -> None:
         client = SimpleNamespace(
             host="http://localhost:11434",
