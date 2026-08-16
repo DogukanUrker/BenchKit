@@ -81,7 +81,7 @@ RUN git clone https://github.com/Aider-AI/polyglot-benchmark.git \\
        -execdir gradle dependencies --no-daemon \\;
 
 COPY inference_proxy.py /opt/benchkit/inference_proxy.py
-RUN mkdir -p /workspace /home/node/.pi/agent \\
+RUN mkdir -p /workspace /home/node/.pi/agent /opt/go \\
     && chown -R node:node /workspace /home/node/.pi /opt/cargo-home \\
        /opt/rustup /opt/go /opt/gradle-cache \\
     && chmod -R a+rX /opt/aider-polyglot

@@ -134,6 +134,10 @@ class AiderPolyglotTests(unittest.TestCase):
         ):
             self.assertIn(executable, AIDER_PI_DOCKERFILE)
         self.assertEqual(tuple(_EXPECTED_COUNTS), _LANGUAGES)
+        self.assertIn(
+            "mkdir -p /workspace /home/node/.pi/agent /opt/go",
+            AIDER_PI_DOCKERFILE,
+        )
 
 
 if __name__ == "__main__":
