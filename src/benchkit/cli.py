@@ -73,7 +73,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--benchmarks",
         default="",
-        help="Headless: comma separated benchmarks, e.g. humaneval:20,gsm8k:-50",
+        help=(
+            "Headless: comma separated benchmarks, e.g. humaneval:20,gsm8k:-50 "
+            "or aider-polyglot:cpp:5"
+        ),
     )
     parser.add_argument(
         "--tag",
@@ -298,20 +301,49 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
         explicit = {part.partition(":")[0].strip() for part in requested}
         requested += [key for key in tagged if key not in explicit]
 
-    specs: list[tuple[str, str | None]] = []
+    specs: list[tuple[str, str | None, str | None]] = []
     for part in requested:
         part = part.strip()
         if not part:
             continue
-        key, _, slice_spec = part.partition(":")
-        key = key.strip()
-        slice_spec = slice_spec.strip() or None
+        pieces = [piece.strip() for piece in part.split(":")]
+        key = pieces[0]
         if key not in REGISTRY:
             console.print(f"[red]Unknown benchmark:[/red] {key}")
             console.print(f"[dim]Available: {', '.join(REGISTRY)}[/dim]")
             sys.exit(1)
+        if len(pieces) > 3 or any(not piece for piece in pieces[1:]):
+            console.print(f"[red]Invalid benchmark selector:[/red] {part}")
+            sys.exit(1)
+
+        bench = REGISTRY[key]()
+        resolve_variant = getattr(bench, "resolve_variant", None)
+        variant = None
+        slice_spec = None
+        if len(pieces) == 2:
+            candidate = (
+                resolve_variant(pieces[1]) if callable(resolve_variant) else None
+            )
+            if candidate is not None:
+                variant = str(candidate)
+            else:
+                slice_spec = pieces[1]
+        elif len(pieces) == 3:
+            candidate = (
+                resolve_variant(pieces[1]) if callable(resolve_variant) else None
+            )
+            if candidate is None:
+                console.print(f"[red]Unknown {key} variant:[/red] {pieces[1]}")
+                sys.exit(1)
+            variant = str(candidate)
+            slice_spec = pieces[2]
         try:
-            total = slice_task_count(key)
+            variant_count = getattr(bench, "variant_task_count", None)
+            total = (
+                int(variant_count(variant))
+                if variant is not None and callable(variant_count)
+                else slice_task_count(key)
+            )
         except Exception as exc:
             console.print(f"[red]Could not load {key}:[/red] {exc}")
             sys.exit(1)
@@ -320,7 +352,7 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
         except SliceError as exc:
             console.print(f"[red]{exc}[/red]")
             sys.exit(1)
-        specs.append((key, slice_spec))
+        specs.append((key, slice_spec, variant))
 
     if not specs:
         console.print("[red]--benchmarks or --tag is required with --headless[/red]")
@@ -328,7 +360,9 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
 
     if args.perturbation:
         unsupported = [
-            key for key, _ in specs if args.perturbation not in perturbations_for(key)
+            key
+            for key, _, _ in specs
+            if args.perturbation not in perturbations_for(key)
         ]
         if unsupported:
             unique = list(dict.fromkeys(unsupported))
@@ -345,13 +379,14 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
     harnesses = ("direct", "pi") if args.harness == "both" else (args.harness,)
     jobs: list[JobSpec] = []
     for model in models:
-        for key, spec in specs:
+        for key, spec, variant in specs:
             for harness in harnesses:
                 jobs.append(
                     JobSpec(
                         model,
                         key,
                         spec,
+                        variant=variant,
                         harness=harness,
                         repair_attempts=args.repair_attempts,
                     )
@@ -362,6 +397,7 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
                             model,
                             key,
                             spec,
+                            variant=variant,
                             perturbation=args.perturbation,
                             perturbation_seed=args.perturbation_seed,
                             harness=harness,

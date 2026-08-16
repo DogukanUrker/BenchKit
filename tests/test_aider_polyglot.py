@@ -15,6 +15,7 @@ from benchkit.benchmarks.aider_polyglot import (
     AiderPolyglot,
 )
 from benchkit.benchmarks.base import Task
+from benchkit.cli import _headless_jobs, _parse_args
 from benchkit.sandbox import AIDER_PI_DOCKERFILE, AIDER_POLYGLOT_COMMIT
 
 
@@ -34,6 +35,46 @@ class FakeEnvironment:
 
 
 class AiderPolyglotTests(unittest.TestCase):
+    def test_cli_selects_language_alias_and_optional_slice(self) -> None:
+        args = _parse_args(
+            [
+                "--headless",
+                "--models",
+                "model",
+                "--benchmarks",
+                "aider-polyglot:js:5",
+                "--harness",
+                "pi",
+            ]
+        )
+
+        jobs = _headless_jobs(args, ["model"])
+
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0].variant, "javascript")
+        self.assertEqual(jobs[0].slice_spec, "5")
+
+    def test_cli_accepts_every_short_language_selector(self) -> None:
+        args = _parse_args(
+            [
+                "--headless",
+                "--models",
+                "model",
+                "--benchmarks",
+                "aider-polyglot:cpp,aider-polyglot:go,aider-polyglot:java,"
+                "aider-polyglot:js,aider-polyglot:py,aider-polyglot:rs",
+                "--harness",
+                "pi",
+            ]
+        )
+
+        jobs = _headless_jobs(args, ["model"])
+
+        self.assertEqual(
+            [job.variant for job in jobs],
+            ["cpp", "go", "java", "javascript", "python", "rust"],
+        )
+
     def test_loads_all_225_pinned_tasks_and_language_variants(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

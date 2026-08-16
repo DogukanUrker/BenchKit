@@ -19,6 +19,18 @@ from benchkit.sandbox import (
 
 _REPOSITORY = "https://github.com/Aider-AI/polyglot-benchmark.git"
 _LANGUAGES = ("cpp", "go", "java", "javascript", "python", "rust")
+_LANGUAGE_ALIASES = {
+    "cpp": "cpp",
+    "c++": "cpp",
+    "go": "go",
+    "java": "java",
+    "js": "javascript",
+    "javascript": "javascript",
+    "py": "python",
+    "python": "python",
+    "rs": "rust",
+    "rust": "rust",
+}
 _EXPECTED_COUNTS = {
     "cpp": 26,
     "go": 39,
@@ -98,6 +110,13 @@ class AiderPolyglot:
 
     def variants(self, _client: object, _model: str) -> tuple[str, ...]:
         return _LANGUAGES
+
+    def resolve_variant(self, selector: str) -> str | None:
+        """Resolve a CLI language selector to its canonical variant name."""
+        return _LANGUAGE_ALIASES.get(selector.strip().lower())
+
+    def variant_task_count(self, variant: str) -> int:
+        return _EXPECTED_COUNTS[variant]
 
     def load_tasks(self) -> list[Task]:
         root = _dataset_root()
