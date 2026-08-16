@@ -219,6 +219,11 @@ class AiderPolyglotTests(unittest.TestCase):
             "gradle test --test-dry-run --no-daemon",
             AIDER_PI_DOCKERFILE,
         )
+        self.assertIn("-name Cargo-example.toml", AIDER_PI_DOCKERFILE)
+        self.assertIn(
+            'cargo fetch --manifest-path "$cache_dir/Cargo.toml"',
+            AIDER_PI_DOCKERFILE,
+        )
 
     def test_aider_sandbox_allows_the_bank_account_thread_suite(self) -> None:
         self.assertEqual(AiderPolyglot().pi_image().pids_limit, 2048)

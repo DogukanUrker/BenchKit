@@ -76,6 +76,16 @@ RUN git clone https://github.com/Aider-AI/polyglot-benchmark.git \\
       /opt/aider-polyglot \\
     && git -C /opt/aider-polyglot checkout {AIDER_POLYGLOT_COMMIT} \\
     && find /opt/aider-polyglot -name Cargo.toml -execdir cargo fetch \\; \\
+    && find /opt/aider-polyglot/rust/exercises/practice \\
+       -name Cargo-example.toml -exec sh -c '\
+         for manifest do \
+           cache_dir=$(mktemp -d); \
+           mkdir "$cache_dir/src"; \
+           cp "$manifest" "$cache_dir/Cargo.toml"; \
+           cp "$(dirname "$manifest")/example.rs" "$cache_dir/src/lib.rs"; \
+           cargo fetch --manifest-path "$cache_dir/Cargo.toml"; \
+           rm -rf "$cache_dir"; \
+         done' sh {{}} + \\
     && find /opt/aider-polyglot/go/exercises/practice -name go.mod \\
        -execdir go mod download \\; \\
     && find /opt/aider-polyglot/java/exercises/practice -name build.gradle \\
