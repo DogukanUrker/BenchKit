@@ -441,7 +441,7 @@ class PiAgentRunner:
         last_generation = generation_results[-1]
         last_generation["response_time_s"] += overhead
 
-        if verifier is None:
+        if verifier is None and workspace_verifier is None:
             output_tokens = int(last_generation.get("eval_count") or 0)
             generation_ns = int(last_generation.get("eval_duration_ns") or 0)
             last_generation["tok_s"] = (

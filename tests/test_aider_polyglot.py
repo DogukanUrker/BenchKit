@@ -103,6 +103,13 @@ class AiderPolyglotTests(unittest.TestCase):
         self.assertEqual(test_command, _TEST_COMMANDS["cpp"])
         self.assertEqual(test_options["workdir"], "/workspace/allergies")
 
+    def test_cpp_verifier_runs_all_tests_with_an_in_container_deadline(self) -> None:
+        command = _TEST_COMMANDS["cpp"]
+
+        self.assertEqual(command[:2], ["bash", "-lc"])
+        self.assertIn("timeout --signal=KILL 120s", command[2])
+        self.assertIn("-DEXERCISM_RUN_ALL_TESTS=ON", command[2])
+
     def test_workspace_verifier_returns_tests_and_patch(self) -> None:
         environment = FakeEnvironment(
             [

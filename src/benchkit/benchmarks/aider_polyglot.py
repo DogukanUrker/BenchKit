@@ -31,7 +31,9 @@ _TEST_COMMANDS = {
     "cpp": [
         "bash",
         "-lc",
-        "cmake -S . -B build && cmake --build build --parallel 2",
+        "timeout --signal=KILL 120s bash -lc "
+        "'cmake -S . -B build -DEXERCISM_RUN_ALL_TESTS=ON "
+        "&& cmake --build build --parallel 2'",
     ],
     "go": ["go", "test", "./..."],
     "java": ["gradle", "test", "--offline", "--no-daemon"],
@@ -129,8 +131,10 @@ class AiderPolyglot:
             f"Solve the Aider Polyglot {language} exercise `{exercise}` in the "
             "current workspace. Read `.docs/instructions.md` and any appendices, "
             "inspect the starter code and tests, then edit the implementation so "
-            "all tests pass. Use the terminal to run the tests yourself. Do not "
-            "change the tests or exercise instructions."
+            "all tests pass. Use the terminal to run the tests yourself, but bound "
+            "every test command with `timeout --signal=KILL 120s` so a broken "
+            "implementation cannot deadlock the agent. Do not change the tests or "
+            "exercise instructions."
         )
 
     def evaluate(self, _task: Task, _response: str) -> bool:
