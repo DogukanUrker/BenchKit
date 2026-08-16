@@ -216,7 +216,7 @@ class AiderPolyglotTests(unittest.TestCase):
             AIDER_PI_DOCKERFILE,
         )
         self.assertIn(
-            "gradle testClasses --no-daemon",
+            "gradle test --test-dry-run --no-daemon",
             AIDER_PI_DOCKERFILE,
         )
 

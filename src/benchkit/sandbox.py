@@ -79,7 +79,7 @@ RUN git clone https://github.com/Aider-AI/polyglot-benchmark.git \\
     && find /opt/aider-polyglot/go/exercises/practice -name go.mod \\
        -execdir go mod download \\; \\
     && find /opt/aider-polyglot/java/exercises/practice -name build.gradle \\
-       -execdir gradle testClasses --no-daemon \\;
+       -execdir gradle test --test-dry-run --no-daemon \\;
 
 COPY inference_proxy.py /opt/benchkit/inference_proxy.py
 RUN mkdir -p /workspace /home/node/.pi/agent /opt/go \\
