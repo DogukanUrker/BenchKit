@@ -9,13 +9,18 @@ import queue
 import subprocess
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from benchkit.client import GenerationUpdate, InferenceClient
 from benchkit.evaluation import EvaluationResult, combine_attempts, repair_message
-from benchkit.sandbox import DockerTaskEnvironment, LatestPiImage
+from benchkit.sandbox import (
+    DockerTaskEnvironment,
+    LatestPiImage,
+    cleanup_owned_resources,
+)
 
 
 def _message_blocks(message: object, kind: str, field: str) -> str:
@@ -132,6 +137,7 @@ class PiAgentRunner:
 
     client: InferenceClient
     image: LatestPiImage = field(default_factory=LatestPiImage)
+    owner_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     @property
     def version(self) -> str:
@@ -141,7 +147,10 @@ class PiAgentRunner:
         return self.image.prepare()
 
     def cleanup(self) -> None:
-        self.image.cleanup()
+        try:
+            cleanup_owned_resources(self.image.docker, self.owner_id)
+        finally:
+            self.image.cleanup()
 
     def generate(
         self,
@@ -151,6 +160,9 @@ class PiAgentRunner:
         cancel_event: threading.Event | None = None,
         verifier: Callable[[str], EvaluationResult] | None = None,
         repair_attempts: int = 0,
+        workspace_setup: Callable[[DockerTaskEnvironment], None] | None = None,
+        workspace_verifier: Callable[[DockerTaskEnvironment], EvaluationResult]
+        | None = None,
     ) -> dict:
         self.prepare()
         started = time.perf_counter()
@@ -170,7 +182,14 @@ class PiAgentRunner:
         verification_time = 0.0
 
         try:
-            with DockerTaskEnvironment(self.client, model, self.image) as environment:
+            with DockerTaskEnvironment(
+                self.client,
+                model,
+                self.image,
+                owner_id=self.owner_id,
+            ) as environment:
+                if workspace_setup is not None:
+                    workspace_setup(environment)
                 process = environment.start_pi()
                 assert process.stdin is not None
                 assert process.stdout is not None
@@ -373,14 +392,19 @@ class PiAgentRunner:
                     }
                     generation_results.append(generation)
 
-                    if verifier is None:
+                    active_verifier = (
+                        (lambda _response: workspace_verifier(environment))
+                        if workspace_verifier is not None
+                        else verifier
+                    )
+                    if active_verifier is None:
                         break
                     terminal = cancelled or timed_out or length_exceeded
                     verification_started = time.perf_counter()
                     evaluation = (
                         EvaluationResult(score=0.0)
                         if terminal
-                        else verifier(trace.final_response)
+                        else active_verifier(trace.final_response)
                     )
                     verification_time += time.perf_counter() - verification_started
                     attempts.append((generation, evaluation))
@@ -431,7 +455,7 @@ class PiAgentRunner:
         last_generation = generation_results[-1]
         last_generation["response_time_s"] += overhead
 
-        if verifier is None:
+        if verifier is None and workspace_verifier is None:
             output_tokens = int(last_generation.get("eval_count") or 0)
             generation_ns = int(last_generation.get("eval_duration_ns") or 0)
             last_generation["tok_s"] = (

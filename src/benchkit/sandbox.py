@@ -16,7 +16,9 @@ from urllib.parse import urlsplit, urlunsplit
 from benchkit.client import InferenceClient, _openai_base
 
 PI_IMAGE = "benchkit-pi:latest"
+AIDER_PI_IMAGE = "benchkit-pi-aider-polyglot:latest"
 PI_PACKAGE = "@earendil-works/pi-coding-agent@latest"
+AIDER_POLYGLOT_COMMIT = "7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f"
 _PROXY_SOURCE = Path(__file__).with_name("_pi_proxy.py")
 
 PI_DOCKERFILE = f"""\
@@ -34,6 +36,70 @@ RUN mkdir -p /workspace /home/node/.pi/agent \\
 USER node
 WORKDIR /workspace
 ENV PI_OFFLINE=1 PI_TELEMETRY=0
+CMD ["sleep", "infinity"]
+"""
+
+AIDER_PI_DOCKERFILE = f"""\
+FROM node:24-bookworm
+
+RUN apt-get update \\
+    && apt-get install -y --no-install-recommends \\
+       bash ca-certificates cmake curl g++ git libboost-date-time-dev \\
+       openjdk-17-jdk \\
+       python3 ripgrep unzip \\
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install -g {PI_PACKAGE}
+ARG TARGETARCH
+RUN curl -fsSL "https://go.dev/dl/go1.21.5.linux-${{TARGETARCH}}.tar.gz" \\
+      -o /tmp/go.tar.gz \\
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \\
+    && rm /tmp/go.tar.gz
+ENV PATH="/usr/local/go/bin:$PATH" RUSTUP_HOME="/opt/rustup" \\
+    CARGO_HOME="/opt/cargo-home"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \\
+    | sh -s -- -y --no-modify-path
+RUN mkdir -p /opt/javascript-deps \\
+    && cd /opt/javascript-deps \\
+    && npm init -y \\
+    && npm install jest @babel/core@7.25.2 \\
+       @exercism/babel-preset-javascript@0.2.1 \\
+       @exercism/eslint-config-javascript@0.6.0 @types/jest@29.5.12 \\
+       @types/node@20.12.12 babel-jest@29.6.4 core-js@3.37.1 eslint@8.49.0
+RUN curl -fsSL https://services.gradle.org/distributions/gradle-8.10.2-bin.zip \\
+      -o /tmp/gradle.zip \\
+    && unzip -q /tmp/gradle.zip -d /opt \\
+    && rm /tmp/gradle.zip
+ENV PATH="/opt/gradle-8.10.2/bin:/opt/javascript-deps/node_modules/.bin:/opt/cargo-home/bin:$PATH" \\
+    NODE_PATH="/opt/javascript-deps/node_modules" \\
+    GOPATH="/opt/go" GRADLE_USER_HOME="/opt/gradle-cache"
+RUN git clone https://github.com/Aider-AI/polyglot-benchmark.git \\
+      /opt/aider-polyglot \\
+    && git -C /opt/aider-polyglot checkout {AIDER_POLYGLOT_COMMIT} \\
+    && find /opt/aider-polyglot -name Cargo.toml -execdir cargo fetch \\; \\
+    && find /opt/aider-polyglot/rust/exercises/practice \\
+       -name Cargo-example.toml -exec sh -c '\
+         for manifest do \
+           cache_dir=$(mktemp -d); \
+           mkdir "$cache_dir/src"; \
+           cp "$manifest" "$cache_dir/Cargo.toml"; \
+           cp "$(dirname "$manifest")/example.rs" "$cache_dir/src/lib.rs"; \
+           cargo fetch --manifest-path "$cache_dir/Cargo.toml"; \
+           rm -rf "$cache_dir"; \
+         done' sh {{}} + \\
+    && find /opt/aider-polyglot/go/exercises/practice -name go.mod \\
+       -execdir go mod download \\; \\
+    && find /opt/aider-polyglot/java/exercises/practice -name build.gradle \\
+       -execdir gradle test --test-dry-run --no-daemon \\;
+
+COPY inference_proxy.py /opt/benchkit/inference_proxy.py
+RUN mkdir -p /workspace /home/node/.pi/agent /opt/go \\
+    && chown -R node:node /workspace /home/node/.pi /opt/cargo-home \\
+       /opt/rustup /opt/go /opt/gradle-cache \\
+    && chmod -R a+rX /opt/aider-polyglot
+
+USER node
+WORKDIR /workspace
+ENV PI_OFFLINE=1 PI_TELEMETRY=0 CARGO_NET_OFFLINE=true
 CMD ["sleep", "infinity"]
 """
 
@@ -94,12 +160,43 @@ def _docker_upstream(url: str) -> str:
     return urlunsplit((parsed.scheme, replacement, parsed.path, parsed.query, ""))
 
 
+def cleanup_owned_resources(docker: str, owner_id: str) -> None:
+    """Remove every container and network belonging to one Pi runner."""
+    label = f"benchkit.owner={owner_id}"
+    containers = _run(
+        [docker, "ps", "--all", "--quiet", "--filter", f"label={label}"],
+        timeout=30,
+        check=False,
+    ).stdout.split()
+    if containers:
+        _run(
+            [docker, "rm", "--force", *containers],
+            timeout=30,
+            check=False,
+        )
+    networks = _run(
+        [docker, "network", "ls", "--quiet", "--filter", f"label={label}"],
+        timeout=30,
+        check=False,
+    ).stdout.split()
+    if networks:
+        _run(
+            [docker, "network", "rm", *networks],
+            timeout=30,
+            check=False,
+        )
+
+
 @dataclass
 class LatestPiImage:
     """Build the stock Pi image once per run, resolving npm's latest release."""
 
     docker: str = field(default_factory=_docker_binary)
     image: str = PI_IMAGE
+    dockerfile: str = PI_DOCKERFILE
+    no_cache: bool = True
+    transient: bool = True
+    pids_limit: int = 256
     version: str = ""
     _ready: bool = field(default=False, init=False, repr=False)
     _lock: threading.Lock = field(
@@ -118,23 +215,16 @@ class LatestPiImage:
             )
             with tempfile.TemporaryDirectory(prefix="benchkit-pi-build-") as directory:
                 context = Path(directory)
-                (context / "Dockerfile").write_text(PI_DOCKERFILE, encoding="utf-8")
+                (context / "Dockerfile").write_text(self.dockerfile, encoding="utf-8")
                 (context / "inference_proxy.py").write_text(
                     _PROXY_SOURCE.read_text(encoding="utf-8"),
                     encoding="utf-8",
                 )
-                _run(
-                    [
-                        self.docker,
-                        "build",
-                        "--pull",
-                        "--no-cache",
-                        "--tag",
-                        self.image,
-                        str(context),
-                    ],
-                    timeout=900,
-                )
+                command = [self.docker, "build", "--pull"]
+                if self.no_cache:
+                    command.append("--no-cache")
+                command.extend(["--tag", self.image, str(context)])
+                _run(command, timeout=1800)
             result = _run(
                 [self.docker, "run", "--rm", self.image, "pi", "--version"],
                 timeout=30,
@@ -145,7 +235,7 @@ class LatestPiImage:
 
     def cleanup(self) -> None:
         """Remove the transient Pi image after its benchmark run."""
-        if not self._ready:
+        if not self._ready or not self.transient:
             return
         _run(
             [self.docker, "image", "rm", "--force", self.image],
@@ -153,6 +243,20 @@ class LatestPiImage:
         )
         self._ready = False
         self.version = ""
+
+
+def aider_pi_image() -> LatestPiImage:
+    """Return an image definition containing every Aider Polyglot toolchain."""
+    return LatestPiImage(
+        image=AIDER_PI_IMAGE,
+        dockerfile=AIDER_PI_DOCKERFILE,
+        no_cache=False,
+        transient=True,
+        # cpp/bank-account creates 1,000 simultaneous std::threads. Linux
+        # accounts threads against Docker's PID cgroup, so the generic Pi
+        # sandbox limit of 256 makes the official test suite impossible.
+        pids_limit=2048,
+    )
 
 
 @dataclass
@@ -163,6 +267,8 @@ class DockerTaskEnvironment:
     model: str
     image: LatestPiImage
     docker: str = field(default_factory=_docker_binary)
+    owner_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    workdir: str = "/workspace"
     task_name: str = field(default_factory=lambda: f"benchkit-{uuid.uuid4().hex[:12]}")
     network_name: str = field(init=False)
     proxy_name: str = field(init=False)
@@ -187,13 +293,29 @@ class DockerTaskEnvironment:
         if not self.image.version:
             raise SandboxError("Pi image must be prepared before starting a task")
         try:
-            _run([self.docker, "network", "create", "--internal", self.network_name])
+            resource_labels = [
+                "--label",
+                "benchkit.managed=true",
+                "--label",
+                f"benchkit.owner={self.owner_id}",
+            ]
+            _run(
+                [
+                    self.docker,
+                    "network",
+                    "create",
+                    "--internal",
+                    *resource_labels,
+                    self.network_name,
+                ]
+            )
             proxy_args = [
                 self.docker,
                 "run",
                 "--detach",
                 "--name",
                 self.proxy_name,
+                *resource_labels,
                 "--network",
                 self.network_name,
                 "--network-alias",
@@ -225,7 +347,7 @@ class DockerTaskEnvironment:
 
             memory = os.environ.get("BENCHKIT_SANDBOX_MEMORY", "2g")
             cpus = os.environ.get("BENCHKIT_SANDBOX_CPUS", "2")
-            pids = os.environ.get("BENCHKIT_SANDBOX_PIDS", "256")
+            pids = os.environ.get("BENCHKIT_SANDBOX_PIDS", str(self.image.pids_limit))
             _run(
                 [
                     self.docker,
@@ -233,6 +355,7 @@ class DockerTaskEnvironment:
                     "--detach",
                     "--name",
                     self.container_name,
+                    *resource_labels,
                     "--network",
                     self.network_name,
                     "--cap-drop",
@@ -296,7 +419,7 @@ class DockerTaskEnvironment:
                 "exec",
                 "--interactive",
                 "--workdir",
-                "/workspace",
+                self.workdir,
                 self.container_name,
                 "pi",
                 "--mode",
@@ -339,12 +462,19 @@ class DockerTaskEnvironment:
         self,
         command: list[str],
         *,
+        workdir: str | None = None,
         input_text: str | None = None,
         timeout: float | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         return _run(
-            [self.docker, "exec", self.container_name, *command],
+            [
+                self.docker,
+                "exec",
+                *(["--workdir", workdir] if workdir is not None else []),
+                self.container_name,
+                *command,
+            ],
             input_text=input_text,
             timeout=timeout,
             check=check,

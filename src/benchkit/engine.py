@@ -197,7 +197,10 @@ class JobSpec:
         return f"{label} + repair" if self.repair_attempts else label
 
     def planned_total(self) -> int:
-        total = slice_task_count(self.benchmark)
+        if self.variant is not None:
+            total = len(tasks_for_job(self))
+        else:
+            total = slice_task_count(self.benchmark)
         try:
             start, end = parse_slice(self.slice_spec, total)
         except SliceError:
@@ -272,6 +275,7 @@ class TaskRecord:
     repair_feedback: list[str] = field(default_factory=list)
     first_attempt_score: float = 0.0
     repaired: bool = False
+    workspace: dict = field(default_factory=dict)
 
     @property
     def label(self) -> str:
@@ -736,6 +740,9 @@ class Engine:
         default_factory=threading.Lock, init=False, repr=False
     )
     _pi_runner: PiAgentRunner | None = field(default=None, init=False, repr=False)
+    _workspace_pi_runners: dict[str, PiAgentRunner] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self.loop_kill_percent = min(100.0, max(0.0, self.loop_kill_percent))
@@ -749,7 +756,15 @@ class Engine:
             with self._emit_lock:
                 self.sink(event)
 
-    def _pi(self) -> PiAgentRunner:
+    def _pi(self, bench: object | None = None) -> PiAgentRunner:
+        image_factory = getattr(bench, "pi_image", None)
+        if callable(image_factory):
+            key = str(getattr(bench, "name", type(bench).__name__))
+            if key not in self._workspace_pi_runners:
+                self._workspace_pi_runners[key] = PiAgentRunner(
+                    self.client, image=image_factory()
+                )
+            return self._workspace_pi_runners[key]
         if self._pi_runner is None:
             if getattr(self.client, "provider", None) == "demo":
                 raise RuntimeError("Pi harness is unavailable in demo mode")
@@ -791,6 +806,9 @@ class Engine:
             if self._pi_runner is not None:
                 with contextlib.suppress(Exception):
                     self._pi_runner.cleanup()
+            for runner in self._workspace_pi_runners.values():
+                with contextlib.suppress(Exception):
+                    runner.cleanup()
 
         annotate_robustness(results)
         annotate_harness_effect(results)
@@ -833,6 +851,10 @@ class Engine:
         self, index: int, job: JobSpec, overall_total: int
     ) -> tuple[dict | None, bool]:
         bench = benchmark(job.benchmark)
+        if getattr(bench, "workspace_task", False) and job.harness != "pi":
+            raise ValueError(
+                f"{job.benchmark} requires the Pi harness; use --harness pi"
+            )
         all_tasks = tasks_for_job(job)
 
         slice_spec = job.slice_spec
@@ -867,7 +889,7 @@ class Engine:
                     activity="preparing latest Pi sandbox image",
                 )
             )
-            self._pi().prepare()
+            self._pi(bench).prepare()
 
         if not tasks:
             return None, False
@@ -1097,9 +1119,14 @@ class Engine:
             "harness": job.harness,
             "harness_label": job.harness_label,
             "harness_version": (
-                self._pi_runner.version
-                if job.harness == "pi" and self._pi_runner
-                else ""
+                next(
+                    (
+                        record.harness_version
+                        for record in records
+                        if record.harness_version
+                    ),
+                    "",
+                )
             ),
             "score": round(score, 1),
             "passed": passed,
@@ -1219,6 +1246,7 @@ class Engine:
                     "repair_feedback": record.repair_feedback,
                     "first_attempt_score": round(record.first_attempt_score * 100, 1),
                     "repaired": record.repaired,
+                    "workspace": record.workspace or None,
                 }
                 for record in records
             ],
@@ -1471,7 +1499,18 @@ class Engine:
 
         request_started = time.perf_counter()
         try:
-            generator = self._pi() if job.harness == "pi" else self.client
+            generator = self._pi(bench) if job.harness == "pi" else self.client
+            workspace = bool(getattr(bench, "workspace_task", False))
+            workspace_setup = None
+            workspace_verifier = None
+            if workspace:
+
+                def workspace_setup(environment):
+                    return bench.prepare_workspace(task, environment)
+
+                def workspace_verifier(environment):
+                    return bench.verify_workspace(task, environment)
+
             if job.repair_attempts:
 
                 def verifier(response: str) -> EvaluationResult:
@@ -1485,6 +1524,8 @@ class Engine:
                         cancel_event=self.controls.cancel_event,
                         verifier=verifier,
                         repair_attempts=job.repair_attempts,
+                        workspace_setup=workspace_setup,
+                        workspace_verifier=workspace_verifier,
                     )
                 else:
                     gen = self._generate_direct_with_repairs(
@@ -1499,6 +1540,14 @@ class Engine:
                     prompt,
                     on_progress=on_progress,
                     cancel_event=self.controls.cancel_event,
+                    **(
+                        {
+                            "workspace_setup": workspace_setup,
+                            "workspace_verifier": workspace_verifier,
+                        }
+                        if workspace
+                        else {}
+                    ),
                 )
         except _GenerationCancelled:
             gen = dict(ERROR_GENERATION)
@@ -1804,6 +1853,7 @@ class Engine:
             repair_feedback=list(gen.get("repair_feedback") or []),
             first_attempt_score=float(gen.get("first_attempt_score", evaluation_score)),
             repaired=bool(gen.get("repaired")),
+            workspace=dict(gen.get("evaluation_details") or {}),
         )
         return _TaskOutcome(
             record=record,

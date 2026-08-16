@@ -23,10 +23,14 @@ from benchkit.sandbox import (
     DockerTaskEnvironment,
     LatestPiImage,
     _docker_upstream,
+    cleanup_owned_resources,
 )
 
 
 class LatestPiImageTests(unittest.TestCase):
+    def test_generic_pi_sandbox_keeps_the_restricted_pid_limit(self) -> None:
+        self.assertEqual(LatestPiImage(docker="docker").pids_limit, 256)
+
     def test_package_deliberately_tracks_npm_latest(self) -> None:
         self.assertEqual(PI_PACKAGE, "@earendil-works/pi-coding-agent@latest")
         self.assertIn(f"npm install -g {PI_PACKAGE}", PI_DOCKERFILE)
@@ -76,6 +80,41 @@ class LatestPiImageTests(unittest.TestCase):
         self.assertFalse(image._ready)
         self.assertEqual(image.version, "")
 
+    def test_cleanup_removes_every_resource_owned_by_the_runner(self) -> None:
+        responses = [
+            SimpleNamespace(stdout="container-one\ncontainer-two\n"),
+            SimpleNamespace(stdout=""),
+            SimpleNamespace(stdout="network-one\n"),
+            SimpleNamespace(stdout=""),
+        ]
+        with patch("benchkit.sandbox._run", side_effect=responses) as run:
+            cleanup_owned_resources("docker", "owner-123")
+
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(
+            commands,
+            [
+                [
+                    "docker",
+                    "ps",
+                    "--all",
+                    "--quiet",
+                    "--filter",
+                    "label=benchkit.owner=owner-123",
+                ],
+                ["docker", "rm", "--force", "container-one", "container-two"],
+                [
+                    "docker",
+                    "network",
+                    "ls",
+                    "--quiet",
+                    "--filter",
+                    "label=benchkit.owner=owner-123",
+                ],
+                ["docker", "network", "rm", "network-one"],
+            ],
+        )
+
     def test_local_inference_host_is_rewritten_for_docker(self) -> None:
         self.assertEqual(
             _docker_upstream("http://localhost:11434"),
@@ -112,6 +151,57 @@ class LatestPiImageTests(unittest.TestCase):
         self.assertNotIn("--tools", command)
         self.assertNotIn("--system-prompt", command)
 
+    def test_runner_cleanup_sweeps_resources_and_removes_image(self) -> None:
+        image = LatestPiImage(docker="docker")
+        runner = PiAgentRunner(
+            client=SimpleNamespace(),
+            image=image,
+            owner_id="owner-123",
+        )
+
+        with (
+            patch("benchkit.pi_agent.cleanup_owned_resources") as resources,
+            patch.object(image, "cleanup") as image_cleanup,
+        ):
+            runner.cleanup()
+
+        resources.assert_called_once_with("docker", "owner-123")
+        image_cleanup.assert_called_once_with()
+
+    def test_pi_and_commands_can_run_in_task_specific_workdir(self) -> None:
+        client = SimpleNamespace(host="http://local", api_key=None, provider="openai")
+        image = LatestPiImage(docker="docker", version="test")
+        environment = DockerTaskEnvironment(
+            client,
+            "model",
+            image,
+            docker="docker",
+            workdir="/workspace/allergies",
+        )
+        environment._started = True
+
+        with (
+            patch("benchkit.sandbox.subprocess.Popen") as popen,
+            patch("benchkit.sandbox._run") as run,
+        ):
+            environment.start_pi()
+            environment.exec(["cmake", "-S", "."], workdir=environment.workdir)
+
+        self.assertEqual(
+            popen.call_args.args[0][3:5],
+            ["--workdir", "/workspace/allergies"],
+        )
+        self.assertEqual(
+            run.call_args.args[0][:5],
+            [
+                "docker",
+                "exec",
+                "--workdir",
+                "/workspace/allergies",
+                environment.container_name,
+            ],
+        )
+
     def test_task_container_has_no_host_mount_or_direct_egress(self) -> None:
         client = SimpleNamespace(
             host="http://localhost:11434",
@@ -134,6 +224,9 @@ class LatestPiImageTests(unittest.TestCase):
         agent = calls[3].args[0]
         config = calls[4].kwargs["input_text"]
         self.assertEqual(network[:4], ["docker", "network", "create", "--internal"])
+        for command in (network, proxy, agent):
+            self.assertIn("benchkit.managed=true", command)
+            self.assertIn(f"benchkit.owner={environment.owner_id}", command)
         self.assertIn("BENCHKIT_MODEL=selected/model", proxy)
         self.assertIn("BENCHKIT_UPSTREAM_API_KEY=real-secret", proxy)
         self.assertNotIn("BENCHKIT_UPSTREAM_API_KEY=real-secret", agent)

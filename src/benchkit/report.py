@@ -306,6 +306,25 @@ def save(
                 )
                 if task.get("error"):
                     f.write(f"**Error:** {task['error']}\n\n")
+                if workspace := task.get("workspace"):
+                    command = workspace.get("test_command") or []
+                    f.write(
+                        "**Workspace verifier:** "
+                        f"`{' '.join(map(str, command))}` · exit "
+                        f"{workspace.get('test_exit_code', '—')}\n\n"
+                    )
+                    if workspace.get("test_output"):
+                        f.write(
+                            "~~~text\n"
+                            + str(workspace["test_output"]).rstrip()
+                            + "\n~~~\n\n"
+                        )
+                    if workspace.get("patch"):
+                        f.write(
+                            "**Workspace patch:**\n\n~~~diff\n"
+                            + str(workspace["patch"]).rstrip()
+                            + "\n~~~\n\n"
+                        )
                 if attempts := task.get("attempts"):
                     f.write("**Verifier-feedback attempts:**\n\n")
                     for attempt in attempts:
