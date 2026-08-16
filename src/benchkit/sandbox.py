@@ -44,7 +44,8 @@ FROM node:24-bookworm
 
 RUN apt-get update \\
     && apt-get install -y --no-install-recommends \\
-       bash ca-certificates cmake curl g++ git openjdk-17-jdk \\
+       bash ca-certificates cmake curl g++ git libboost-date-time-dev \\
+       openjdk-17-jdk \\
        python3 ripgrep unzip \\
     && rm -rf /var/lib/apt/lists/*
 RUN npm install -g {PI_PACKAGE}
@@ -78,7 +79,7 @@ RUN git clone https://github.com/Aider-AI/polyglot-benchmark.git \\
     && find /opt/aider-polyglot/go/exercises/practice -name go.mod \\
        -execdir go mod download \\; \\
     && find /opt/aider-polyglot/java/exercises/practice -name build.gradle \\
-       -execdir gradle dependencies --no-daemon \\;
+       -execdir gradle testClasses --no-daemon \\;
 
 COPY inference_proxy.py /opt/benchkit/inference_proxy.py
 RUN mkdir -p /workspace /home/node/.pi/agent /opt/go \\

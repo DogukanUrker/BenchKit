@@ -205,6 +205,7 @@ class AiderPolyglotTests(unittest.TestCase):
             "cmake",
             "go1.21.5",
             "openjdk-17-jdk",
+            "libboost-date-time-dev",
             "rustup.rs",
             "jest",
         ):
@@ -212,6 +213,10 @@ class AiderPolyglotTests(unittest.TestCase):
         self.assertEqual(tuple(_EXPECTED_COUNTS), _LANGUAGES)
         self.assertIn(
             "mkdir -p /workspace /home/node/.pi/agent /opt/go",
+            AIDER_PI_DOCKERFILE,
+        )
+        self.assertIn(
+            "gradle testClasses --no-daemon",
             AIDER_PI_DOCKERFILE,
         )
 
