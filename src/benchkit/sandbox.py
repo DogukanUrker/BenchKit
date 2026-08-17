@@ -17,6 +17,7 @@ from benchkit.client import InferenceClient, _openai_base
 
 PI_IMAGE = "benchkit-pi:latest"
 AIDER_PI_IMAGE = "benchkit-pi-aider-polyglot:latest"
+GIT_SURGERY_PI_IMAGE = "benchkit-pi-git-surgery:latest"
 PI_PACKAGE = "@earendil-works/pi-coding-agent@latest"
 AIDER_POLYGLOT_COMMIT = "7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f"
 _PROXY_SOURCE = Path(__file__).with_name("_pi_proxy.py")
@@ -100,6 +101,29 @@ RUN mkdir -p /workspace /home/node/.pi/agent /opt/go \\
 USER node
 WORKDIR /workspace
 ENV PI_OFFLINE=1 PI_TELEMETRY=0 CARGO_NET_OFFLINE=true
+CMD ["sleep", "infinity"]
+"""
+
+GIT_SURGERY_PI_DOCKERFILE = f"""\
+FROM node:24-bookworm-slim
+
+ARG GIT_DEBIAN_VERSION=1:2.39.5-0+deb12u3
+RUN apt-get update \\
+    && apt-get install -y --no-install-recommends \\
+       bash ca-certificates git=${{GIT_DEBIAN_VERSION}} python3 ripgrep \\
+    && test "$(git --version)" = "git version 2.39.5" \\
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install -g {PI_PACKAGE}
+
+COPY inference_proxy.py /opt/benchkit/inference_proxy.py
+COPY git-surgery /opt/git-surgery
+RUN chmod +x /opt/git-surgery/*/setup.sh /opt/git-surgery/*/verify.sh \\
+    && mkdir -p /workspace /home/node/.pi/agent \\
+    && chown -R node:node /workspace /home/node/.pi
+
+USER node
+WORKDIR /workspace
+ENV PI_OFFLINE=1 PI_TELEMETRY=0
 CMD ["sleep", "infinity"]
 """
 
@@ -197,6 +221,7 @@ class LatestPiImage:
     no_cache: bool = True
     transient: bool = True
     pids_limit: int = 256
+    build_assets: Path | None = None
     version: str = ""
     _ready: bool = field(default=False, init=False, repr=False)
     _lock: threading.Lock = field(
@@ -220,6 +245,8 @@ class LatestPiImage:
                     _PROXY_SOURCE.read_text(encoding="utf-8"),
                     encoding="utf-8",
                 )
+                if self.build_assets is not None:
+                    shutil.copytree(self.build_assets, context / "git-surgery")
                 command = [self.docker, "build", "--pull"]
                 if self.no_cache:
                     command.append("--no-cache")
@@ -256,6 +283,17 @@ def aider_pi_image() -> LatestPiImage:
         # accounts threads against Docker's PID cgroup, so the generic Pi
         # sandbox limit of 256 makes the official test suite impossible.
         pids_limit=2048,
+    )
+
+
+def git_surgery_pi_image() -> LatestPiImage:
+    """Return the stock Pi image with pinned Git and Git Surgery assets."""
+    return LatestPiImage(
+        image=GIT_SURGERY_PI_IMAGE,
+        dockerfile=GIT_SURGERY_PI_DOCKERFILE,
+        no_cache=False,
+        transient=True,
+        build_assets=Path(__file__).with_name("git_surgery"),
     )
 
 

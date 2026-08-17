@@ -151,6 +151,17 @@ class MixedCoverageClient:
         return list(range(len(content.split()) + int(add_special)))
 
 
+class CompleteTimeoutClient(MixedCoverageClient):
+    def generate(self, model: str, prompt: str, on_progress=None, **kwargs: object):
+        generation = super().generate(model, prompt, on_progress, **kwargs)
+        if generation.get("timed_out"):
+            generation.update(
+                eval_count=30,
+                eval_duration_ns=3_000_000_000,
+            )
+        return generation
+
+
 class LatencyCohortClient:
     timeout = 20.0
 
@@ -464,6 +475,27 @@ class ConcurrentEngineTests(unittest.TestCase):
         self.assertEqual(result["sum_request_time"], 1.0)
         self.assertEqual(result["avg_response_time"], 1.0)
         self.assertTrue(result["tasks"][1]["tokens_recovered"])
+
+    def test_complete_timeout_metrics_are_included_in_throughput(self) -> None:
+        client = CompleteTimeoutClient()
+        engine = Engine(
+            client=client,
+            jobs=[JobSpec("model", "quickbench", "2")],
+        )
+
+        with patch.object(
+            engine,
+            "_verify_response",
+            return_value=Mock(score=1.0, passed=True, error=""),
+        ):
+            result = engine.run()[0]
+
+        self.assertEqual(result["throughput_items"], 2)
+        self.assertEqual(result["throughput_coverage"], 100.0)
+        self.assertEqual(result["sum_generation_time"], 5.0)
+        self.assertEqual(result["sum_request_time"], 4.0)
+        self.assertEqual(result["avg_response_time"], 2.0)
+        self.assertEqual(result["timeouts"], 1)
 
     def test_pi_uses_normal_discovered_capacity(self) -> None:
         client = ParallelClient({"model": 4})

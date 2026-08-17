@@ -156,6 +156,36 @@ def save(
             "timing payload is complete.\n"
         )
 
+        agentic_rows = [
+            result
+            for result in results
+            if result.get("tool_schema_validity_rate") is not None
+        ]
+        if agentic_rows:
+            f.write("\n## Agentic metrics\n\n")
+            f.write(
+                "| Model | Benchmark | Schema valid | Avg turns to solve | "
+                "Avg tokens to solve | Post-error recovery | Redundant actions | "
+                "Destructive actions |\n"
+            )
+            f.write(
+                "|-------|-----------|-------------:|-------------------:|"
+                "--------------------:|--------------------:|------------------:|"
+                "--------------------:|\n"
+            )
+            for result in agentic_rows:
+                recovery = result.get("post_error_recovery_rate")
+                f.write(
+                    f"| {result['model']} "
+                    f"| {result.get('benchmark_label', result['benchmark'])} "
+                    f"| {result['tool_schema_validity_rate']:.1f}% "
+                    f"| {result.get('avg_turns_to_solve') or '—'} "
+                    f"| {result.get('avg_tokens_to_solve') or '—'} "
+                    f"| {f'{recovery:.1f}%' if recovery is not None else '—'} "
+                    f"| {result.get('redundant_action_rate', 0):.1f}% "
+                    f"| {result.get('destructive_action_count', 0)} |\n"
+                )
+
         harness_pairs = [
             result
             for result in results
@@ -307,12 +337,35 @@ def save(
                 if task.get("error"):
                     f.write(f"**Error:** {task['error']}\n\n")
                 if workspace := task.get("workspace"):
+                    if checkpoints := workspace.get("checkpoints"):
+                        f.write(
+                            "**Checkpoints:** "
+                            f"{workspace.get('positive_points', 0)}/"
+                            f"{workspace.get('max_points', 0)} points"
+                        )
+                        if workspace.get("penalty_points"):
+                            f.write(f" · −{workspace.get('penalty_points', 0)} penalty")
+                        f.write("\n\n")
+                        f.write("| Checkpoint | Weight | Awarded | Evidence |\n")
+                        f.write("|------------|-------:|--------:|----------|\n")
+                        for checkpoint in checkpoints:
+                            evidence = str(checkpoint.get("evidence", "")).replace(
+                                "|", "\\|"
+                            )
+                            f.write(
+                                f"| {checkpoint.get('id', '')} "
+                                f"| {checkpoint.get('weight', 0):+} "
+                                f"| {checkpoint.get('awarded', 0):+} "
+                                f"| {evidence} |\n"
+                            )
+                        f.write("\n")
                     command = workspace.get("test_command") or []
-                    f.write(
-                        "**Workspace verifier:** "
-                        f"`{' '.join(map(str, command))}` · exit "
-                        f"{workspace.get('test_exit_code', '—')}\n\n"
-                    )
+                    if command:
+                        f.write(
+                            "**Workspace verifier:** "
+                            f"`{' '.join(map(str, command))}` · exit "
+                            f"{workspace.get('test_exit_code', '—')}\n\n"
+                        )
                     if workspace.get("test_output"):
                         f.write(
                             "~~~text\n"
