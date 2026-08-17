@@ -161,7 +161,9 @@ class PiAgentRunner:
         verifier: Callable[[str], EvaluationResult] | None = None,
         repair_attempts: int = 0,
         workspace_setup: Callable[[DockerTaskEnvironment], None] | None = None,
-        workspace_verifier: Callable[[DockerTaskEnvironment], EvaluationResult]
+        workspace_verifier: Callable[
+            [DockerTaskEnvironment, list[dict[str, Any]]], EvaluationResult
+        ]
         | None = None,
     ) -> dict:
         self.prepare()
@@ -394,7 +396,11 @@ class PiAgentRunner:
                     generation_results.append(generation)
 
                     active_verifier = (
-                        (lambda _response: workspace_verifier(environment))
+                        (
+                            lambda _response, current_trace=trace: workspace_verifier(
+                                environment, current_trace.tool_trace
+                            )
+                        )
                         if workspace_verifier is not None
                         else verifier
                     )

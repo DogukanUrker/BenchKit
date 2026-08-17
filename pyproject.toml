@@ -32,6 +32,8 @@ benchkit = [
     "datasets/*.jsonl",
     "datasets/*.md",
     "datasets/*.txt",
+    "git_surgery/**/*.sh",
+    "git_surgery/**/*.md",
     "templates/*.html",
     "tui/*.tcss",
 ]

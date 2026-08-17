@@ -1110,6 +1110,27 @@ class Engine:
             (record.pi_scaffold for record in records if record.pi_scaffold), {}
         )
         pi_metadata = {f"pi_{key}": value for key, value in pi_scaffold.items()}
+        agentic = [
+            record.workspace.get("agentic_metrics", {})
+            for record in records
+            if isinstance(record.workspace.get("agentic_metrics"), dict)
+        ]
+        schema_valid = sum(
+            int(item.get("tool_schema_valid_calls", 0)) for item in agentic
+        )
+        schema_invalid = sum(
+            int(item.get("tool_schema_invalid_calls", 0)) for item in agentic
+        )
+        errored_calls = sum(int(item.get("errored_tool_calls", 0)) for item in agentic)
+        recoveries = sum(int(item.get("post_error_recoveries", 0)) for item in agentic)
+        redundant_calls = sum(
+            int(item.get("redundant_tool_calls", 0)) for item in agentic
+        )
+        destructive_actions = sum(
+            int(item.get("destructive_action_count", 0)) for item in agentic
+        )
+        observed_calls = schema_valid + schema_invalid
+        solved_records = [record for record in records if record.passed]
 
         result = {
             "model": job.model,
@@ -1146,6 +1167,43 @@ class Engine:
             "total_input_tokens": sum(record.input_tokens for record in records),
             "model_turns": sum(record.model_turns for record in records),
             "tool_calls": sum(record.tool_calls for record in records),
+            "tool_schema_valid_calls": schema_valid,
+            "tool_schema_invalid_calls": schema_invalid,
+            "tool_schema_validity_rate": round(schema_valid / observed_calls * 100, 1)
+            if observed_calls
+            else None,
+            "errored_tool_calls": errored_calls,
+            "post_error_recoveries": recoveries,
+            "post_error_recovery_rate": round(recoveries / errored_calls * 100, 1)
+            if errored_calls
+            else None,
+            "redundant_tool_calls": redundant_calls,
+            "redundant_action_rate": round(redundant_calls / observed_calls * 100, 1)
+            if observed_calls
+            else None,
+            "destructive_action_count": destructive_actions,
+            "destructive_action_rate": round(
+                destructive_actions / observed_calls * 100, 1
+            )
+            if observed_calls
+            else None,
+            "avg_turns_to_solve": round(
+                sum(record.model_turns for record in solved_records)
+                / len(solved_records),
+                1,
+            )
+            if solved_records
+            else None,
+            "avg_tokens_to_solve": round(
+                sum(
+                    record.input_tokens + record.output_tokens
+                    for record in solved_records
+                )
+                / len(solved_records),
+                1,
+            )
+            if solved_records
+            else None,
             "first_attempt_score": round(
                 sum(record.first_attempt_score for record in scored_records)
                 / scored_total
@@ -1247,6 +1305,7 @@ class Engine:
                     "first_attempt_score": round(record.first_attempt_score * 100, 1),
                     "repaired": record.repaired,
                     "workspace": record.workspace or None,
+                    "agentic_metrics": record.workspace.get("agentic_metrics") or None,
                 }
                 for record in records
             ],
@@ -1508,8 +1567,8 @@ class Engine:
                 def workspace_setup(environment):
                     return bench.prepare_workspace(task, environment)
 
-                def workspace_verifier(environment):
-                    return bench.verify_workspace(task, environment)
+                def workspace_verifier(environment, tool_trace):
+                    return bench.verify_workspace(task, environment, tool_trace)
 
             if job.repair_attempts:
 

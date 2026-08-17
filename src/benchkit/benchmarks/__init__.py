@@ -4,6 +4,7 @@ from benchkit.benchmarks.aider_polyglot import AiderPolyglot
 from benchkit.benchmarks.arc import ARC
 from benchkit.benchmarks.boolq import BoolQ
 from benchkit.benchmarks.evalplus import HumanEvalPlus, MBPPPlus
+from benchkit.benchmarks.git_surgery import GitSurgery
 from benchkit.benchmarks.gpqa import GPQA
 from benchkit.benchmarks.gsm8k import GSM8K
 from benchkit.benchmarks.hellaswag import HellaSwag
@@ -22,6 +23,7 @@ from benchkit.benchmarks.winogrande import WinoGrande
 REGISTRY: dict[str, type] = {
     # Generative suites first, then the multiple-choice ones.
     "aider-polyglot": AiderPolyglot,
+    "git-surgery": GitSurgery,
     "quickbench": QuickBench,
     "humaneval": HumanEval,
     "humaneval-plus": HumanEvalPlus,
@@ -54,6 +56,7 @@ REGISTRY: dict[str, type] = {
 # `low-signal` leaves the benchmarks that actually spread this size band.
 TAGS: dict[str, tuple[str, ...]] = {
     "aider-polyglot": ("code", "generative", "agent", "polyglot"),
+    "git-surgery": ("code", "generative", "agent", "git"),
     "quickbench": ("code", "generative", "smoke"),
     "humaneval": ("code", "generative"),
     "humaneval-plus": ("code", "generative"),

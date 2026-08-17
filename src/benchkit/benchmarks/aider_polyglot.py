@@ -232,6 +232,7 @@ class AiderPolyglot:
         self,
         task: Task,
         environment: DockerTaskEnvironment,
+        _tool_trace: list[dict] | None = None,
     ) -> EvaluationResult:
         language, exercise = self._coordinates(task)
         workspace = f"/workspace/{exercise}"
