@@ -10,7 +10,7 @@ Not vibes. Actual scores.
 
 <img src="https://img.shields.io/badge/Python-3.11%2B-2563EB?style=flat-square&logo=python&logoColor=white&labelColor=0b0b0b" alt="Python 3.11+">
 <img src="https://img.shields.io/badge/TUI-Textual-60A5FA?style=flat-square&labelColor=0b0b0b" alt="Built with Textual">
-<img src="https://img.shields.io/badge/Suites-18-34D399?style=flat-square&labelColor=0b0b0b" alt="18 benchmark suites">
+<img src="https://img.shields.io/badge/Suites-20-34D399?style=flat-square&labelColor=0b0b0b" alt="20 benchmark suites">
 <img src="https://img.shields.io/badge/License-Apache%202.0-6B7280?style=flat-square&labelColor=0b0b0b" alt="Apache 2.0">
 
 </div>
@@ -248,29 +248,39 @@ in JSON and the human-readable reports.
 ### Git Surgery with the Pi agent
 
 `git-surgery` measures multi-turn agent behavior against a real Git repository.
-The first implemented task, `secret-in-history`, asks the stock Pi agent to
-remove a generated credential from reachable history while retaining later
-changes and repository lineage:
+Its five deterministic tasks exercise history rewriting, regression bisection,
+commit splitting, unreachable-object recovery, and semantic conflict resolution:
+
+- `secret-in-history` removes a generated credential from reachable history
+  without losing later changes or repository lineage.
+- `bisect-the-regression` finds the first bad commit among roughly 40 commits,
+  records its SHA, and fixes the underlying bug.
+- `split-the-mega-commit` separates a mixed bugfix and feature into two ordered,
+  independently testable commits.
+- `recover-lost-work` restores an unreachable commit object as a named branch
+  without recreating its contents.
+- `rebase-conflict-chain` resolves three sequential semantic conflicts while
+  preserving both sides and the feature commit sequence.
 
 ```bash
 uv run benchkit --headless --models MODEL \
-  --benchmarks git-surgery:1 --harness pi --verbose
+  --benchmarks git-surgery --harness pi --verbose
 ```
 
-The task is generated deterministically from a fixed seed inside a fresh,
-network-isolated container. Its dedicated image pins Git 2.39.5 and bundles the
-offline setup and verifier scripts. Verification uses Git plumbing and tests;
-there is no LLM judge. Five positive checkpoints award eight points, while
-deleting and reinitializing `.git` incurs a four-point penalty. A partial final
-state therefore retains partial credit even when Pi times out or reaches its
-model output limit.
+Every task is generated deterministically from a fixed seed inside a fresh,
+network-isolated container. The dedicated image pins Git 2.39.5 and bundles the
+offline setup and verifier scripts. Verification uses Git plumbing, committed
+object state, and tests; there is no LLM judge. Each task has positive
+checkpoints worth eight points and a four-point negative checkpoint for its
+destructive shortcut, such as reinitializing the repository, changing tests,
+squashing the requested split, recreating lost work, or discarding one side of
+a conflict. Partial final states therefore retain useful credit.
 
 Git Surgery does not impose a turn, token, or tool-call budget. Reports retain
 the full native trace and aggregate schema-valid calls, turns and tokens to
 solve, post-error recovery, identical repeated actions, and destructive
-actions. `git-surgery:1` uses ordinary BenchKit task slicing; as the remaining
-four tasks land, `git-surgery:2` will select the first two tasks in their stable
-published order.
+actions. Ordinary slicing follows the stable order above: `git-surgery:1`
+selects only history cleanup, while `git-surgery:2` selects the first two tasks.
 
 ### Choice-order robustness
 
@@ -429,6 +439,8 @@ never duplicated.
 
 | Benchmark  | Key              |  Tasks | Tags                               | What it tests                                                       |
 | ---------- | ---------------- | -----: | ---------------------------------- | ------------------------------------------------------------------- |
+| Aider Polyglot | `aider-polyglot` | 225 | code generative agent polyglot | Repository editing through stock Pi across six languages            |
+| Git Surgery | `git-surgery`   |      5 | code generative agent git          | Stateful Git operations with deterministic checkpoint scoring       |
 | QuickBench | `quickbench`     |     20 | code generative smoke              | Tiny Python tasks for a fast end-to-end sanity check                |
 | HumanEval  | `humaneval`      |    164 | code generative                    | Python function completion with the original unit tests             |
 | HumanEval+ | `humaneval-plus` |    164 | code generative                    | HumanEval with more than 122,000 tougher EvalPlus test inputs       |
