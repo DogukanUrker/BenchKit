@@ -83,7 +83,12 @@ def agentic_metrics(tool_trace: list[dict]) -> dict:
             )
             recoveries += int(next_key != key and not _is_error(next_call))
     destructive = sum(
-        bool(re.search(r"(?:rm\s+-[^\n]*r[^\n]*\s+\.git|git\s+init\b)", _command(call)))
+        bool(
+            re.search(
+                r"(?:rm\s+-[^\n]*r[^\n]*\s+\.git(?=$|[\s;&|])|git\s+init\b)",
+                _command(call),
+            )
+        )
         for call in calls
     )
     total = len(calls)

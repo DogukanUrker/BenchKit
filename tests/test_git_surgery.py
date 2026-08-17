@@ -232,6 +232,25 @@ def test_agentic_metrics_count_repeated_and_destructive_calls() -> None:
     assert metrics["destructive_action_count"] == 1
 
 
+def test_agentic_metrics_allow_cleanup_inside_git_directory() -> None:
+    metrics = agentic_metrics(
+        [
+            {
+                "name": "bash",
+                "arguments": {"command": "rm -rf .git/refs/original"},
+                "is_error": False,
+            },
+            {
+                "name": "bash",
+                "arguments": {"command": "rm -rf .git-backup"},
+                "is_error": False,
+            },
+        ]
+    )
+
+    assert metrics["destructive_action_count"] == 0
+
+
 def test_agentic_metrics_reject_malformed_native_arguments() -> None:
     metrics = agentic_metrics(
         [
