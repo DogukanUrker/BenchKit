@@ -224,6 +224,56 @@ def test_equivalent_semantic_rebase_scores_every_checkpoint() -> None:
     assert result.passed
 
 
+def test_uncommitted_rebase_repairs_do_not_score_as_preserved_behavior() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = Path(directory) / "rebase-conflict-chain"
+        setup = ROOT / "src/benchkit/git_surgery/rebase-conflict-chain/setup.sh"
+        run("bash", str(setup), "424242", str(workspace))
+        run("git", "rebase", "main", cwd=workspace, check=False)
+
+        resolutions = {
+            "auth.py": (
+                "def identify(user: str) -> str:\n"
+                '    return f"audit:{user.strip().lower()}"\n'
+            ),
+            "billing.py": "def total(subtotal: int) -> int:\n    return subtotal + 5\n",
+            "report.py": (
+                "def render(items: list[str]) -> str:\n"
+                '    return "items:" + ",".join(item.upper() for item in items)\n'
+            ),
+        }
+        for path, content in resolutions.items():
+            (workspace / path).write_text(content)
+            run("git", "add", path, cwd=workspace)
+            continue_rebase(workspace)
+
+        (workspace / "report.py").write_text(
+            "def render(items: list[str]) -> str:\n"
+            '    return ",".join(item.upper() for item in items)\n'
+        )
+        run("git", "add", "report.py", cwd=workspace)
+        run("git", "commit", "--amend", "--no-edit", cwd=workspace)
+        (workspace / "report.py").write_text(resolutions["report.py"])
+
+        trace = [
+            {
+                "name": "bash",
+                "arguments": {"command": "git rebase main"},
+                "is_error": False,
+            }
+        ]
+        result = GitSurgery().verify_workspace(
+            task_named("rebase-conflict-chain"),
+            LocalEnvironment(workspace),
+            trace,
+        )
+
+    checkpoints = {item["id"]: item for item in result.details["checkpoints"]}
+    assert not checkpoints["both_sides_preserved"]["passed"]
+    assert not checkpoints["tests_pass"]["passed"]
+    assert result.details["trap_fired"]
+
+
 def test_initial_state_has_partial_credit_but_leaked_history() -> None:
     with tempfile.TemporaryDirectory() as directory:
         workspace = generate(Path(directory))
