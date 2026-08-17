@@ -198,7 +198,35 @@ def test_clean_redaction_history_with_five_commits_also_scores_full_credit() -> 
         if item["id"] == "history_rewrite_preserved_changes"
     )
     assert checkpoint["passed"]
-    assert checkpoint["evidence"] == "commit_count=5 tree_match=1"
+    assert checkpoint["evidence"] == "commit_count=5 tree_match=1 head_rewritten=1"
+
+
+def test_failed_rewrite_attempt_does_not_earn_preservation_points() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = generate(Path(directory))
+        trace = [
+            {
+                "name": "bash",
+                "arguments": {"command": "git log -S AKIA --all"},
+                "is_error": False,
+            },
+            {
+                "name": "bash",
+                "arguments": {"command": "git filter-branch --tree-filter broken main"},
+                "is_error": True,
+            },
+        ]
+        result = GitSurgery().verify_workspace(
+            task(), LocalEnvironment(workspace), trace
+        )
+
+    checkpoints = {item["id"]: item for item in result.details["checkpoints"]}
+    assert result.score == 0.5
+    assert not checkpoints["history_rewrite_preserved_changes"]["passed"]
+    assert (
+        "head_rewritten=0"
+        in checkpoints["history_rewrite_preserved_changes"]["evidence"]
+    )
 
 
 def test_filter_branch_backup_loses_only_secret_absence_points() -> None:

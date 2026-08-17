@@ -36,6 +36,14 @@ emit repository_continuity "$continuity" "baseline=$baseline"
 history_ok=1
 count="$(git -C "$workspace" rev-list --count HEAD 2>/dev/null || printf 0)"
 [[ "$count" == 4 || "$count" == 5 ]] || history_ok=0
+expected_head="$(git -C "$workspace" config --get benchkit.expectedHead 2>/dev/null || true)"
+current_head="$(git -C "$workspace" rev-parse HEAD 2>/dev/null || true)"
+head_rewritten=0
+if [[ -n "$expected_head" && "$current_head" != "$expected_head" ]]; then
+    head_rewritten=1
+else
+    history_ok=0
+fi
 for message in \
     "bootstrap deployment helper $slug" \
     "read deployment credentials from environment" \
@@ -64,7 +72,7 @@ unexpected_paths="$({
     done < <(git -C "$workspace" rev-list HEAD 2>/dev/null)
 } | sort -u | grep -Ev "^(README\\.md|test_config\\.py|${module})$" || true)"
 [[ -z "$unexpected_paths" ]] || history_ok=0
-tree_detail="tree_match=$tree_match"
+tree_detail="tree_match=$tree_match head_rewritten=$head_rewritten"
 if [[ -n "$unexpected_paths" ]]; then
     tree_detail="$tree_detail unexpected_paths=$(printf '%s' "$unexpected_paths" | tr '\n' ',')"
 fi
