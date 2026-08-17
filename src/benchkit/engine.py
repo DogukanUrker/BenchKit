@@ -382,6 +382,14 @@ class RunCompleted:
     elapsed: float
 
 
+@dataclass(frozen=True)
+class ModelUnloaded:
+    """A force-unload attempt for a model that finished its last job."""
+
+    model: str
+    error: str = ""
+
+
 @dataclass
 class RunFailed:
     message: str
@@ -394,6 +402,7 @@ EngineEvent = (
     | GenerationProgress
     | TaskCompleted
     | JobCompleted
+    | ModelUnloaded
     | RunCompleted
     | RunFailed
 )
@@ -401,14 +410,15 @@ Sink = Callable[[EngineEvent], None]
 
 
 class RunControls:
-    """Thread-safe pause / skip / stop switches driven by the UI."""
+    """Thread-safe pause / skip / stop / force-unload switches for the UI."""
 
-    def __init__(self) -> None:
+    def __init__(self, force_unload: bool = False) -> None:
         self._stop = threading.Event()
         self._skip = threading.Event()
         self._cancel_request = threading.Event()
         self._running = threading.Event()
         self._running.set()
+        self._force_unload = force_unload
 
     @property
     def stopped(self) -> bool:
@@ -426,6 +436,15 @@ class RunControls:
     @property
     def paused(self) -> bool:
         return not self._running.is_set()
+
+    @property
+    def force_unload(self) -> bool:
+        return self._force_unload
+
+    def toggle_force_unload(self) -> bool:
+        """Flip force-unload and return the new state."""
+        self._force_unload = not self._force_unload
+        return self._force_unload
 
     def stop(self) -> None:
         self._stop.set()
@@ -821,14 +840,29 @@ class Engine:
         return results
 
     def _maybe_unload(self, index: int, job: JobSpec) -> None:
-        """Free VRAM once the last job for a model finishes."""
+        """Free VRAM once the last job for a model finishes.
+
+        Jobs run strictly one model at a time and ``_run_job`` only returns
+        after every in-flight request has drained, so by the time this runs the
+        model's slots are idle. When force-unload is on, the model is evicted
+        here (and the unload request completes) before the next model's job
+        submits its first request.
+        """
         upcoming = self.jobs[index + 1 :]
         if any(other.model == job.model for other in upcoming):
             return
         if len(self.jobs) <= 1:
             return
-        with contextlib.suppress(Exception):
-            self.client.unload_model(job.model)
+        if self.controls.force_unload:
+            error = ""
+            try:
+                self.client.force_unload_model(job.model)
+            except Exception as exc:
+                error = str(exc)
+            self.emit(ModelUnloaded(job.model, error))
+        else:
+            with contextlib.suppress(Exception):
+                self.client.unload_model(job.model)
 
     def _max_parallel_requests(self, job: JobSpec, total: int) -> int:
         """Resolve a safe worker count, keeping unknown clients serial."""

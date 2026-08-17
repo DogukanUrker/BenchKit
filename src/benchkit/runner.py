@@ -33,6 +33,7 @@ from benchkit.engine import (
     JobCompleted,
     JobSpec,
     JobStarted,
+    ModelUnloaded,
     RunCompleted,
     RunControls,
     RunFailed,
@@ -394,6 +395,8 @@ class _Reporter:
             self.on_job_completed(event)
         elif isinstance(event, RunFailed):
             self.log(Text.assemble(("Run failed: ", "bold red"), event.message))
+        elif isinstance(event, ModelUnloaded):
+            self.on_model_unloaded(event)
         elif isinstance(event, RunCompleted):
             self.on_run_completed(event)
 
@@ -655,6 +658,26 @@ class _Reporter:
         )
         self.log(line)
 
+    def on_model_unloaded(self, event: ModelUnloaded) -> None:
+        stamp = f"[{self._stamp()}] " if self.plain else ""
+        if event.error:
+            self.log(
+                Text.assemble(
+                    (f"{stamp}force-unload failed for ", "bold red"),
+                    (event.model, "bold"),
+                    (f" — {event.error}", "red"),
+                )
+            )
+        else:
+            self.log(
+                Text.assemble(
+                    (stamp, "dim"),
+                    ("force-unloading ", "dim"),
+                    (event.model, "bold"),
+                    (" before the next model", "dim"),
+                )
+            )
+
     def on_run_completed(self, event: RunCompleted) -> None:
         if not event.results:
             return
@@ -675,6 +698,7 @@ def run(
     jobs: list[JobSpec],
     console: Console,
     verbose: bool = False,
+    force_unload: bool = False,
 ) -> tuple[list[dict], str | None]:
     """Run every job, printing progress to `console`.
 
@@ -682,8 +706,16 @@ def run(
     Ctrl+C cancels every active request, so a partial run still reports and
     still writes its artifacts; a second Ctrl+C aborts.
     """
-    controls = RunControls()
+    controls = RunControls(force_unload=force_unload)
     reporter = _Reporter(console, verbose=verbose)
+    if force_unload:
+        reporter.log(
+            Text(
+                "Force-unload enabled: each model is evicted from VRAM "
+                "before the next model loads",
+                style="dim",
+            )
+        )
     engine = Engine(client=client, jobs=jobs, sink=reporter, controls=controls)
 
     def on_interrupt(signum: int, frame: FrameType | None) -> None:

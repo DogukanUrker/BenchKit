@@ -60,8 +60,8 @@ class BenchKitApp(App[None]):
         self.models = models
         self.push_screen(SetupScreen())
 
-    def start_run(self, jobs: list[JobSpec]) -> None:
-        self.push_screen(RunScreen(jobs))
+    def start_run(self, jobs: list[JobSpec], *, force_unload: bool = False) -> None:
+        self.push_screen(RunScreen(jobs, force_unload=force_unload))
 
     def show_results(self, results: list[dict], output: Path | None) -> None:
         self.last_output = output

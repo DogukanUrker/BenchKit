@@ -204,6 +204,18 @@ class SetupScreen(Screen[None]):
                 "paired shuffled options · supported multiple-choice benchmarks only",
                 classes="hint",
             )
+        with Horizontal(id="setup-unload"):
+            yield Label("Model unload", classes="field-label wide")
+            yield Checkbox(
+                "Force unload between models",
+                id="force-unload",
+                compact=True,
+            )
+            yield Static(
+                "evict each model from VRAM before the next model loads "
+                "(llama.cpp /models/unload)",
+                classes="hint",
+            )
         with Horizontal(id="setup-footer"):
             yield Static("", id="plan-summary")
             yield Button("Check templates", id="check-templates")
@@ -522,7 +534,7 @@ class SetupScreen(Screen[None]):
                 sorted({job.benchmark for job in jobs}),
                 perturbations=perturbations,
             )
-        self.app.start_run(jobs)
+        self.app.start_run(jobs, force_unload=self._force_unload_enabled())
 
     # Planning ---------------------------------------------------------
 
@@ -534,6 +546,9 @@ class SetupScreen(Screen[None]):
 
     def _choice_order_enabled(self) -> bool:
         return self.query_one("#choice-order", Checkbox).value
+
+    def _force_unload_enabled(self) -> bool:
+        return self.query_one("#force-unload", Checkbox).value
 
     def _harnesses(self) -> tuple[str, ...]:
         value = self.query_one("#harness", Select).value
@@ -723,6 +738,11 @@ class SetupScreen(Screen[None]):
                 paired=(
                     (" · clean + choice-order" if choice_order else "")
                     + (" · one verifier repair" if self._repair_attempts() else "")
+                    + (
+                        " · force unload between models"
+                        if self._force_unload_enabled()
+                        else ""
+                    )
                 ),
             )
         self.query_one("#plan-summary", Static).update(summary)

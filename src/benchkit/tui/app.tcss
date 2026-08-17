@@ -194,7 +194,8 @@ DataTable > .datatable--cursor {
 
 #setup-options .field-label,
 #setup-harness .field-label,
-#setup-perturbation .field-label {
+#setup-perturbation .field-label,
+#setup-unload .field-label {
     padding: 0 1 0 0;
 }
 
@@ -259,6 +260,21 @@ DataTable > .datatable--cursor {
 }
 
 #setup-perturbation .hint {
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#setup-unload {
+    height: 1;
+    padding: 0 2;
+}
+
+#force-unload {
+    width: 32;
+    height: 1;
+}
+
+#setup-unload .hint {
     text-wrap: nowrap;
     text-overflow: ellipsis;
 }
