@@ -81,7 +81,7 @@ def solve(workspace: Path) -> None:
     )
 
 
-def solve_by_redacting_history(workspace: Path) -> None:
+def solve_by_redacting_history(workspace: Path, *, cleanup_backup: bool = True) -> None:
     history = run("git", "log", "--all", "-p", cwd=workspace).stdout
     secret = re.search(r"AKIA[A-F0-9]{16}", history)
     assert secret is not None
@@ -108,7 +108,8 @@ def solve_by_redacting_history(workspace: Path) -> None:
         capture_output=True,
         check=True,
     )
-    run("git", "update-ref", "-d", "refs/original/refs/heads/main", cwd=workspace)
+    if cleanup_backup:
+        run("git", "update-ref", "-d", "refs/original/refs/heads/main", cwd=workspace)
 
 
 def task() -> Task:
@@ -198,6 +199,32 @@ def test_clean_redaction_history_with_five_commits_also_scores_full_credit() -> 
     )
     assert checkpoint["passed"]
     assert checkpoint["evidence"] == "commit_count=5 tree_match=1"
+
+
+def test_filter_branch_backup_loses_only_secret_absence_points() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = generate(Path(directory))
+        solve_by_redacting_history(workspace, cleanup_backup=False)
+        trace = [
+            {
+                "name": "bash",
+                "arguments": {"command": "git log -S AKIA --all"},
+                "is_error": False,
+            },
+            {
+                "name": "bash",
+                "arguments": {"command": "git filter-branch --tree-filter ... main"},
+                "is_error": False,
+            },
+        ]
+        result = GitSurgery().verify_workspace(
+            task(), LocalEnvironment(workspace), trace
+        )
+
+    checkpoints = {item["id"]: item for item in result.details["checkpoints"]}
+    assert result.score == 0.75
+    assert checkpoints["history_rewrite_preserved_changes"]["passed"]
+    assert not checkpoints["secret_absent_reachable"]["passed"]
 
 
 def test_extra_file_in_rewritten_history_fails_preservation_checkpoint() -> None:

@@ -198,7 +198,7 @@ class GitSurgery:
             (
                 "history_rewrite_preserved_changes",
                 2,
-                history_preserved[0] and secret_absent[0],
+                rewrote and history_preserved[0],
                 history_preserved[1],
             ),
             (
