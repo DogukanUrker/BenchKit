@@ -27,3 +27,83 @@ See `CONTRIBUTING.md` for the tooling walkthrough. Recent commits use short, imp
 
 ## Configuration & Data
 Copy `.env.example` to `.env` and set `OLLAMA_HOST` before local runs. Do not commit `.env`, local caches, or generated `results/` artifacts. Treat bundled dataset files as source data: update benchmark logic and dataset contents together when schema or evaluation behavior changes.
+
+## Product & Feature Map
+Keep the public README short and human-oriented. Put implementation guidance,
+edge cases, and agent-facing operational detail here or next to the relevant
+code. Treat the CLI's `--help`, `.env.example`, and the benchmark registry as
+the canonical, version-matched references rather than duplicating large option
+tables in the README.
+
+### User Flows
+- The TUI moves through Connect, Setup, Run, and Results screens. It supports
+  model and benchmark filters, per-benchmark slices, live task inspection,
+  pause, skip, stop, sortable results, and report drill-down.
+- `--demo` exercises the TUI offline, including healthy and deliberately
+  looping traces. Demo mode does not support the Pi harness.
+- `--headless` uses the same engine and report pipeline as the TUI. `--verbose`
+  prints prompts, available reasoning traces, and responses.
+- `benchkit history` serves completed benchmark and performance reports from
+  one or more results directories on localhost.
+- `benchkit perf MODEL` profiles prompt processing, generation speed, time to
+  first token, wall time, and client overhead across configurable contexts.
+
+### Generation, Loops, and Retries
+- Generation streams have no BenchKit token cap. `BENCHKIT_TIMEOUT` is the hard
+  per-task deadline; partial traces are retained on timeout, loop kill, stop,
+  and other recoverable terminal states.
+- Reasoning comes from Ollama `thinking`, OpenAI-compatible
+  `reasoning_content`, or inline `<think>` blocks. Providers that hide it must
+  be reported as `NO TRACE`, not as producing no reasoning.
+- Loop killing is controlled by `BENCHKIT_LOOP_KILL`,
+  `BENCHKIT_LOOP_KILL_PERCENT`, and `BENCHKIT_LOOP_KILL_SECONDS`. Detection
+  remains visible when killing is disabled. Only a confirmed, continuously
+  growing suffix cycle is actionable; global repetition and code similarity
+  are advisory.
+- Transient gateway, rate-limit, DNS, connection, and dropped-stream failures
+  use configurable exponential backoff. Never replay a generation after it has
+  emitted tokens. Client errors are not retried. See `.env.example` and
+  `client.py` for the current knobs and exact policy.
+
+### Harnesses and Perturbations
+- `--harness direct`, `pi`, and `both` compare raw generation with the stock Pi
+  coding agent. Paired scoring uses only items valid on both sides.
+- Pi requires Docker. Each task gets a fresh persistent `/workspace` in an
+  isolated container plus a restricted inference proxy. Do not add host
+  mounts, the Docker socket, direct network egress, hidden answers, or hidden
+  tests to the agent environment.
+- `--repair-attempts 1` gives an incorrect answer one sanitized verifier
+  message and one full replacement attempt. Feedback must never expose the
+  expected answer or hidden test bodies.
+- `aider-polyglot` is Pi-only and uses pinned task content and toolchains. It
+  measures the stock Pi protocol on Aider tasks, not Aider's edit formats.
+- `--perturbation choice-order` runs supported MCQ tasks clean and with a
+  deterministic permutation whose correct option moves. Perturbed jobs are
+  paired with the baseline and excluded from the overall model score.
+
+### Concurrency and Metrics
+- Request concurrency is detected from server slot endpoints or explicit
+  metadata and is bounded by task count. Model jobs remain sequential; tasks
+  within the active job may run concurrently.
+- Pause waits for active requests to drain before withholding new work. Skip,
+  stop, and interrupt cancel in-flight requests.
+- Reports distinguish aggregate throughput, per-stream throughput, effective
+  concurrency, and throughput coverage. Preserve raw timing/token denominators
+  and the legacy `tok_s` compatibility alias when changing report schemas.
+- Harness errors are excluded from scores and paired comparisons. Ordinary
+  incorrect answers, timeouts, length limits, and loop kills remain scored
+  failures when applicable.
+
+### Reports and Benchmarks
+- Every run writes `results.json`, `results.csv`, `results.md`, and a standalone
+  `results.html`. Performance runs write matching `perf.*` artifacts. Keep old
+  reports readable when adding fields; missing historical fields mean “not
+  captured,” not zero.
+- Benchmark metadata, counts, tags, perturbation support, and descriptions are
+  canonical in `src/benchkit/benchmarks/__init__.py`; inspect it or run
+  `uv run benchkit --list` instead of maintaining a second table.
+- RULER is generated deterministically at runtime and reported by context
+  bucket. It is excluded from overall-score averaging so its degradation curve
+  stays visible.
+- EvalPlus datasets may be downloaded and cached on first use. Generated code
+  is untrusted; preserve evaluator guards and process isolation.
