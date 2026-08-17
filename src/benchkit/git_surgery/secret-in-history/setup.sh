@@ -70,7 +70,6 @@ baseline_sha="$(git rev-parse HEAD)"
 printf '\nDEPLOY_KEY = "%s"\n' "$secret" >> "$module.py"
 git add "$module.py"
 commit_at 1700000060 -m "temporarily configure deployment credentials"
-secret_sha="$(git rev-parse HEAD)"
 
 python3 - "$module.py" <<'PY'
 from pathlib import Path
@@ -105,10 +104,4 @@ git add README.md
 commit_at 1700000240 -m "document credential cleanup policy"
 
 git tag "benchkit-baseline-$slug" "$baseline_sha"
-git config benchkit.seed "$seed"
-git config benchkit.baseline "$baseline_sha"
-git config benchkit.secretCommit "$secret_sha"
-git config benchkit.expectedHead "$(git rev-parse HEAD)"
-git config benchkit.expectedTree "$(git rev-parse 'HEAD^{tree}')"
-git config benchkit.module "$module.py"
 git status --porcelain | grep -q . && exit 1 || true

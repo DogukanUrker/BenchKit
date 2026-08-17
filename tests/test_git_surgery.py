@@ -28,8 +28,7 @@ class LocalEnvironment:
             relative = Path(command[1]).relative_to("/opt/git-surgery")
             command[1] = str(ROOT / "src/benchkit/git_surgery" / relative)
         command = [
-            self.workdir if item == "/workspace/secret-in-history" else item
-            for item in command
+            self.workdir if item.startswith("/workspace/") else item for item in command
         ]
         completed = subprocess.run(
             command,
@@ -55,7 +54,14 @@ def generate(root: Path, seed: int = 424242) -> Path:
 
 
 def solve(workspace: Path) -> None:
-    secret = run("git", "config", "benchkit.secretCommit", cwd=workspace).stdout.strip()
+    secret = run(
+        "git",
+        "log",
+        "--format=%H",
+        "--grep=^temporarily configure deployment credentials$",
+        "-1",
+        cwd=workspace,
+    ).stdout.strip()
     baseline = run("git", "rev-parse", f"{secret}^", cwd=workspace).stdout.strip()
     run(
         "git",
@@ -67,7 +73,7 @@ def solve(workspace: Path) -> None:
         cwd=workspace,
         check=False,
     )
-    module = run("git", "config", "benchkit.module", cwd=workspace).stdout.strip()
+    module = next(workspace.glob("service_*.py")).name
     run("git", "checkout", "--theirs", "--", module, cwd=workspace)
     run("git", "add", module, cwd=workspace)
     env = dict(os.environ, GIT_EDITOR="true")
@@ -85,7 +91,7 @@ def solve_by_redacting_history(workspace: Path, *, cleanup_backup: bool = True) 
     history = run("git", "log", "--all", "-p", cwd=workspace).stdout
     secret = re.search(r"AKIA[A-F0-9]{16}", history)
     assert secret is not None
-    module = run("git", "config", "benchkit.module", cwd=workspace).stdout.strip()
+    module = next(workspace.glob("service_*.py")).name
     env = dict(os.environ, FILTER_BRANCH_SQUELCH_WARNING="1")
     filter_command = (
         "python3 -c 'from pathlib import Path; "
@@ -116,6 +122,10 @@ def task() -> Task:
     return GitSurgery().load_tasks()[0]
 
 
+def task_named(task_id: str) -> Task:
+    return next(item for item in GitSurgery().load_tasks() if item.id == task_id)
+
+
 def test_same_seed_produces_identical_reachable_repository() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -125,6 +135,39 @@ def test_same_seed_produces_identical_reachable_repository() -> None:
         second_refs = run("git", "show-ref", cwd=second).stdout
 
     assert first_refs == second_refs
+
+
+def test_git_surgery_registers_all_five_tasks_in_slice_order() -> None:
+    benchmark = GitSurgery()
+
+    assert [item.id for item in benchmark.load_tasks()] == [
+        "secret-in-history",
+        "bisect-the-regression",
+        "split-the-mega-commit",
+        "recover-lost-work",
+        "rebase-conflict-chain",
+    ]
+    assert benchmark.task_count == 5
+
+
+def test_new_task_initial_states_receive_only_deterministic_partial_credit() -> None:
+    expected_scores = {
+        "bisect-the-regression": 0.125,
+        "split-the-mega-commit": 0.0,
+        "recover-lost-work": 0.125,
+        "rebase-conflict-chain": 0.0,
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for task_id, expected_score in expected_scores.items():
+            workspace = root / task_id
+            setup = ROOT / "src/benchkit/git_surgery" / task_id / "setup.sh"
+            run("bash", str(setup), "424242", str(workspace))
+            result = GitSurgery().verify_workspace(
+                task_named(task_id), LocalEnvironment(workspace), []
+            )
+
+            assert result.score == expected_score
 
 
 def test_initial_state_has_partial_credit_but_leaked_history() -> None:
@@ -142,7 +185,12 @@ def test_legitimate_rewrite_scores_every_checkpoint() -> None:
     with tempfile.TemporaryDirectory() as directory:
         workspace = generate(Path(directory))
         secret = run(
-            "git", "config", "benchkit.secretCommit", cwd=workspace
+            "git",
+            "log",
+            "--format=%H",
+            "--grep=^temporarily configure deployment credentials$",
+            "-1",
+            cwd=workspace,
         ).stdout.strip()
         solve(workspace)
         trace = [
