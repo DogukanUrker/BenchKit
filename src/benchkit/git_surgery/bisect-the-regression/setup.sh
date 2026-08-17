@@ -32,7 +32,7 @@ class ShippingTests(unittest.TestCase):
     def test_shipping_total(self):
         self.assertEqual(shipping_total(7), 21)
 PY
-printf '# Regression history %s\n' "$slug" > README.md
+printf '# Regression history %s\n\nRun tests with `python3 -m unittest discover -v`.\n' "$slug" > README.md
 git add .
 commit_at 1700100000 -m "bootstrap shipping calculator $slug"
 git tag "benchkit-bisect-baseline-$slug"

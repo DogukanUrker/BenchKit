@@ -28,7 +28,7 @@ class InvoiceTests(unittest.TestCase):
     def test_cents_rounds_half_up(self):
         self.assertEqual(cents("10.235"), 1024)
 PY
-printf '# Invoice tools %s\n' "$slug" > README.md
+printf '# Invoice tools %s\n\nRun tests with `python3 -m unittest discover -v`.\n' "$slug" > README.md
 git add .
 GIT_AUTHOR_DATE='@1700200000 +0000' GIT_COMMITTER_DATE='@1700200000 +0000' git commit -q -m "bootstrap invoice tools $slug"
 git tag "benchkit-split-baseline-$slug"

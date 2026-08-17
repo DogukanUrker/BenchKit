@@ -12,7 +12,7 @@ git config commit.gpgSign false
 git config core.autocrlf false
 export GIT_AUTHOR_NAME="BenchKit Generator" GIT_AUTHOR_EMAIL="generator@benchkit.invalid"
 export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
-printf '# Recovery exercise %s\n' "$slug" > README.md
+printf '# Recovery exercise %s\n\nRun tests with `python3 -m unittest discover -v`.\n' "$slug" > README.md
 git add README.md
 GIT_AUTHOR_DATE='@1700300000 +0000' GIT_COMMITTER_DATE='@1700300000 +0000' git commit -q -m "bootstrap recovery workspace $slug"
 git tag "benchkit-recover-baseline-$slug"

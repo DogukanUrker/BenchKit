@@ -126,6 +126,17 @@ def task_named(task_id: str) -> Task:
     return next(item for item in GitSurgery().load_tasks() if item.id == task_id)
 
 
+def continue_rebase(workspace: Path) -> None:
+    subprocess.run(
+        ["git", "rebase", "--continue"],
+        cwd=workspace,
+        env=dict(os.environ, GIT_EDITOR="true"),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 def test_same_seed_produces_identical_reachable_repository() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -168,6 +179,49 @@ def test_new_task_initial_states_receive_only_deterministic_partial_credit() -> 
             )
 
             assert result.score == expected_score
+
+
+def test_equivalent_semantic_rebase_scores_every_checkpoint() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = Path(directory) / "rebase-conflict-chain"
+        setup = ROOT / "src/benchkit/git_surgery/rebase-conflict-chain/setup.sh"
+        run("bash", str(setup), "424242", str(workspace))
+        run("git", "rebase", "main", cwd=workspace, check=False)
+
+        (workspace / "auth.py").write_text(
+            'def identify(user: str) -> str:\n    return f"audit:{user.strip().lower()}"\n'
+        )
+        run("git", "add", "auth.py", cwd=workspace)
+        continue_rebase(workspace)
+
+        (workspace / "billing.py").write_text(
+            "def total(subtotal: int) -> int:\n    return subtotal + 5\n"
+        )
+        run("git", "add", "billing.py", cwd=workspace)
+        continue_rebase(workspace)
+
+        (workspace / "report.py").write_text(
+            "def render(items: list[str]) -> str:\n"
+            '    return "items:" + ",".join(item.upper() for item in items)\n'
+        )
+        run("git", "add", "report.py", cwd=workspace)
+        continue_rebase(workspace)
+
+        trace = [
+            {
+                "name": "bash",
+                "arguments": {"command": "git rebase main"},
+                "is_error": False,
+            }
+        ]
+        result = GitSurgery().verify_workspace(
+            task_named("rebase-conflict-chain"),
+            LocalEnvironment(workspace),
+            trace,
+        )
+
+    assert result.score == 1.0
+    assert result.passed
 
 
 def test_initial_state_has_partial_credit_but_leaked_history() -> None:

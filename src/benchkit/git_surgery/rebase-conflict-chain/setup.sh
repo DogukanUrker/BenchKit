@@ -42,7 +42,7 @@ class BehaviorTests(unittest.TestCase):
     def test_report_keeps_header_and_uppercase(self):
         self.assertEqual(render(["one", "two"]), "items:ONE,TWO")
 PY
-printf '# Conflict chain %s\n' "$slug" > README.md
+printf '# Conflict chain %s\n\nRun tests with `python3 -m unittest discover -v`.\n' "$slug" > README.md
 git add .
 commit_at 1700400000 -m "bootstrap conflict chain $slug"
 git tag "benchkit-rebase-baseline-$slug"
