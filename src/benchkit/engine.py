@@ -1697,6 +1697,9 @@ class Engine:
         loop_killed = bool(gen.get("loop_killed"))
         length_exceeded = bool(gen.get("length_exceeded"))
         harness_error = bool(gen.get("harness_error"))
+        terminal_workspace_evaluation = bool(gen.get("workspace_evaluated")) and (
+            "evaluation_score" in gen
+        )
         evaluation_score = 0.0
         if loop_killed:
             ok = False
@@ -1708,7 +1711,7 @@ class Engine:
             errors += 1
             phase = "loop_killed"
             activity = "doom loop killed — skipping task"
-        elif timed_out:
+        elif timed_out and not terminal_workspace_evaluation:
             ok = False
             if not error:
                 timeout_s = float(gen.get("timeout_s") or self.client.timeout)
@@ -1716,7 +1719,7 @@ class Engine:
                 errors += 1
             phase = "timed_out"
             activity = "timed out — skipping task"
-        elif length_exceeded:
+        elif length_exceeded and not terminal_workspace_evaluation:
             ok = False
             if not error:
                 error = "generation reached the model output-token limit"
@@ -1746,8 +1749,8 @@ class Engine:
 
         if (
             not loop_killed
-            and not timed_out
-            and not length_exceeded
+            and (not timed_out or terminal_workspace_evaluation)
+            and (not length_exceeded or terminal_workspace_evaluation)
             and not harness_error
         ):
             if "evaluation_score" in gen:
@@ -1777,14 +1780,14 @@ class Engine:
         outcome = (
             "harness_error"
             if harness_error
+            else "pass"
+            if ok
             else "length_exceeded"
             if length_exceeded
             else "loop_killed"
             if loop_killed
             else "timeout"
             if timed_out
-            else "pass"
-            if ok
             else "fail"
         )
 

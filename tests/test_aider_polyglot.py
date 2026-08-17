@@ -199,6 +199,97 @@ class AiderPolyglotTests(unittest.TestCase):
             environment.commands,
         )
 
+    def test_disabled_java_tests_are_enabled_after_pristine_restore(self) -> None:
+        environment = FakeEnvironment(
+            [
+                subprocess.CompletedProcess(["git", "diff"], 0, "patch", ""),
+                subprocess.CompletedProcess(
+                    ["git", "diff"],
+                    0,
+                    "src/main/java/WordProblemSolver.java\n"
+                    "src/test/java/WordProblemSolverTest.java\n",
+                    "",
+                ),
+                subprocess.CompletedProcess(["git", "checkout"], 0, "", ""),
+                subprocess.CompletedProcess(["sed"], 0, "", ""),
+                subprocess.CompletedProcess(["gradle", "test"], 0, "tests passed", ""),
+            ]
+        )
+        task = Task(
+            "java/wordy",
+            "",
+            {"language": "java", "exercise": "wordy"},
+        )
+
+        result = AiderPolyglot().verify_workspace(task, environment)
+
+        self.assertTrue(result.passed)
+        self.assertIn("@Disabled", environment.commands[-2][2])
+        self.assertEqual(environment.commands[-1], _TEST_COMMANDS["java"])
+
+    def test_javascript_and_rust_verifiers_enable_skipped_tests(self) -> None:
+        for language, exercise, marker in (
+            ("javascript", "wordy", "xtest"),
+            ("rust", "wordy", "ignore"),
+        ):
+            with self.subTest(language=language):
+                environment = FakeEnvironment(
+                    [
+                        subprocess.CompletedProcess(["git", "diff"], 0, "patch", ""),
+                        subprocess.CompletedProcess(["git", "diff"], 0, "", ""),
+                        subprocess.CompletedProcess(["sed"], 0, "", ""),
+                        subprocess.CompletedProcess(["test"], 0, "tests passed", ""),
+                    ]
+                )
+                task = Task(
+                    f"{language}/{exercise}",
+                    "",
+                    {"language": language, "exercise": exercise},
+                )
+
+                result = AiderPolyglot().verify_workspace(task, environment)
+
+                self.assertTrue(result.passed)
+                self.assertIn(marker, environment.commands[-2][2])
+                self.assertEqual(environment.commands[-1], _TEST_COMMANDS[language])
+
+    def test_counter_keeps_authored_tests_and_checks_every_implementation(self) -> None:
+        environment = FakeEnvironment(
+            [
+                subprocess.CompletedProcess(["git", "diff"], 0, "test patch", ""),
+                subprocess.CompletedProcess(
+                    ["git", "diff"], 0, "counter_test.go\n", ""
+                ),
+                subprocess.CompletedProcess(
+                    ["bash"], 0, "implementation checks passed", ""
+                ),
+            ]
+        )
+        task = Task(
+            "go/counter",
+            "",
+            {"language": "go", "exercise": "counter"},
+        )
+
+        result = AiderPolyglot().verify_workspace(task, environment)
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.details["test_files_restored"], [])
+        self.assertFalse(any("checkout" in command for command in environment.commands))
+        self.assertIn("COUNTER_IMPL=4", environment.commands[-1][2])
+
+    def test_counter_prompt_describes_test_authoring_protocol(self) -> None:
+        task = Task(
+            "go/counter",
+            "",
+            {"language": "go", "exercise": "counter"},
+        )
+
+        prompt = AiderPolyglot().build_prompt(task)
+
+        self.assertIn("test-authoring exercise", prompt)
+        self.assertIn("counter_test.go", prompt)
+
     def test_full_image_pins_dataset_and_contains_every_toolchain(self) -> None:
         self.assertIn(AIDER_POLYGLOT_COMMIT, AIDER_PI_DOCKERFILE)
         for executable in (
@@ -207,7 +298,7 @@ class AiderPolyglotTests(unittest.TestCase):
             "openjdk-17-jdk",
             "libboost-date-time-dev",
             "rustup.rs",
-            "jest",
+            "jest@29.7.0",
         ):
             self.assertIn(executable, AIDER_PI_DOCKERFILE)
         self.assertEqual(tuple(_EXPECTED_COUNTS), _LANGUAGES)

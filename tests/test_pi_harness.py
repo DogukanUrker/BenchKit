@@ -563,6 +563,77 @@ class PiRpcTraceTests(unittest.TestCase):
         self.assertEqual(scaffold["max_output_tokens"], 16384)
         self.assertEqual(scaffold["tools_available"], ["read", "bash", "edit", "write"])
 
+    def test_length_limited_workspace_is_still_verified(self) -> None:
+        events = [
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "usage": {"input": 10, "output": 20},
+                    "stopReason": "length",
+                },
+            },
+            {"type": "agent_settled"},
+            {
+                "id": "benchkit-stats-0",
+                "type": "response",
+                "data": {
+                    "tokens": {"input": 10, "output": 20},
+                    "assistantMessages": 1,
+                },
+            },
+            {
+                "id": "benchkit-final-0",
+                "type": "response",
+                "data": {"text": None},
+            },
+        ]
+
+        class FakeProcess:
+            stdin = io.StringIO()
+            stdout = io.StringIO("".join(json.dumps(event) + "\n" for event in events))
+            stderr = io.StringIO()
+
+            @staticmethod
+            def poll() -> int:
+                return 0
+
+        class FakeEnvironment:
+            def __init__(self, *_args: object, **_kwargs: object) -> None:
+                self.process = FakeProcess()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def start_pi(self) -> FakeProcess:
+                return self.process
+
+            @staticmethod
+            def pi_scaffold() -> dict:
+                return {}
+
+        verifier = Mock(return_value=EvaluationResult(score=1.0))
+        runner = PiAgentRunner(
+            client=SimpleNamespace(),
+            image=SimpleNamespace(
+                version="test", prepare=Mock(return_value="test"), cleanup=Mock()
+            ),
+        )
+
+        with patch("benchkit.pi_agent.DockerTaskEnvironment", FakeEnvironment):
+            generation = runner.generate(
+                "model", "question", workspace_verifier=verifier
+            )
+
+        verifier.assert_called_once()
+        self.assertTrue(generation["length_exceeded"])
+        self.assertTrue(generation["workspace_evaluated"])
+        self.assertEqual(generation["evaluation_score"], 1.0)
+
 
 class HarnessPairingTests(unittest.TestCase):
     def test_genuine_harness_errors_are_excluded_from_score(self) -> None:
@@ -666,6 +737,36 @@ class HarnessPairingTests(unittest.TestCase):
         self.assertEqual(task["output_tokens"], 16384)
         self.assertEqual(task["thinking"], "truncated reasoning")
         self.assertEqual(task["response_time_s"], 610.0)
+
+    def test_length_exceeded_workspace_can_pass_final_verification(self) -> None:
+        runner = Mock(version="test")
+        runner.generate.return_value = {
+            "thinking": "truncated reasoning",
+            "response": "",
+            "trace_status": "observed",
+            "tok_s": 27.3,
+            "eval_count": 100,
+            "eval_duration_ns": 1_000_000_000,
+            "response_time_s": 2.0,
+            "done_reason": "length",
+            "length_exceeded": True,
+            "workspace_evaluated": True,
+            "evaluation_score": 1.0,
+            "evaluation_error": "",
+            "evaluation_details": {"test_exit_code": 0},
+        }
+        engine = Engine(
+            client=SimpleNamespace(provider="openai", timeout=1.0),
+            jobs=[JobSpec("model", "quickbench", "1", harness="pi")],
+        )
+        engine._pi_runner = runner
+
+        result = engine.run()[0]
+
+        self.assertEqual(result["passed"], 1)
+        self.assertEqual(result["score"], 100.0)
+        self.assertEqual(result["length_exceeded"], 1)
+        self.assertEqual(result["tasks"][0]["outcome"], "pass")
 
     def test_engine_cleans_the_image_after_a_failed_pi_job(self) -> None:
         runner = Mock()

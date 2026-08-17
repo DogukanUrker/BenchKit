@@ -389,6 +389,7 @@ class PiAgentRunner:
                         "model_turns": trace.turns,
                         "tool_calls": trace.tool_calls_started,
                         "tool_trace": trace.tool_trace,
+                        "workspace_evaluated": workspace_verifier is not None,
                     }
                     generation_results.append(generation)
 
@@ -403,7 +404,7 @@ class PiAgentRunner:
                     verification_started = time.perf_counter()
                     evaluation = (
                         EvaluationResult(score=0.0)
-                        if terminal
+                        if cancelled or (terminal and workspace_verifier is None)
                         else active_verifier(trace.final_response)
                     )
                     verification_time += time.perf_counter() - verification_started

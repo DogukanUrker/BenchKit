@@ -59,6 +59,29 @@ _TEST_COMMANDS = {
     "python": ["python3", "-m", "unittest", "discover", "-v", "-p", "*_test.py"],
     "rust": ["cargo", "test", "--offline"],
 }
+_ENABLE_TEST_COMMANDS = {
+    "java": [
+        "bash",
+        "-lc",
+        "find src/test -name '*.java' -exec "
+        "sed -i '/^[[:space:]]*@Disabled/d;"
+        "/import org.junit.jupiter.api.Disabled;/d' {} +",
+    ],
+    "javascript": [
+        "bash",
+        "-lc",
+        "find . -maxdepth 1 -name '*.spec.js' -exec "
+        "sed -i -E 's/\\b(xit|xtest)\\s*\\(/test(/g; "
+        "s/\\b(xdescribe)\\s*\\(/describe(/g; "
+        "s/\\b(test|it|describe)\\.skip\\s*\\(/\\1(/g' {} +",
+    ],
+    "rust": [
+        "bash",
+        "-lc",
+        "find tests -name '*.rs' -exec "
+        "sed -i '/^[[:space:]]*#\\[ignore[^]]*\\][[:space:]]*$/d' {} +",
+    ],
+}
 _SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _CACHE_LOCK = threading.Lock()
 
@@ -152,6 +175,17 @@ class AiderPolyglot:
     def build_prompt(self, task: Task) -> str:
         language = task.metadata["language"]
         exercise = task.metadata["exercise"]
+        if language == "go" and exercise == "counter":
+            return (
+                "Solve the Aider Polyglot go exercise `counter` in the current "
+                "workspace. This is a test-authoring exercise: read "
+                "`.docs/instructions.md`, inspect the supplied implementations, "
+                "and write a comprehensive `counter_test.go` that accepts the "
+                "correct implementation and rejects every incorrect one. Use the "
+                "terminal to run checks yourself, bounding every command with "
+                "`timeout --signal=KILL 120s`. Do not modify the supplied "
+                "implementations or exercise instructions."
+            )
         return (
             f"Solve the Aider Polyglot {language} exercise `{exercise}` in the "
             "current workspace. Read `.docs/instructions.md` and any appendices, "
@@ -216,6 +250,10 @@ class AiderPolyglot:
             changed_tests = [
                 path for path in changed if self._is_test_file(language, path)
             ]
+            if language == "go" and exercise == "counter":
+                changed_tests = [
+                    path for path in changed_tests if path != "counter_test.go"
+                ]
             if changed_tests:
                 environment.exec(
                     [
@@ -229,6 +267,21 @@ class AiderPolyglot:
                     ],
                     timeout=30,
                 )
+            enable_command = _ENABLE_TEST_COMMANDS.get(language)
+            if enable_command is not None:
+                environment.exec(
+                    enable_command,
+                    workdir=workspace,
+                    timeout=30,
+                )
+            if language == "go" and exercise == "counter":
+                command = [
+                    "bash",
+                    "-lc",
+                    "for implementation in 1 2 3; do "
+                    "if COUNTER_IMPL=$implementation go test ./...; then exit 1; fi; "
+                    "done; COUNTER_IMPL=4 go test ./...",
+                ]
             completed = environment.exec(
                 command,
                 workdir=workspace,

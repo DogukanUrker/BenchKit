@@ -61,7 +61,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \\
 RUN mkdir -p /opt/javascript-deps \\
     && cd /opt/javascript-deps \\
     && npm init -y \\
-    && npm install jest @babel/core@7.25.2 \\
+    && npm install jest@29.7.0 @babel/core@7.25.2 \\
        @exercism/babel-preset-javascript@0.2.1 \\
        @exercism/eslint-config-javascript@0.6.0 @types/jest@29.5.12 \\
        @types/node@20.12.12 babel-jest@29.6.4 core-js@3.37.1 eslint@8.49.0
