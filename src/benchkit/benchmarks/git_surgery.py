@@ -28,7 +28,17 @@ def _command(call: dict) -> str:
 def _is_error(call: dict) -> bool:
     output = str(call.get("output") or "")
     return bool(call.get("is_error")) or bool(
-        re.search(r"(?:exited with (?:code|status)|exit code)\s+[1-9]\d*", output, re.I)
+        re.search(
+            r"(?:"
+            r"(?:exited with (?:code|status)|exit code)\s+[1-9]\d*"
+            r"|(?:^|\n)\s*(?:fatal|error):"
+            r"|index filter failed"
+            r"|unknown (?:option|switch)"
+            r"|usage:\s+git\b"
+            r")",
+            output,
+            re.I,
+        )
     )
 
 
@@ -170,6 +180,8 @@ class GitSurgery:
         commands = [_command(call) for call in trace]
         searched = any(_SEARCH_RE.search(command) for command in commands)
         rewrote = any(_REWRITE_RE.search(command) for command in commands)
+        history_preserved = state.get("history_preserved", (False, "missing"))
+        secret_absent = state.get("secret_absent", (False, "missing"))
         checkpoint_specs = [
             (
                 "located_offending_commit",
@@ -179,16 +191,16 @@ class GitSurgery:
             ),
             ("history_rewrite_path", 1, rewrote, "history-rewrite command observed"),
             (
-                "conflict_resolved_history_preserved",
+                "history_rewrite_preserved_changes",
                 2,
-                state.get("history_preserved", (False, "missing"))[0],
-                state.get("history_preserved", (False, "missing"))[1],
+                history_preserved[0] and secret_absent[0],
+                history_preserved[1],
             ),
             (
                 "secret_absent_reachable",
                 2,
-                state.get("secret_absent", (False, "missing"))[0],
-                state.get("secret_absent", (False, "missing"))[1],
+                secret_absent[0],
+                secret_absent[1],
             ),
             (
                 "tests_pass",

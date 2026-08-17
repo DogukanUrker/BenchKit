@@ -3,7 +3,9 @@
 `setup.sh SEED WORKSPACE` creates a five-commit repository with fixed Git
 identity and timestamps. The generated AWS-style credential appears in the
 second commit, while the third commit replaces the same line. Removing the
-credential commit therefore causes a real replay conflict. Later commits change
+credential commit therefore causes a real replay conflict. A content-filtering
+rewrite may instead retain a redacted five-commit chain; both outcomes are valid
+when the secret is absent and all later behavior survives. Later commits change
 the retry policy and documentation.
 
 `verify.sh SEED WORKSPACE` emits tab-separated, deterministic state checks. It

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -80,6 +81,36 @@ def solve(workspace: Path) -> None:
     )
 
 
+def solve_by_redacting_history(workspace: Path) -> None:
+    history = run("git", "log", "--all", "-p", cwd=workspace).stdout
+    secret = re.search(r"AKIA[A-F0-9]{16}", history)
+    assert secret is not None
+    module = run("git", "config", "benchkit.module", cwd=workspace).stdout.strip()
+    env = dict(os.environ, FILTER_BRANCH_SQUELCH_WARNING="1")
+    filter_command = (
+        "python3 -c 'from pathlib import Path; "
+        f'p=Path("{module}"); '
+        f'p.write_text(p.read_text().replace("{secret.group()}", "REDACTED"))'
+        "'"
+    )
+    subprocess.run(
+        [
+            "git",
+            "filter-branch",
+            "--force",
+            "--tree-filter",
+            filter_command,
+            "main",
+        ],
+        cwd=workspace,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    run("git", "update-ref", "-d", "refs/original/refs/heads/main", cwd=workspace)
+
+
 def task() -> Task:
     return GitSurgery().load_tasks()[0]
 
@@ -139,6 +170,36 @@ def test_legitimate_rewrite_scores_every_checkpoint() -> None:
     assert result.details["agentic_metrics"]["post_error_recovery_rate"] == 1.0
 
 
+def test_clean_redaction_history_with_five_commits_also_scores_full_credit() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = generate(Path(directory))
+        solve_by_redacting_history(workspace)
+        trace = [
+            {
+                "name": "bash",
+                "arguments": {"command": "git log -S AKIA --all"},
+                "is_error": False,
+            },
+            {
+                "name": "bash",
+                "arguments": {"command": "git filter-branch --tree-filter ... main"},
+                "is_error": False,
+            },
+        ]
+        result = GitSurgery().verify_workspace(
+            task(), LocalEnvironment(workspace), trace
+        )
+
+    assert result.score == 1.0
+    checkpoint = next(
+        item
+        for item in result.details["checkpoints"]
+        if item["id"] == "history_rewrite_preserved_changes"
+    )
+    assert checkpoint["passed"]
+    assert checkpoint["evidence"] == "commit_count=5"
+
+
 def test_reinitialized_repository_fires_destructive_penalty() -> None:
     with tempfile.TemporaryDirectory() as directory:
         workspace = generate(Path(directory))
@@ -186,6 +247,27 @@ def test_agentic_metrics_reject_malformed_native_arguments() -> None:
     assert metrics["tool_schema_valid_calls"] == 1
     assert metrics["tool_schema_invalid_calls"] == 1
     assert metrics["errored_tool_calls"] == 2
+
+
+def test_agentic_metrics_detect_errors_hidden_by_successful_shell_tail() -> None:
+    metrics = agentic_metrics(
+        [
+            {
+                "name": "bash",
+                "arguments": {"command": "broken-command; echo done"},
+                "is_error": False,
+                "output": "fatal: unknown revision\ndone\n",
+            },
+            {
+                "name": "bash",
+                "arguments": {"command": "git status"},
+                "is_error": False,
+            },
+        ]
+    )
+
+    assert metrics["errored_tool_calls"] == 1
+    assert metrics["post_error_recoveries"] == 1
 
 
 def test_cli_slice_selects_the_first_git_surgery_task() -> None:

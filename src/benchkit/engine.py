@@ -996,18 +996,16 @@ class Engine:
                         errors += outcome.errors
                         total_tokens += outcome.eval_count
                         total_response_time += outcome.response_time_s
-                        complete_length_metrics = not record.length_exceeded or (
+                        complete_terminal_metrics = not (
+                            record.length_exceeded or record.timed_out
+                        ) or (
                             outcome.eval_count > 0
                             and outcome.eval_duration_ns > 0
                             and outcome.response_time_s > 0
                         )
                         if (
-                            not (
-                                record.loop_killed
-                                or record.timed_out
-                                or record.harness_error
-                            )
-                            and complete_length_metrics
+                            not (record.loop_killed or record.harness_error)
+                            and complete_terminal_metrics
                         ):
                             throughput_tokens += outcome.eval_count
                             throughput_eval_ns += outcome.eval_duration_ns
