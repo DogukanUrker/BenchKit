@@ -109,5 +109,6 @@ git config benchkit.seed "$seed"
 git config benchkit.baseline "$baseline_sha"
 git config benchkit.secretCommit "$secret_sha"
 git config benchkit.expectedHead "$(git rev-parse HEAD)"
+git config benchkit.expectedTree "$(git rev-parse 'HEAD^{tree}')"
 git config benchkit.module "$module.py"
 git status --porcelain | grep -q . && exit 1 || true

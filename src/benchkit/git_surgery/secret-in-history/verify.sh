@@ -50,7 +50,25 @@ fi
 expected_line='CREDENTIAL_ENV = "BENCHKIT_DEPLOY_KEY"'
 grep -Fxq "$expected_line" "$workspace/$module" 2>/dev/null || history_ok=0
 grep -Fxq 'RETRIES = 5' "$workspace/$module" 2>/dev/null || history_ok=0
-emit history_preserved "$history_ok" "commit_count=$count"
+expected_tree="$(git -C "$workspace" config --get benchkit.expectedTree 2>/dev/null || true)"
+current_tree="$(git -C "$workspace" rev-parse 'HEAD^{tree}' 2>/dev/null || true)"
+tree_match=0
+if [[ -n "$expected_tree" && "$current_tree" == "$expected_tree" ]]; then
+    tree_match=1
+else
+    history_ok=0
+fi
+unexpected_paths="$({
+    while read -r commit; do
+        git -C "$workspace" ls-tree -r --name-only "$commit" 2>/dev/null
+    done < <(git -C "$workspace" rev-list HEAD 2>/dev/null)
+} | sort -u | grep -Ev "^(README\\.md|test_config\\.py|${module})$" || true)"
+[[ -z "$unexpected_paths" ]] || history_ok=0
+tree_detail="tree_match=$tree_match"
+if [[ -n "$unexpected_paths" ]]; then
+    tree_detail="$tree_detail unexpected_paths=$(printf '%s' "$unexpected_paths" | tr '\n' ',')"
+fi
+emit history_preserved "$history_ok" "commit_count=$count $tree_detail"
 
 secret_found=0
 while read -r object _path; do

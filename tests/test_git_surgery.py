@@ -197,7 +197,30 @@ def test_clean_redaction_history_with_five_commits_also_scores_full_credit() -> 
         if item["id"] == "history_rewrite_preserved_changes"
     )
     assert checkpoint["passed"]
-    assert checkpoint["evidence"] == "commit_count=5"
+    assert checkpoint["evidence"] == "commit_count=5 tree_match=1"
+
+
+def test_extra_file_in_rewritten_history_fails_preservation_checkpoint() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = generate(Path(directory))
+        run(
+            "git",
+            "filter-branch",
+            "--force",
+            "--tree-filter",
+            "echo hello > test.txt",
+            "main",
+            cwd=workspace,
+        )
+        result = GitSurgery().verify_workspace(task(), LocalEnvironment(workspace), [])
+
+    checkpoint = next(
+        item
+        for item in result.details["checkpoints"]
+        if item["id"] == "history_rewrite_preserved_changes"
+    )
+    assert not checkpoint["passed"]
+    assert "unexpected_paths=test.txt" in checkpoint["evidence"]
 
 
 def test_reinitialized_repository_fires_destructive_penalty() -> None:
