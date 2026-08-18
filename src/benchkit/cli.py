@@ -120,6 +120,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--force-unload",
+        action="store_true",
+        help=(
+            "Headless: evict each model from VRAM between models "
+            "(llama.cpp POST /models/unload; Ollama keep_alive=0)"
+        ),
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="Print the available benchmarks and exit",
@@ -447,7 +455,13 @@ def _headless(args: argparse.Namespace) -> None:
             perturbations=perturbations,
         )
 
-    results, failure = run(client, jobs, console, args.verbose)
+    results, failure = run(
+        client,
+        jobs,
+        console,
+        args.verbose,
+        force_unload=args.force_unload,
+    )
     if not results:
         console.print("[yellow]No results.[/yellow]")
         sys.exit(1 if failure else 0)

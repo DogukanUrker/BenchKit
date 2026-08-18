@@ -321,6 +321,9 @@ class DemoClient:
     def unload_model(self, model: str) -> None:
         time.sleep(0.05 / self.speed)
 
+    def force_unload_model(self, model: str) -> None:
+        self.unload_model(model)
+
     def _profile(self, model: str) -> dict:
         for entry in DEMO_MODELS:
             if entry["name"] == model:

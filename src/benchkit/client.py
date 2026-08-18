@@ -137,6 +137,24 @@ def _capacity_from_payload(payload: object) -> int | None:
     return total or None
 
 
+def _describe_http_error(exc: Exception) -> str:
+    """Human message for an unload failure, reading error bodies when present."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = exc.response
+        try:
+            body = response.json()
+        except (ValueError, TypeError):
+            return f"HTTP {response.status_code}"
+        if isinstance(body, dict):
+            error = body.get("error")
+            if isinstance(error, dict) and isinstance(error.get("message"), str):
+                return f"HTTP {response.status_code}: {error['message']}"
+            if isinstance(error, str):
+                return f"HTTP {response.status_code}: {error}"
+        return f"HTTP {response.status_code}"
+    return str(exc)
+
+
 def _content_text(content: object) -> str:
     """Normalize text from OpenAI-compatible string or content-part fields."""
     if isinstance(content, str):
@@ -532,6 +550,15 @@ class InferenceClient:
         self._context_lengths[model] = known
         return known
 
+    def _is_llama_swap(self, model: str) -> bool:
+        """Return True when the served model is routed by llama-swap."""
+        info = self._models_by_name.get(model, {})
+        owner = str(info.get("owned_by") or "").strip().lower()
+        meta = info.get("meta") or {}
+        return owner in {"llama-swap", "llamaswap"} or (
+            isinstance(meta, dict) and "llamaswap" in meta
+        )
+
     def _discover_context_length(self, model: str) -> int | None:
         if self.provider == "ollama":
             root = _without_v1(self.host)
@@ -568,17 +595,11 @@ class InferenceClient:
             return None
 
         root = _without_v1(self.host)
-        info = self._models_by_name.get(model, {})
         attempts: list[tuple[str, dict[str, str] | None]] = [
             (f"{root}/props", {"model": model}),
             (f"{root}/slots", {"model": model}),
         ]
-        owner = str(info.get("owned_by") or "").strip().lower()
-        meta = info.get("meta") or {}
-        is_llama_swap = owner in {"llama-swap", "llamaswap"} or (
-            isinstance(meta, dict) and "llamaswap" in meta
-        )
-        if is_llama_swap:
+        if self._is_llama_swap(model):
             upstream = f"{root}/upstream/{quote(model, safe='/')}"
             attempts.extend([(f"{upstream}/props", None), (f"{upstream}/slots", None)])
 
@@ -609,12 +630,7 @@ class InferenceClient:
             (f"{root}/health", {"model": model}),
         ]
 
-        owner = str(info.get("owned_by") or "").strip().lower()
-        meta = info.get("meta") or {}
-        is_llama_swap = owner in {"llama-swap", "llamaswap"} or (
-            isinstance(meta, dict) and "llamaswap" in meta
-        )
-        if is_llama_swap:
+        if self._is_llama_swap(model):
             upstream = f"{root}/upstream/{quote(model, safe='/')}"
             attempts.extend(
                 [
@@ -1045,13 +1061,7 @@ class InferenceClient:
             return None
         root = _without_v1(self.host)
         attempts = [f"{root}/tokenize"]
-        info = self._models_by_name.get(model, {})
-        owner = str(info.get("owned_by") or "").strip().lower()
-        meta = info.get("meta") or {}
-        is_llama_swap = owner in {"llama-swap", "llamaswap"} or (
-            isinstance(meta, dict) and "llamaswap" in meta
-        )
-        if is_llama_swap:
+        if self._is_llama_swap(model):
             upstream = f"{root}/upstream/{quote(model, safe='/')}"
             attempts.append(f"{upstream}/tokenize")
 
@@ -1233,3 +1243,52 @@ class InferenceClient:
             json={"model": model, "keep_alive": 0},
             timeout=30,
         )
+
+    def force_unload_model(self, model: str) -> None:
+        """Force a model out of VRAM before the next model loads.
+
+        Ollama keeps the model-scoped ``keep_alive=0`` unload. Both llama.cpp's
+        router mode and llama-swap unload a named model through the synchronous
+        ``POST /models/unload`` endpoint, whose success response means the
+        model has already been evicted. Older single-model llama-server builds
+        only know the bare ``POST /unload`` endpoint, used as a fallback for
+        non-swap servers. Raises ``RuntimeError`` with the server's message when
+        no unload could be issued.
+        """
+        if self.provider == "ollama":
+            self.unload_model(model)
+            return
+        if self.provider != "openai":
+            raise RuntimeError(f"{self.label} does not support model unload")
+
+        root = _without_v1(self.host)
+        try:
+            self._request(
+                "POST",
+                f"{root}/models/unload",
+                headers=self._headers(),
+                json={"model": model},
+                timeout=min(self.timeout, 60),
+            )
+            return
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {404, 405} and not self._is_llama_swap(
+                model
+            ):
+                try:
+                    self._request(
+                        "POST",
+                        f"{root}/unload",
+                        headers=self._headers(),
+                        timeout=min(self.timeout, 60),
+                    )
+                    return
+                except (httpx.HTTPError, RuntimeError, ValueError, TypeError) as fb:
+                    raise RuntimeError(
+                        f"POST /unload: {_describe_http_error(fb)}"
+                    ) from fb
+            raise RuntimeError(
+                f"POST /models/unload: {_describe_http_error(exc)}"
+            ) from exc
+        except (httpx.HTTPError, RuntimeError, ValueError, TypeError) as exc:
+            raise RuntimeError(f"POST /models/unload: {exc}") from exc

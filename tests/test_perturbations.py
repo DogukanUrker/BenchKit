@@ -289,7 +289,9 @@ class SetupPerturbationTUITests(unittest.IsolatedAsyncioTestCase):
             def on_mount(self) -> None:
                 self.push_screen(TestSetupScreen())
 
-            def start_run(self, jobs: list[JobSpec]) -> None:
+            def start_run(
+                self, jobs: list[JobSpec], *, force_unload: bool = False
+            ) -> None:
                 self.started_jobs = jobs
 
         app = Harness()

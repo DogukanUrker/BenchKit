@@ -21,6 +21,7 @@ from benchkit.engine import (
     JobCompleted,
     JobSpec,
     JobStarted,
+    ModelUnloaded,
     RunCompleted,
     RunControls,
     RunFailed,
@@ -88,15 +89,17 @@ class RunScreen(Screen[None]):
         Binding("p", "pause", "Pause"),
         Binding("k", "skip", "Skip job"),
         Binding("x", "stop", "Stop run"),
+        Binding("u", "toggle_unload", "Force unload"),
         Binding("f", "toggle_failures", "Failures only"),
         Binding("t", "toggle_follow", "Follow"),
         Binding("escape", "stop", "Stop run", show=False),
     ]
 
-    def __init__(self, jobs: list[JobSpec]) -> None:
+    def __init__(self, jobs: list[JobSpec], *, force_unload: bool = False) -> None:
         super().__init__()
         self.jobs = jobs
-        self.controls = RunControls()
+        self.force_unload = force_unload
+        self.controls = RunControls(force_unload=force_unload)
         self.records: dict[int, list[TaskRecord]] = {}
         self.current_index = -1
         self.current_total = 0
@@ -161,6 +164,8 @@ class RunScreen(Screen[None]):
         subtitle = f"{len(self.jobs)} run(s) · {fmt_count(self.overall_total)} tasks"
         if cap_note := _variant_cap_note(self.jobs):
             subtitle += f" · served cap: {cap_note}"
+        if self.force_unload:
+            subtitle += " · force unload"
         self.sub_title = subtitle
 
         queue = self.query_one("#queue", DataTable)
@@ -256,6 +261,15 @@ class RunScreen(Screen[None]):
             self._job_completed(event)
         elif isinstance(event, RunCompleted):
             self._run_completed(event)
+        elif isinstance(event, ModelUnloaded):
+            if event.error:
+                self.notify(
+                    f"Force-unload failed for {event.model}: {event.error}",
+                    severity="error",
+                    timeout=6,
+                )
+            else:
+                self.notify(f"Force-unloading {event.model}", timeout=3)
         elif isinstance(event, RunFailed):
             self.notify(event.message, severity="error", timeout=10)
 
@@ -840,6 +854,16 @@ class RunScreen(Screen[None]):
     def action_toggle_follow(self) -> None:
         self.follow = not self.follow
         self.notify(f"Auto-scroll {'on' if self.follow else 'off'}", timeout=2)
+
+    def action_toggle_unload(self) -> None:
+        if self.finished:
+            return
+        enabled = self.controls.toggle_force_unload()
+        self.notify(
+            f"Force unload {'on' if enabled else 'off'} "
+            "— applies at the next model switch",
+            timeout=3,
+        )
 
 
 def _result_cell(record: TaskRecord, dark: bool = True) -> Text:
