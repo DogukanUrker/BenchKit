@@ -29,6 +29,7 @@ include = ["benchkit*"]
 
 [tool.setuptools.package-data]
 benchkit = [
+    "answer_key_guard.ts",
     "datasets/*.jsonl",
     "datasets/*.md",
     "datasets/*.txt",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import unittest
 from collections import Counter
 from unittest.mock import Mock, patch
@@ -10,10 +11,12 @@ from benchkit.benchmarks.ruler import RULER
 from benchkit.benchmarks.ruler_generator import (
     CONTEXT_BUCKETS,
     OUTPUT_RESERVE_TOKENS,
+    TASK_KINDS,
     TASKS_PER_BUCKET,
     context_label,
     fit_prompt,
     generate_tasks,
+    render_prompt,
 )
 from benchkit.client import InferenceClient, _context_length_hint
 from benchkit.engine import (
@@ -21,10 +24,9 @@ from benchkit.engine import (
     JobSpec,
     benchmark,
     expand_jobs,
-    slice_task_count,
-    task_count,
     tasks_for_job,
 )
+from benchkit.leakage import PromptLeakageError, assert_candidate_parity
 
 
 class ContextClient:
@@ -60,25 +62,40 @@ class ContextClient:
 
 
 class RulerGenerationTests(unittest.TestCase):
-    def test_generates_twenty_lightweight_specs_per_context(self) -> None:
-        tasks = generate_tasks()
+    def test_generates_all_thirteen_lightweight_specs_per_context(self) -> None:
+        tasks = generate_tasks(samples_per_kind=1)
         counts = Counter(task.metadata["context_tokens"] for task in tasks)
 
-        self.assertEqual(len(tasks), TASKS_PER_BUCKET * len(CONTEXT_BUCKETS))
-        self.assertEqual(task_count("ruler"), len(tasks))
-        self.assertEqual(slice_task_count("ruler"), TASKS_PER_BUCKET)
+        self.assertEqual(len(tasks), len(TASK_KINDS) * len(CONTEXT_BUCKETS))
         self.assertEqual(
             counts,
-            Counter(dict.fromkeys(CONTEXT_BUCKETS, TASKS_PER_BUCKET)),
+            Counter(dict.fromkeys(CONTEXT_BUCKETS, len(TASK_KINDS))),
         )
         self.assertTrue(all(not task.prompt for task in tasks))
         self.assertEqual(
             {task.metadata["task_type"] for task in tasks},
-            {"niah_multikey", "variable_tracking"},
+            set(TASK_KINDS),
+        )
+
+    def test_leakage_guard_rejects_old_markers_and_accepts_fixed_distribution(
+        self,
+    ) -> None:
+        with self.assertRaises(PromptLeakageError):
+            assert_candidate_parity(
+                target_keys=["target-1", "target-2", "target-3", "target-4"],
+                distractor_keys=["archive-a", "archive-b", "archive-c", "archive-d"],
+                target_values=["7654321"],
+                distractor_values=["5284639", "5389368", "5494097", "5598826"],
+            )
+        assert_candidate_parity(
+            target_keys=["quiet-harbor", "silver-forest"],
+            distractor_keys=["gentle-meadow", "rapid-river"],
+            target_values=["5284639"],
+            distractor_values=["7654321", "2381947"],
         )
 
     def test_prompt_fitting_is_deterministic_and_token_aware(self) -> None:
-        task = generate_tasks()[0]
+        task = generate_tasks(samples_per_kind=1)[0]
 
         def counter(text: str) -> int:
             return len(text.split())
@@ -93,13 +110,13 @@ class RulerGenerationTests(unittest.TestCase):
         assert measured is not None
         self.assertLessEqual(measured, target)
         self.assertGreaterEqual(measured, target * 0.99)
-        self.assertIn(str(task.metadata["query"]), first)
+        self.assertIn(str(task.metadata["query"][0]), first)
         self.assertIn(str(task.metadata["answers"][0]), first)
 
     def test_variable_tracking_uses_fractional_ruler_scoring(self) -> None:
         task = next(
             task
-            for task in generate_tasks()
+            for task in generate_tasks(samples_per_kind=1)
             if task.metadata["task_type"] == "variable_tracking"
         )
         answers = task.metadata["answers"]
@@ -107,6 +124,20 @@ class RulerGenerationTests(unittest.TestCase):
 
         self.assertEqual(RULER().evaluate(task, response), 3 / 5)
         self.assertEqual(RULER().evaluate(task, "none found"), 0.0)
+
+    def test_variable_tracking_generation_is_unchanged(self) -> None:
+        task = next(
+            task
+            for task in generate_tasks(samples_per_kind=1)
+            if task.metadata["task_type"] == "variable_tracking"
+        )
+        digest = hashlib.sha256(render_prompt(task, 7).encode()).hexdigest()
+
+        self.assertEqual(task.metadata["seed"], 4_132_917)
+        self.assertEqual(
+            digest,
+            "e0c8aff8e12204f82e9ac9c095add399a8b7e9653e6d9615f2a180e63ae3824b",
+        )
 
 
 class RulerJobTests(unittest.TestCase):

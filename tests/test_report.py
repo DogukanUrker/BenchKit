@@ -94,3 +94,50 @@ def test_markdown_exposes_score_denominator_failure_modes_and_pi_scaffold(
     assert report_csv["pi_system_prompt_tokens"] == "5"
     assert '"pi_system_prompt_tokens": 5' in report_html
     assert "Pi scaffold · ${number(row.pi_system_prompt_tokens)} tokens" in report_html
+
+
+def test_reports_contamination_summary_and_offending_tasks(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = {
+        "model": "model",
+        "harness": "pi",
+        "benchmark": "aider-polyglot",
+        "score": 0.0,
+        "passed": 0,
+        "scored_total": 0,
+        "total": 1,
+        "contaminated": 1,
+        "contamination_by_language": {"go": 1},
+        "contaminated_tasks": [
+            {
+                "task_id": "go/pov",
+                "language": "go",
+                "guard_hits": [{"matches": [".meta/example.go"]}],
+            }
+        ],
+        "avg_response_time": 1.0,
+        "total_time": 1.0,
+        "tasks": [
+            {
+                "task_id": "go/pov",
+                "passed": False,
+                "score": 0.0,
+                "contaminated": True,
+                "prompt": "solve",
+                "response": "done",
+            }
+        ],
+    }
+
+    output = save([result])
+    markdown = (output / "results.md").read_text()
+    html = (output / "results.html").read_text()
+
+    assert "Contamination detected" in markdown
+    assert "Headline score excludes 1 contaminated task" in markdown
+    assert "go 1" in markdown
+    assert "`go/pov`: `.meta/example.go`" in markdown
+    assert "CONTAMINATED" in markdown
+    assert "contaminationByLanguage" in html

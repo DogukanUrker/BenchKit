@@ -231,6 +231,7 @@ class TaskRecord:
         "timeout",
         "length_exceeded",
         "harness_error",
+        "contaminated",
     ] = "fail"
     perturbation: dict = field(default_factory=dict)
     score: float = 0.0
@@ -244,6 +245,7 @@ class TaskRecord:
     loop_killed: bool = False
     length_exceeded: bool = False
     harness_error: bool = False
+    contaminated: bool = False
     loop_kill_score: float = 0.0
     loop_killed_at_s: float | None = None
     trace_status: str = "unavailable"
@@ -641,6 +643,9 @@ def _empty_result(job: JobSpec) -> dict:
         "concurrency": 1,
         "errors": 0,
         "harness_errors": 0,
+        "contaminated": 0,
+        "contamination_by_language": {},
+        "contaminated_tasks": [],
         "length_exceeded": 0,
         "timeouts": 0,
         "loop_kills": 0,
@@ -1026,7 +1031,9 @@ class Engine:
                         records_by_position[record.index] = record
                         passed += int(record.passed)
                         score_points += record.score
-                        scored_total += int(not record.harness_error)
+                        scored_total += int(
+                            not record.harness_error and not record.contaminated
+                        )
                         errors += outcome.errors
                         total_tokens += outcome.eval_count
                         total_response_time += outcome.response_time_s
@@ -1084,7 +1091,11 @@ class Engine:
         )
         total_time = round(wall_time_s, 1)
         completed = len(records)
-        scored_records = [record for record in records if not record.harness_error]
+        scored_records = [
+            record
+            for record in records
+            if not record.harness_error and not record.contaminated
+        ]
         scored_total = len(scored_records)
         throughput_coverage = (
             throughput_response_time / total_response_time
@@ -1121,6 +1132,7 @@ class Engine:
         loop_kills = sum(record.loop_killed for record in records)
         length_exceeded = sum(record.length_exceeded for record in records)
         harness_errors = sum(record.harness_error for record in records)
+        contaminated_records = [record for record in records if record.contaminated]
         failures = sum(record.outcome == "fail" for record in records)
         traced = sum(record.trace_status != "unavailable" for record in records)
         latency_records = [
@@ -1267,6 +1279,28 @@ class Engine:
             "concurrency": concurrency,
             "errors": errors,
             "harness_errors": harness_errors,
+            "contaminated": len(contaminated_records),
+            "contamination_by_language": {
+                language: sum(
+                    record.workspace.get("language") == language
+                    for record in contaminated_records
+                )
+                for language in sorted(
+                    {
+                        str(record.workspace.get("language"))
+                        for record in contaminated_records
+                        if record.workspace.get("language")
+                    }
+                )
+            },
+            "contaminated_tasks": [
+                {
+                    "task_id": record.task_id,
+                    "language": record.workspace.get("language", ""),
+                    "guard_hits": record.workspace.get("answer_key_guard_hits", []),
+                }
+                for record in contaminated_records
+            ],
             "length_exceeded": length_exceeded,
             "failures": failures,
             "timeouts": timeouts,
@@ -1306,6 +1340,10 @@ class Engine:
                     "loop_killed": record.loop_killed,
                     "length_exceeded": record.length_exceeded,
                     "harness_error": record.harness_error,
+                    "contaminated": record.contaminated,
+                    "contamination_verdict": record.workspace.get(
+                        "contamination_verdict", "CLEAR"
+                    ),
                     "loop_kill_score": record.loop_kill_score,
                     "loop_killed_at_s": record.loop_killed_at_s,
                     "trace_status": record.trace_status,
@@ -1344,6 +1382,9 @@ class Engine:
             **pi_metadata,
             **_result_metadata(job),
         }
+        task_statistics = getattr(bench, "task_statistics", None)
+        if callable(task_statistics):
+            result["task_statistics"] = task_statistics(records)
         return result, skipped
 
     def _verify_response(
@@ -1792,6 +1833,8 @@ class Engine:
             "evaluation_score" in gen
         )
         evaluation_score = 0.0
+        evaluation_details = dict(gen.get("evaluation_details") or {})
+        contaminated = evaluation_details.get("contamination_verdict") == "CONTAMINATED"
         if loop_killed:
             ok = False
             error = (
@@ -1868,9 +1911,15 @@ class Engine:
                 errors += 1
                 harness_error = True
 
+        if contaminated:
+            ok = False
+            evaluation_score = 0.0
+
         outcome = (
             "harness_error"
             if harness_error
+            else "contaminated"
+            if contaminated
             else "pass"
             if ok
             else "length_exceeded"
@@ -1904,6 +1953,7 @@ class Engine:
             loop_killed=loop_killed,
             length_exceeded=length_exceeded,
             harness_error=harness_error,
+            contaminated=contaminated,
             loop_kill_score=float(gen.get("loop_kill_score", 0.0)),
             loop_killed_at_s=gen.get("loop_killed_at_s"),
             trace_status=gen.get("trace_status", "unavailable"),
@@ -1947,7 +1997,7 @@ class Engine:
             repair_feedback=list(gen.get("repair_feedback") or []),
             first_attempt_score=float(gen.get("first_attempt_score", evaluation_score)),
             repaired=bool(gen.get("repaired")),
-            workspace=dict(gen.get("evaluation_details") or {}),
+            workspace=evaluation_details,
         )
         return _TaskOutcome(
             record=record,

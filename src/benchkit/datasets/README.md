@@ -80,7 +80,12 @@ IFEval paper. Only the schema changed: `key` became `task_id`, and the
 
 ## RULER
 
-RULER has no dataset file. BenchKit deterministically generates its multi-key
+RULER deterministically generates its NIAH, variable-tracking, CWE, and FWE
+tasks. Essay-backed NIAH uses upstream `PaulGrahamEssays.json`; QA-1 and QA-2
+use SQuAD 2.0 development and HotpotQA distractor validation data cached under
+`~/.cache/benchkit/ruler`. BenchKit downloads the QA files on first use. The
+essay corpus is generated with NVIDIA/RULER's
+`download_paulgraham_essay.py`.
 retrieval and variable-tracking prompts at runtime for each context bucket.
 
 - Source design: <https://github.com/NVIDIA/RULER>

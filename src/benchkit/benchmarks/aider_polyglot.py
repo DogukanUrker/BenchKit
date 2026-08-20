@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -84,6 +85,7 @@ _ENABLE_TEST_COMMANDS = {
 }
 _SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _CACHE_LOCK = threading.Lock()
+_ANSWER_KEY_GUARD_LOG = "/tmp/benchkit-answer-key-guard.jsonl"
 
 
 def _cache_root() -> Path:
@@ -213,6 +215,36 @@ class AiderPolyglot:
         source = f"/opt/aider-polyglot/{language}/exercises/practice/{exercise}/."
         environment.exec(["mkdir", "-p", workspace])
         environment.exec(["cp", "-a", source, f"{workspace}/"])
+        environment.exec(
+            [
+                "find",
+                workspace,
+                "-depth",
+                "(",
+                "-name",
+                ".meta",
+                "-o",
+                "-name",
+                ".approaches",
+                "-o",
+                "-iname",
+                "*example*",
+                "-o",
+                "-iname",
+                "*reference*",
+                "-o",
+                "-iname",
+                "*proof*",
+                ")",
+                "-exec",
+                "rm",
+                "-rf",
+                "{}",
+                "+",
+            ]
+        )
+        environment.exec(["rm", "-rf", f"{workspace}/.git"])
+        environment.exec(["rm", "-f", _ANSWER_KEY_GUARD_LOG])
         environment.exec(["git", "init", "-q", workspace])
         environment.exec(["git", "-C", workspace, "config", "user.name", "BenchKit"])
         environment.exec(
@@ -289,6 +321,17 @@ class AiderPolyglot:
                 timeout=180,
                 check=False,
             )
+            guard_result = environment.exec(
+                ["cat", _ANSWER_KEY_GUARD_LOG], timeout=10, check=False
+            )
+            guard_hits = []
+            for line in guard_result.stdout.splitlines():
+                try:
+                    hit = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(hit, dict):
+                    guard_hits.append(hit)
         except Exception as exc:
             return EvaluationResult(
                 0.0,
@@ -296,6 +339,7 @@ class AiderPolyglot:
             )
         output = (completed.stdout + completed.stderr).strip()
         passed = completed.returncode == 0
+        contaminated = bool(guard_hits)
         feedback = ""
         if not passed:
             feedback = (
@@ -303,10 +347,12 @@ class AiderPolyglot:
                 f"workspace, and run the tests again:\n\n{output[-6000:]}"
             )
         return EvaluationResult(
-            score=1.0 if passed else 0.0,
+            score=1.0 if passed and not contaminated else 0.0,
             feedback=feedback,
             details={
                 "language": language,
+                "contamination_verdict": ("CONTAMINATED" if contaminated else "CLEAR"),
+                "answer_key_guard_hits": guard_hits,
                 "test_command": command,
                 "test_exit_code": completed.returncode,
                 "test_output": output[-8000:],

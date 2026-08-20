@@ -82,6 +82,42 @@ def save(
     with open(out / "results.md", "w") as f:
         f.write("# BenchKit Results\n\n")
         f.write(f"**Date:** {ts}\n\n")
+        contaminated_rows = [result for result in results if result.get("contaminated")]
+        if contaminated_rows:
+            f.write("## ⚠️ Contamination detected\n\n")
+            language_counts: dict[str, int] = {}
+            offending: list[dict] = []
+            for result in contaminated_rows:
+                for language, count in result.get(
+                    "contamination_by_language", {}
+                ).items():
+                    language_counts[language] = language_counts.get(language, 0) + int(
+                        count
+                    )
+                offending.extend(result.get("contaminated_tasks", []))
+            f.write(
+                "**Headline score excludes "
+                f"{sum(language_counts.values())} contaminated task(s).**\n\n"
+            )
+            f.write(
+                "**Per language:** "
+                + " · ".join(
+                    f"{language} {count}"
+                    for language, count in sorted(language_counts.items())
+                )
+                + "\n\n"
+            )
+            for task in offending:
+                hits = task.get("guard_hits") or []
+                targets = sorted(
+                    {str(match) for hit in hits for match in (hit.get("matches") or [])}
+                )
+                f.write(
+                    f"- `{task.get('task_id', '')}`: "
+                    + ", ".join(f"`{target}`" for target in targets)
+                    + "\n"
+                )
+            f.write("\n")
         f.write(
             "| Model | Harness | Benchmark | Score | Harness score Δ | Loop-kill Δ | Repair Δ | Fixed | Delta | Regressions | Passed | Scored | Total | Fail | Loop killed | Timeout | Length exceeded | Harness error | Tools used/available | Parallel | Trace | Throughput coverage | Agg tok/s | Stream tok/s | Effective | Avg Resp | Wall Time |\n"
         )
@@ -185,6 +221,19 @@ def save(
                     f"| {result.get('redundant_action_rate', 0):.1f}% "
                     f"| {result.get('destructive_action_count', 0)} |\n"
                 )
+
+        ruler_rows = [result for result in results if result.get("task_statistics")]
+        if ruler_rows:
+            f.write("\n## RULER per-task confidence intervals\n\n")
+            f.write("| Model | Context | Task | Samples | Score | 95% CI |\n")
+            f.write("|-------|---------|------|--------:|------:|-------:|\n")
+            for result in ruler_rows:
+                for row in result["task_statistics"]:
+                    f.write(
+                        f"| {result['model']} | {result.get('context_label', '')} "
+                        f"| {row['task']} | {row['samples']} | {row['score']:.1f}% "
+                        f"| [{row['ci95_low']:.1f}%, {row['ci95_high']:.1f}%] |\n"
+                    )
 
         harness_pairs = [
             result
@@ -296,7 +345,9 @@ def save(
                 entry = task.get("entry_point")
                 label = f"{task_id} ({entry})" if entry else task_id
                 status = (
-                    "🛑 LOOP KILLED"
+                    "☣️ CONTAMINATED"
+                    if task.get("contaminated")
+                    else "🛑 LOOP KILLED"
                     if task.get("loop_killed")
                     else "⏱️ TIMEOUT"
                     if task.get("timed_out")

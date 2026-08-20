@@ -351,6 +351,7 @@
     </header>
 
     <section class="summary" id="summary"></section>
+    <section id="contamination"></section>
 
     <section class="section">
       <div class="section-head"><h2>Chart gallery</h2><p class="section-note">Inspect and capture any chart directly</p></div>
@@ -438,6 +439,13 @@
     const date = report.generated_at.replace("_", " · ").replaceAll("-", ".");
     const benchmarks = [...new Set(capabilityRows.map(benchmarkLabel))];
     const totalTasks = rows.reduce((sum, row) => sum + number(row.total), 0);
+    const contaminatedTasks = rows.flatMap(row => row.contaminated_tasks || []);
+    const contaminationByLanguage = rows.reduce((counts, row) => {
+      Object.entries(row.contamination_by_language || {}).forEach(([language, count]) => {
+        counts[language] = number(counts[language]) + number(count);
+      });
+      return counts;
+    }, {});
     const totalScored = rows.reduce((sum, row) => sum + number(row.scored_total ?? row.total), 0);
     const totalLoops = rows.reduce((sum, row) => sum + number(row.loops), 0);
     const totalRuntime = rows.reduce((sum, row) => sum + number(row.total_time), 0);
@@ -546,6 +554,9 @@
       ["Peak throughput", `${Math.max(0, ...models.map(model => model.speed)).toFixed(1)} tok/s`],
       ["Runtime", formatTime(totalRuntime)],
     ].map(([label, value]) => `<div class="stat"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`).join("");
+    document.getElementById("contamination").innerHTML = contaminatedTasks.length
+      ? `<article class="chart-shell"><div class="chart-header"><h3 class="chart-title">⚠️ Contamination detected</h3><span class="chart-subtitle">· excluded from headline score</span></div><p>${contaminatedTasks.length} task(s) · ${escapeHtml(Object.entries(contaminationByLanguage).sort().map(([language, count]) => `${language} ${count}`).join(" · "))}</p><p>${escapeHtml(contaminatedTasks.map(task => task.task_id).join(", "))}</p></article>`
+      : "";
     document.getElementById("overallChart").innerHTML = scoredModels.length
       ? chart(chartConfigs.get("overall"))
       : `<article class="chart-shell"><div class="chart-header"><h3 class="chart-title">Overall</h3><span class="chart-subtitle">· not applicable</span></div><p class="section-note">RULER is reported independently at each context length.</p></article>`;
@@ -711,9 +722,10 @@
       .map(row => `<details>
         <summary><span class="detail-title">${escapeHtml(row.model)}${row.harness_version ? ` ${escapeHtml(row.harness_version)}` : ""} / ${escapeHtml(benchmarkLabel(row))}</span><span class="detail-score">${row.passed}/${number(row.scored_total ?? row.total)} scored · ${number(row.total)} attempted · ${number(row.score).toFixed(1)}% · failures ${number(row.failures)}/${number(row.loop_kills)}/${number(row.timeouts)}/${number(row.length_exceeded)}/${number(row.harness_errors)} (fail/loop/timeout/length/harness)${row.harness_score_delta_pp == null ? "" : ` · harness score ${number(row.harness_score_delta_pp) >= 0 ? "+" : ""}${number(row.harness_score_delta_pp).toFixed(1)}pp · loop-kill ${number(row.loop_kill_delta_pp) >= 0 ? "+" : ""}${number(row.loop_kill_delta_pp).toFixed(1)}pp`}${number(row.repair_attempts) ? ` · repair ${number(row.repair_delta_pp) >= 0 ? "+" : ""}${number(row.repair_delta_pp).toFixed(1)}pp · ${number(row.repair_successes)}/${number(row.repair_attempted)} fixed` : ""}${robustnessMeta(row)} · ${aggregateSpeed(row).toFixed(1)} agg tok/s · ${streamSpeed(row).toFixed(1)} stream · ${effectiveConcurrency(row).toFixed(2)}x eff · ${number(row.throughput_coverage ?? 100).toFixed(1)}% coverage</span></summary>
         ${row.pi_system_prompt ? `<div class="code thinking-code"><div class="code-label">Pi scaffold · ${number(row.pi_system_prompt_tokens)} tokens · sha256 ${escapeHtml(row.pi_system_prompt_sha256 || "unavailable")} · tools available: ${escapeHtml((row.pi_tools_available || []).join(", ") || "none")}${row.pi_max_output_tokens ? ` · output limit ${number(row.pi_max_output_tokens)} via ${escapeHtml(row.pi_max_output_tokens_field || "unknown")}` : ""}</div><pre>${escapeHtml(row.pi_system_prompt)}</pre></div>` : ""}
+        ${(row.task_statistics || []).length ? `<div class="code"><div class="code-label">RULER per-task 95% confidence intervals</div><pre>${escapeHtml(row.task_statistics.map(item => `${item.task} · n=${item.samples} · ${number(item.score).toFixed(1)}% · [${number(item.ci95_low).toFixed(1)}%, ${number(item.ci95_high).toFixed(1)}%]`).join("\n"))}</pre></div>` : ""}
         ${row.tool_schema_validity_rate == null ? "" : `<div class="code thinking-code"><div class="code-label">Agentic metrics</div><pre>schema valid ${number(row.tool_schema_validity_rate).toFixed(1)}% · avg turns to solve ${row.avg_turns_to_solve == null ? "—" : number(row.avg_turns_to_solve).toFixed(1)} · avg tokens to solve ${row.avg_tokens_to_solve == null ? "—" : number(row.avg_tokens_to_solve).toFixed(0)} · post-error recovery ${row.post_error_recovery_rate == null ? "—" : `${number(row.post_error_recovery_rate).toFixed(1)}%`} · redundant ${number(row.redundant_action_rate).toFixed(1)}% · destructive ${number(row.destructive_action_count)}</pre></div>`}
         <div class="tasks">${(row.tasks || []).map(task => `<article class="task">
-          <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} output · ${number(task.input_tokens)} input · ${number(task.model_turns || 1)} turns · ${number(task.tool_calls)} tools</span><span><span class="status ${task.passed ? "pass" : number(task.score) > 0 ? "partial" : ""}">${task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.length_exceeded ? "LENGTH EXCEEDED" : task.harness_error ? "HARNESS ERROR" : task.passed ? "PASS" : number(task.score) > 0 ? `PARTIAL ${number(task.score).toFixed(0)}%` : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(loopLabel(task))}</span></span></div>
+          <div class="task-head"><span>${escapeHtml(task.task_id)} · ${number(task.response_time_s).toFixed(1)}s · ${number(task.output_tokens)} output · ${number(task.input_tokens)} input · ${number(task.model_turns || 1)} turns · ${number(task.tool_calls)} tools</span><span><span class="status ${task.passed ? "pass" : number(task.score) > 0 ? "partial" : ""}">${task.contaminated ? "CONTAMINATED" : task.loop_killed ? "LOOP KILLED" : task.timed_out ? "TIMEOUT" : task.length_exceeded ? "LENGTH EXCEEDED" : task.harness_error ? "HARNESS ERROR" : task.passed ? "PASS" : number(task.score) > 0 ? `PARTIAL ${number(task.score).toFixed(0)}%` : "FAIL"}</span><span class="loop-status ${escapeHtml(task.loop_state)}">${escapeHtml(loopLabel(task))}</span></span></div>
           <div class="exchange">
             ${task.error ? `<div class="code"><div class="code-label">Error</div><pre>${escapeHtml(task.error)}</pre></div>` : ""}
             ${(task.workspace?.checkpoints || []).length ? `<div class="code"><div class="code-label">Checkpoints · ${number(task.workspace.positive_points)}/${number(task.workspace.max_points)} positive · −${number(task.workspace.penalty_points)} penalty</div><pre>${escapeHtml(task.workspace.checkpoints.map(checkpoint => `${checkpoint.awarded >= 0 ? "+" : ""}${number(checkpoint.awarded)} / ${checkpoint.weight >= 0 ? "+" : ""}${number(checkpoint.weight)}  ${checkpoint.id}\n${checkpoint.evidence || ""}`).join("\n\n"))}</pre></div>` : ""}

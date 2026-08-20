@@ -48,7 +48,7 @@ DESCRIPTIONS = {
     "mbpp-plus": "sanitized MBPP tasks with 39k+ EvalPlus test inputs",
     "gsm8k": "multi-step grade-school math problems with exact numeric answers",
     "ifeval": "prompts with code-checkable instruction-following constraints",
-    "ruler": "20 synthetic tasks per context at 4k–128k; very slow",
+    "ruler": "13 RULER tasks per context at 4k–128k; very slow",
     "arc": "challenging grade-school science questions with four choices",
     "gpqa": "expert-written graduate science questions designed to resist search",
     "mmlu-pro": "harder MMLU successor: ten options and reasoning-heavy questions",

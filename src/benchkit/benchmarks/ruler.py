@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 from collections.abc import Callable
 
@@ -17,7 +18,7 @@ from benchkit.benchmarks.utils import strip_think_tags
 
 
 class RULER:
-    """A compact RULER subset: multi-key retrieval and variable tracking."""
+    """The complete 13-task RULER effective-context suite."""
 
     name = "ruler"
     task_count = TASKS_PER_BUCKET * len(CONTEXT_BUCKETS)
@@ -25,9 +26,9 @@ class RULER:
     context_buckets = CONTEXT_BUCKETS
     variant_labels = tuple(context_label(bucket) for bucket in CONTEXT_BUCKETS)
     variant_count = len(CONTEXT_BUCKETS)
-    list_task_count = "20 × 6"
+    list_task_count = f"{TASKS_PER_BUCKET} × 6"
     include_in_overall = False
-    list_note = "20 per context · 4k–128k · very slow"
+    list_note = "13 tasks · 500 samples each · 4k–128k · very slow"
     evaluation_activity = "checking retrieved values"
 
     def __init__(self) -> None:
@@ -108,3 +109,33 @@ class RULER:
         if not answers:
             return 0.0
         return sum(answer in text for answer in answers) / len(answers)
+
+    def task_statistics(self, records: list[object]) -> list[dict]:
+        """Return per-task mean scores and Wilson 95% intervals."""
+        grouped: dict[str, list[float]] = {}
+        for record in records:
+            parts = str(getattr(record, "task_id", "")).split("/")
+            if len(parts) >= 4:
+                grouped.setdefault(parts[2], []).append(
+                    float(getattr(record, "score", 0.0))
+                )
+        rows = []
+        z = 1.959963984540054
+        for kind, scores in sorted(grouped.items()):
+            n = len(scores)
+            mean = sum(scores) / n
+            denominator = 1 + z * z / n
+            center = (mean + z * z / (2 * n)) / denominator
+            margin = (
+                z * math.sqrt(mean * (1 - mean) / n + z * z / (4 * n * n)) / denominator
+            )
+            rows.append(
+                {
+                    "task": kind,
+                    "samples": n,
+                    "score": round(mean * 100, 1),
+                    "ci95_low": round(max(0.0, center - margin) * 100, 1),
+                    "ci95_high": round(min(1.0, center + margin) * 100, 1),
+                }
+            )
+        return rows

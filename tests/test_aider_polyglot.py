@@ -124,6 +124,19 @@ class AiderPolyglotTests(unittest.TestCase):
             ["git", "-C", "/workspace/book-store", "add", "."],
             environment.commands,
         )
+        sanitize = environment.commands[2]
+        self.assertEqual(sanitize[:3], ["find", environment.workdir, "-depth"])
+        for forbidden in (
+            ".meta",
+            ".approaches",
+            "*example*",
+            "*reference*",
+            "*proof*",
+        ):
+            self.assertIn(forbidden, sanitize)
+        self.assertIn(
+            ["rm", "-rf", f"{environment.workdir}/.git"], environment.commands
+        )
 
     def test_cpp_workspace_preserves_exercise_name_for_cmake(self) -> None:
         environment = FakeEnvironment()
@@ -140,7 +153,9 @@ class AiderPolyglotTests(unittest.TestCase):
 
         self.assertTrue(result.passed)
         self.assertEqual(environment.workdir, "/workspace/allergies")
-        test_command, test_options = environment.calls[-1]
+        test_command, test_options = next(
+            call for call in environment.calls if call[0] == _TEST_COMMANDS["cpp"]
+        )
         self.assertEqual(test_command, _TEST_COMMANDS["cpp"])
         self.assertEqual(test_options["workdir"], "/workspace/allergies")
 
@@ -224,8 +239,14 @@ class AiderPolyglotTests(unittest.TestCase):
         result = AiderPolyglot().verify_workspace(task, environment)
 
         self.assertTrue(result.passed)
-        self.assertIn("@Disabled", environment.commands[-2][2])
-        self.assertEqual(environment.commands[-1], _TEST_COMMANDS["java"])
+        self.assertTrue(
+            any(
+                "@Disabled" in command[2]
+                for command in environment.commands
+                if command[:2] == ["bash", "-lc"]
+            )
+        )
+        self.assertIn(_TEST_COMMANDS["java"], environment.commands)
 
     def test_javascript_and_rust_verifiers_enable_skipped_tests(self) -> None:
         for language, exercise, marker in (
@@ -250,8 +271,14 @@ class AiderPolyglotTests(unittest.TestCase):
                 result = AiderPolyglot().verify_workspace(task, environment)
 
                 self.assertTrue(result.passed)
-                self.assertIn(marker, environment.commands[-2][2])
-                self.assertEqual(environment.commands[-1], _TEST_COMMANDS[language])
+                self.assertTrue(
+                    any(
+                        marker in command[2]
+                        for command in environment.commands
+                        if command[:2] == ["bash", "-lc"]
+                    )
+                )
+                self.assertIn(_TEST_COMMANDS[language], environment.commands)
 
     def test_counter_keeps_authored_tests_and_checks_every_implementation(self) -> None:
         environment = FakeEnvironment(
@@ -276,7 +303,38 @@ class AiderPolyglotTests(unittest.TestCase):
         self.assertTrue(result.passed)
         self.assertEqual(result.details["test_files_restored"], [])
         self.assertFalse(any("checkout" in command for command in environment.commands))
-        self.assertIn("COUNTER_IMPL=4", environment.commands[-1][2])
+        self.assertTrue(
+            any(
+                "COUNTER_IMPL=4" in command[2]
+                for command in environment.commands
+                if command[:2] == ["bash", "-lc"]
+            )
+        )
+
+    def test_guard_hit_marks_passing_dirty_workspace_contaminated(self) -> None:
+        hit = (
+            '{"tool":"read","arguments":{"path":".meta/example.go"},'
+            '"matches":[".meta/example.go"]}\n'
+        )
+        environment = FakeEnvironment(
+            [
+                subprocess.CompletedProcess(["git", "diff"], 0, "patch", ""),
+                subprocess.CompletedProcess(["git", "diff"], 0, "", ""),
+                subprocess.CompletedProcess(["go", "test"], 0, "ok", ""),
+                subprocess.CompletedProcess(["cat"], 0, hit, ""),
+            ]
+        )
+        task = Task("go/pov", "", {"language": "go", "exercise": "pov"})
+
+        result = AiderPolyglot().verify_workspace(task, environment)
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.score, 0.0)
+        self.assertEqual(result.details["contamination_verdict"], "CONTAMINATED")
+        self.assertEqual(
+            result.details["answer_key_guard_hits"][0]["matches"],
+            [".meta/example.go"],
+        )
 
     def test_counter_prompt_describes_test_authoring_protocol(self) -> None:
         task = Task(
@@ -315,11 +373,14 @@ class AiderPolyglotTests(unittest.TestCase):
             'cargo fetch --manifest-path "$cache_dir/Cargo.toml"',
             AIDER_PI_DOCKERFILE,
         )
+        self.assertIn("answer_key_guard.ts", AIDER_PI_DOCKERFILE)
+        self.assertIn("rm -rf /opt/aider-polyglot/.git", AIDER_PI_DOCKERFILE)
 
     def test_aider_sandbox_allows_the_bank_account_thread_suite(self) -> None:
         image = AiderPolyglot().pi_image()
         self.assertEqual(image.pids_limit, 2048)
         self.assertTrue(image.transient)
+        self.assertTrue(image.answer_key_guard)
 
     def test_java_verifier_uses_utf8_for_unicode_exercises(self) -> None:
         self.assertEqual(

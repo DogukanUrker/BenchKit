@@ -415,7 +415,13 @@ class PiAgentRunner:
                     )
                     verification_time += time.perf_counter() - verification_started
                     attempts.append((generation, evaluation))
-                    if terminal or evaluation.passed or evaluation.error:
+                    if (
+                        terminal
+                        or evaluation.passed
+                        or evaluation.error
+                        or evaluation.details.get("contamination_verdict")
+                        == "CONTAMINATED"
+                    ):
                         break
                     if attempt >= repair_attempts:
                         break

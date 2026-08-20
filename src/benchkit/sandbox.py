@@ -21,6 +21,7 @@ GIT_SURGERY_PI_IMAGE = "benchkit-pi-git-surgery:latest"
 PI_PACKAGE = "@earendil-works/pi-coding-agent@latest"
 AIDER_POLYGLOT_COMMIT = "7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f"
 _PROXY_SOURCE = Path(__file__).with_name("_pi_proxy.py")
+_ANSWER_KEY_GUARD_SOURCE = Path(__file__).with_name("answer_key_guard.ts")
 
 PI_DOCKERFILE = f"""\
 FROM node:24-bookworm-slim
@@ -31,6 +32,7 @@ RUN apt-get update \\
 RUN npm install -g {PI_PACKAGE}
 
 COPY inference_proxy.py /opt/benchkit/inference_proxy.py
+COPY answer_key_guard.ts /opt/benchkit/answer_key_guard.ts
 RUN mkdir -p /workspace /home/node/.pi/agent \\
     && chown -R node:node /workspace /home/node/.pi
 
@@ -91,8 +93,14 @@ RUN git clone https://github.com/Aider-AI/polyglot-benchmark.git \\
        -execdir go mod download \\; \\
     && find /opt/aider-polyglot/java/exercises/practice -name build.gradle \\
        -execdir gradle test --test-dry-run --no-daemon \\;
+RUN find /opt/aider-polyglot -depth \\
+      \\( -name .meta -o -name .approaches \\
+         -o -iname '*example*' -o -iname '*reference*' -o -iname '*proof*' \\) \\
+      -exec rm -rf {{}} + \\
+    && rm -rf /opt/aider-polyglot/.git
 
 COPY inference_proxy.py /opt/benchkit/inference_proxy.py
+COPY answer_key_guard.ts /opt/benchkit/answer_key_guard.ts
 RUN mkdir -p /workspace /home/node/.pi/agent /opt/go \\
     && chown -R node:node /workspace /home/node/.pi /opt/cargo-home \\
        /opt/rustup /opt/go /opt/gradle-cache \\
@@ -116,6 +124,7 @@ RUN apt-get update \\
 RUN npm install -g {PI_PACKAGE}
 
 COPY inference_proxy.py /opt/benchkit/inference_proxy.py
+COPY answer_key_guard.ts /opt/benchkit/answer_key_guard.ts
 COPY git-surgery /opt/git-surgery
 RUN chmod +x /opt/git-surgery/*/setup.sh /opt/git-surgery/*/verify.sh \\
     && mkdir -p /workspace /home/node/.pi/agent \\
@@ -222,6 +231,7 @@ class LatestPiImage:
     transient: bool = True
     pids_limit: int = 256
     build_assets: Path | None = None
+    answer_key_guard: bool = False
     version: str = ""
     _ready: bool = field(default=False, init=False, repr=False)
     _lock: threading.Lock = field(
@@ -243,6 +253,10 @@ class LatestPiImage:
                 (context / "Dockerfile").write_text(self.dockerfile, encoding="utf-8")
                 (context / "inference_proxy.py").write_text(
                     _PROXY_SOURCE.read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+                (context / "answer_key_guard.ts").write_text(
+                    _ANSWER_KEY_GUARD_SOURCE.read_text(encoding="utf-8"),
                     encoding="utf-8",
                 )
                 if self.build_assets is not None:
@@ -283,6 +297,7 @@ def aider_pi_image() -> LatestPiImage:
         # accounts threads against Docker's PID cgroup, so the generic Pi
         # sandbox limit of 256 makes the official test suite impossible.
         pids_limit=2048,
+        answer_key_guard=True,
     )
 
 
@@ -451,23 +466,26 @@ class DockerTaskEnvironment:
     def start_pi(self) -> subprocess.Popen[str]:
         if not self._started:
             raise SandboxError("task environment is not running")
+        command = [
+            self.docker,
+            "exec",
+            "--interactive",
+            "--workdir",
+            self.workdir,
+            self.container_name,
+            "pi",
+            "--mode",
+            "rpc",
+            "--no-session",
+            "--provider",
+            "benchkit",
+            "--model",
+            self.model,
+        ]
+        if self.image.answer_key_guard:
+            command.extend(["--extension", "/opt/benchkit/answer_key_guard.ts"])
         return subprocess.Popen(
-            [
-                self.docker,
-                "exec",
-                "--interactive",
-                "--workdir",
-                self.workdir,
-                self.container_name,
-                "pi",
-                "--mode",
-                "rpc",
-                "--no-session",
-                "--provider",
-                "benchkit",
-                "--model",
-                self.model,
-            ],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
