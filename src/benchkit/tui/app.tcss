@@ -224,9 +224,10 @@ DataTable > .datatable--cursor {
     margin: -1 2 0 0;
 }
 
-#repair-once {
-    width: 24;
-    height: 1;
+.repair-input {
+    width: 8;
+    height: 3;
+    margin: -1 2 0 0;
 }
 
 #setup-harness .hint {

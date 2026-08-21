@@ -1,4 +1,4 @@
-"""Tests for one-turn, answer-safe verifier repair."""
+"""Tests for bounded, answer-safe verifier repair."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from benchkit.cli import _headless_jobs, _parse_args
-from benchkit.engine import Engine, JobSpec, benchmark
+from benchkit.engine import MAX_REPAIR_ATTEMPTS, Engine, JobSpec, benchmark
 from benchkit.evaluation import EvaluationResult, evaluate_response
 from benchkit.executor import execute_with_feedback
 from benchkit.pi_agent import PiAgentRunner
@@ -131,6 +131,77 @@ class DirectRepairTests(unittest.TestCase):
         self.assertEqual(result["repair_successes"], 0)
         self.assertEqual(result["tasks"][0]["repair_attempts_used"], 1)
 
+    def test_direct_repair_supports_multiple_retries(self) -> None:
+        client = RepairClient(["wrong-one", "wrong-two", "right"])
+        job = JobSpec("model", "quickbench", "1", repair_attempts=3)
+        engine = Engine(client=client, jobs=[job])
+        quickbench = benchmark("quickbench")
+
+        def verify(_task, response: str) -> EvaluationResult:
+            if response == "right":
+                return EvaluationResult(1.0)
+            return EvaluationResult(0.0, "Sanitized verifier failure.")
+
+        with patch.object(quickbench, "evaluate_with_feedback", side_effect=verify):
+            result = engine.run()[0]
+
+        self.assertEqual(len(client.prompts), 3)
+        self.assertIn("2 repair attempt(s) remaining", client.prompts[1])
+        self.assertIn("1 repair attempt(s) remaining", client.prompts[2])
+        self.assertEqual(result["repair_attempted"], 1)
+        self.assertEqual(result["repair_turns"], 2)
+        self.assertEqual(result["repair_successes"], 1)
+        self.assertEqual(
+            result["repair_score_curve"],
+            [
+                {
+                    "round": 0,
+                    "score": 0.0,
+                    "delta_pp": 0.0,
+                    "cumulative_delta_pp": 0.0,
+                    "attempted": 1,
+                    "new_passes": 0,
+                },
+                {
+                    "round": 1,
+                    "score": 0.0,
+                    "delta_pp": 0.0,
+                    "cumulative_delta_pp": 0.0,
+                    "attempted": 1,
+                    "new_passes": 0,
+                },
+                {
+                    "round": 2,
+                    "score": 100.0,
+                    "delta_pp": 100.0,
+                    "cumulative_delta_pp": 100.0,
+                    "attempted": 1,
+                    "new_passes": 1,
+                },
+                {
+                    "round": 3,
+                    "score": 100.0,
+                    "delta_pp": 0.0,
+                    "cumulative_delta_pp": 100.0,
+                    "attempted": 0,
+                    "new_passes": 0,
+                },
+            ],
+        )
+        self.assertEqual(result["repair_round_2_delta_pp"], 100.0)
+        self.assertEqual(result["repair_round_2_new_passes"], 1)
+        self.assertEqual(result["repair_round_3_attempted"], 0)
+        self.assertEqual(result["tasks"][0]["repair_attempts_used"], 2)
+
+    def test_repair_limit_is_bounded(self) -> None:
+        JobSpec("model", "quickbench", repair_attempts=MAX_REPAIR_ATTEMPTS)
+        with self.assertRaisesRegex(ValueError, "between 0 and"):
+            JobSpec(
+                "model",
+                "quickbench",
+                repair_attempts=MAX_REPAIR_ATTEMPTS + 1,
+            )
+
     def test_cli_repair_flag_applies_to_direct_and_pi_jobs(self) -> None:
         args = _parse_args(
             [
@@ -142,14 +213,14 @@ class DirectRepairTests(unittest.TestCase):
                 "--harness",
                 "both",
                 "--repair-attempts",
-                "1",
+                "3",
             ]
         )
 
         jobs = _headless_jobs(args, ["model"])
 
         self.assertEqual([job.harness for job in jobs], ["direct", "pi"])
-        self.assertEqual([job.repair_attempts for job in jobs], [1, 1])
+        self.assertEqual([job.repair_attempts for job in jobs], [3, 3])
         self.assertEqual(
             [job.harness_label for job in jobs],
             ["Direct + repair", "Pi agent + repair"],

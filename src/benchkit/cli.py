@@ -18,6 +18,7 @@ from rich.text import Text
 from benchkit.benchmarks import REGISTRY, all_tags, keys_for_tags, tags_for
 from benchkit.client import InferenceClient
 from benchkit.engine import (
+    MAX_REPAIR_ATTEMPTS,
     JobSpec,
     SliceError,
     expand_jobs,
@@ -111,12 +112,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--repair-attempts",
         type=int,
-        choices=(0, 1),
+        choices=range(MAX_REPAIR_ATTEMPTS + 1),
         default=0,
-        metavar="{0,1}",
+        metavar=f"0-{MAX_REPAIR_ATTEMPTS}",
         help=(
             "Verifier-feedback repair turns after an incorrect first answer; "
-            "works with direct and Pi harnesses (default: 0)"
+            "works with direct and Pi harnesses (default: 0; max: "
+            f"{MAX_REPAIR_ATTEMPTS})"
         ),
     )
     parser.add_argument(

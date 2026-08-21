@@ -34,6 +34,8 @@ from benchkit.metrics import throughput_metrics
 from benchkit.perturbations import annotate_robustness, perturb_task
 from benchkit.pi_agent import PiAgentRunner
 
+MAX_REPAIR_ATTEMPTS = 10
+
 
 class SliceError(ValueError):
     """Raised when a task slice specification cannot be parsed."""
@@ -166,8 +168,10 @@ class JobSpec:
     repair_attempts: int = 0
 
     def __post_init__(self) -> None:
-        if self.repair_attempts not in {0, 1}:
-            raise ValueError("repair_attempts must be 0 or 1")
+        if not 0 <= self.repair_attempts <= MAX_REPAIR_ATTEMPTS:
+            raise ValueError(
+                f"repair_attempts must be between 0 and {MAX_REPAIR_ATTEMPTS}"
+            )
 
     @property
     def key(self) -> str:
@@ -284,6 +288,56 @@ class TaskRecord:
         return (
             f"{self.task_id} ({self.entry_point})" if self.entry_point else self.task_id
         )
+
+
+def _repair_score_curve(records: list[TaskRecord], repair_attempts: int) -> list[dict]:
+    """Return aggregate score and incremental gains after each repair round."""
+    if not records or repair_attempts <= 0:
+        return []
+
+    def score_at(record: TaskRecord, round_number: int) -> float:
+        if record.attempts:
+            attempt = record.attempts[min(round_number, len(record.attempts) - 1)]
+            return float(attempt.get("score", 0.0))
+        if round_number == 0:
+            return record.first_attempt_score * 100
+        return record.score * 100
+
+    curve: list[dict] = []
+    previous_score = 0.0
+    for round_number in range(repair_attempts + 1):
+        scores = [score_at(record, round_number) for record in records]
+        aggregate = sum(scores) / len(scores)
+        previous_scores = (
+            [score_at(record, round_number - 1) for record in records]
+            if round_number
+            else scores
+        )
+        curve.append(
+            {
+                "round": round_number,
+                "score": round(aggregate, 1),
+                "delta_pp": round(aggregate - previous_score, 1)
+                if round_number
+                else 0.0,
+                "cumulative_delta_pp": round(aggregate - curve[0]["score"], 1)
+                if curve
+                else 0.0,
+                "attempted": sum(
+                    len(record.attempts) > round_number for record in records
+                )
+                if round_number
+                else len(records),
+                "new_passes": sum(
+                    before < 100 <= after
+                    for before, after in zip(previous_scores, scores, strict=True)
+                )
+                if round_number
+                else sum(score >= 100 for score in scores),
+            }
+        )
+        previous_score = aggregate
+    return curve
 
 
 @dataclass
@@ -1175,6 +1229,20 @@ class Engine:
         )
         observed_calls = schema_valid + schema_invalid
         solved_records = [record for record in records if record.passed]
+        repair_score_curve = _repair_score_curve(scored_records, job.repair_attempts)
+        repair_round_columns = {
+            key: value
+            for point in repair_score_curve[1:]
+            for key, value in {
+                f"repair_round_{point['round']}_score": point["score"],
+                f"repair_round_{point['round']}_delta_pp": point["delta_pp"],
+                f"repair_round_{point['round']}_cumulative_delta_pp": point[
+                    "cumulative_delta_pp"
+                ],
+                f"repair_round_{point['round']}_attempted": point["attempted"],
+                f"repair_round_{point['round']}_new_passes": point["new_passes"],
+            }.items()
+        }
 
         result = {
             "model": job.model,
@@ -1268,7 +1336,10 @@ class Engine:
             "repair_attempted": sum(
                 record.repair_attempts_used > 0 for record in records
             ),
+            "repair_turns": sum(record.repair_attempts_used for record in records),
             "repair_successes": sum(record.repaired for record in records),
+            "repair_score_curve": repair_score_curve,
+            **repair_round_columns,
             "sum_generation_time": round(throughput_eval_ns / 1e9, 3),
             "sum_request_time": round(throughput_response_time, 3),
             "avg_response_time": round(throughput_response_time / throughput_items, 1)

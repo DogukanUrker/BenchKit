@@ -252,7 +252,7 @@ def save(
                 f.write(
                     f"| {result['model']} "
                     f"| {result.get('benchmark_label', result['benchmark'])} "
-                    f"| {'one repair' if result.get('repair_attempts') else 'none'} "
+                    f"| {result.get('repair_attempts', 0)} repair turn(s) "
                     f"| {result.get('harness_paired_total', 0)} "
                     f"| {result.get('direct_first_score', 0):.1f}% "
                     f"| {result.get('harness_first_score', 0):.1f}% "
@@ -272,20 +272,22 @@ def save(
         if repair_rows:
             f.write("\n## Verifier repair effect\n\n")
             f.write(
-                "| Model | Harness | Benchmark | First attempt | Final | Delta | Retried | Repaired |\n"
+                "| Model | Harness | Benchmark | Max repairs | First attempt | Final | Delta | Retried tasks | Repair turns | Repaired |\n"
             )
             f.write(
-                "|-------|---------|-----------|--------------:|------:|------:|--------:|---------:|\n"
+                "|-------|---------|-----------|------------:|--------------:|------:|------:|--------------:|-------------:|---------:|\n"
             )
             for result in repair_rows:
                 f.write(
                     f"| {result['model']} "
                     f"| {result.get('harness_label', 'Direct')} "
                     f"| {result.get('benchmark_label', result['benchmark'])} "
+                    f"| {result.get('repair_attempts', 0)} "
                     f"| {result.get('first_attempt_score', 0):.1f}% "
                     f"| {result.get('score', 0):.1f}% "
                     f"| {result.get('repair_delta_pp', 0):+.1f}pp "
                     f"| {result.get('repair_attempted', 0)} "
+                    f"| {result.get('repair_turns', result.get('repair_attempted', 0))} "
                     f"| {result.get('repair_successes', 0)} |\n"
                 )
 

@@ -568,7 +568,7 @@
           <tbody>${harnessRows.map(row => `<tr>
             <td>${escapeHtml(row.model.replace(/ · Pi agent(?: \+ repair)?$/, ""))}</td>
             <td>${escapeHtml(benchmarkLabel(row))}</td>
-            <td>${number(row.repair_attempts) ? "one repair" : "none"}</td>
+            <td>${number(row.repair_attempts)} repair turn(s)</td>
             <td>${number(row.harness_paired_total)}</td>
             <td>${number(row.direct_first_score).toFixed(1)}%</td>
             <td>${number(row.harness_first_score).toFixed(1)}%</td>

@@ -146,6 +146,9 @@ uv run benchkit --headless --models qwen3:8b \
   --benchmarks gsm8k:20 --repair-attempts 1
 ```
 
+Repairs default to off and can be set from 0–10. One is a practical starting
+point, but the right depth depends on what you want to measure.
+
 Test whether multiple-choice accuracy survives reordered answer choices:
 
 ```bash

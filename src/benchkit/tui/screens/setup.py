@@ -25,6 +25,7 @@ from textual.widgets.selection_list import Selection
 from benchkit.benchmarks import REGISTRY, all_tags, signal_tag, tags_for
 from benchkit.demo import DemoClient
 from benchkit.engine import (
+    MAX_REPAIR_ATTEMPTS,
     JobSpec,
     SliceError,
     expand_jobs,
@@ -177,13 +178,15 @@ class SetupScreen(Screen[None]):
                 allow_blank=False,
                 id="harness",
             )
-            yield Checkbox(
-                "One verifier repair",
-                id="repair-once",
-                compact=True,
+            yield Input(
+                value="0",
+                type="integer",
+                max_length=2,
+                id="repair-attempts",
+                classes="repair-input",
             )
             yield Static(
-                "failed answers get one sanitized feedback turn",
+                f"sanitized feedback turns (0-{MAX_REPAIR_ATTEMPTS})",
                 classes="hint",
             )
         with Horizontal(id="setup-perturbation"):
@@ -365,7 +368,7 @@ class SetupScreen(Screen[None]):
             self._rebuild_models()
         elif event.input.id == "bench-filter":
             self._rebuild_benchmarks()
-        elif event.input.id == "global-limit":
+        elif event.input.id in {"global-limit", "repair-attempts"}:
             self._refresh_summary()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -374,13 +377,14 @@ class SetupScreen(Screen[None]):
                 "#model-list" if event.input.id == "model-filter" else "#bench-list"
             )
             self.query_one(target, SelectionList).focus()
-        elif event.input.id in {"global-limit", "perturbation-seed"}:
+        elif event.input.id in {
+            "global-limit",
+            "perturbation-seed",
+            "repair-attempts",
+        }:
             self.action_start()
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        if event.checkbox.id == "repair-once":
-            self._refresh_summary()
-            return
         if event.checkbox.id != "choice-order":
             return
         self.query_one("#perturbation-seed", Input).disabled = not event.value
@@ -555,7 +559,11 @@ class SetupScreen(Screen[None]):
         return ("direct", "pi") if value == "both" else (str(value),)
 
     def _repair_attempts(self) -> int:
-        return int(self.query_one("#repair-once", Checkbox).value)
+        value = self.query_one("#repair-attempts", Input).value.strip()
+        try:
+            return int(value)
+        except ValueError:
+            return -1
 
     def _perturbation_seed(self) -> int | None:
         value = self.query_one("#perturbation-seed", Input).value.strip()
@@ -583,6 +591,16 @@ class SetupScreen(Screen[None]):
                 timeout=5,
             )
             self.query_one("#harness", Select).focus()
+            return None
+
+        repair_attempts = self._repair_attempts()
+        if not 0 <= repair_attempts <= MAX_REPAIR_ATTEMPTS:
+            self.notify(
+                f"Repair attempts must be between 0 and {MAX_REPAIR_ATTEMPTS}.",
+                severity="error",
+                timeout=4,
+            )
+            self.query_one("#repair-attempts", Input).focus()
             return None
 
         choice_order = self._choice_order_enabled()
@@ -640,7 +658,7 @@ class SetupScreen(Screen[None]):
                             key,
                             self._limit_for(key),
                             harness=harness,
-                            repair_attempts=self._repair_attempts(),
+                            repair_attempts=repair_attempts,
                         )
                     )
                     if choice_order:
@@ -653,7 +671,7 @@ class SetupScreen(Screen[None]):
                                 perturbation=CHOICE_ORDER,
                                 perturbation_seed=seed,
                                 harness=harness,
-                                repair_attempts=self._repair_attempts(),
+                                repair_attempts=repair_attempts,
                             )
                         )
         expanded = expand_jobs(jobs, self.app.client)
@@ -737,7 +755,11 @@ class SetupScreen(Screen[None]):
                 tasks=fmt_count(tasks),
                 paired=(
                     (" · clean + choice-order" if choice_order else "")
-                    + (" · one verifier repair" if self._repair_attempts() else "")
+                    + (
+                        f" · {self._repair_attempts()} verifier repair turn(s)"
+                        if self._repair_attempts() > 0
+                        else ""
+                    )
                     + (
                         " · force unload between models"
                         if self._force_unload_enabled()
