@@ -662,7 +662,7 @@ class HarnessPairingTests(unittest.TestCase):
         ]
         engine = Engine(
             client=SimpleNamespace(provider="openai", timeout=1.0),
-            jobs=[JobSpec("model", "quickbench", "2", harness="pi")],
+            jobs=[JobSpec("model", "sanity", "2", harness="pi")],
         )
         engine._pi_runner = runner
 
@@ -713,7 +713,7 @@ class HarnessPairingTests(unittest.TestCase):
         ]
         engine = Engine(
             client=SimpleNamespace(provider="openai", timeout=1.0),
-            jobs=[JobSpec("model", "quickbench", "2", harness="pi")],
+            jobs=[JobSpec("model", "sanity", "2", harness="pi")],
         )
         engine._pi_runner = runner
 
@@ -757,7 +757,7 @@ class HarnessPairingTests(unittest.TestCase):
         }
         engine = Engine(
             client=SimpleNamespace(provider="openai", timeout=1.0),
-            jobs=[JobSpec("model", "quickbench", "1", harness="pi")],
+            jobs=[JobSpec("model", "sanity", "1", harness="pi")],
         )
         engine._pi_runner = runner
 
@@ -772,7 +772,7 @@ class HarnessPairingTests(unittest.TestCase):
         runner = Mock()
         engine = Engine(
             client=SimpleNamespace(),
-            jobs=[JobSpec("model", "quickbench", "1", harness="pi")],
+            jobs=[JobSpec("model", "sanity", "1", harness="pi")],
         )
         engine._pi_runner = runner
 
@@ -789,7 +789,7 @@ class HarnessPairingTests(unittest.TestCase):
                 "--models",
                 "model",
                 "--benchmarks",
-                "quickbench:1",
+                "sanity:1",
                 "--harness",
                 "both",
             ]
@@ -803,7 +803,7 @@ class HarnessPairingTests(unittest.TestCase):
     def test_pair_metrics_report_percentage_point_effect(self) -> None:
         common = {
             "model": "model",
-            "benchmark": "quickbench",
+            "benchmark": "sanity",
             "variant": None,
             "slice": "2",
         }
@@ -845,7 +845,7 @@ class HarnessPairingTests(unittest.TestCase):
     def test_pair_metrics_separate_initial_and_repaired_harness_effects(self) -> None:
         common = {
             "model": "model",
-            "benchmark": "quickbench",
+            "benchmark": "sanity",
             "variant": None,
             "slice": "1",
             "repair_attempts": 1,
@@ -883,7 +883,7 @@ class HarnessPairingTests(unittest.TestCase):
     def test_pair_metrics_drop_harness_errors_on_either_side(self) -> None:
         common = {
             "model": "model",
-            "benchmark": "quickbench",
+            "benchmark": "sanity",
             "variant": None,
             "slice": "3",
         }

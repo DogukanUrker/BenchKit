@@ -202,6 +202,7 @@ def _ifeval_answer(task: Task) -> str:
 
 def _good_answer(task: Task, solution: str | None) -> str:
     metadata = task.metadata
+    solution = solution or metadata.get("canonical_solution")
     if solution is not None:
         return solution
 

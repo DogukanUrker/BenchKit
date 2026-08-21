@@ -140,7 +140,7 @@ class PlainReporterTests(unittest.TestCase):
         reporter = _Reporter(console, verbose=False)
         self.assertTrue(reporter.plain)
 
-        job = JobSpec("model", "quickbench", None)
+        job = JobSpec("model", "sanity", None)
         with reporter:
             reporter(TaskCompleted(0, job, _record(passed=True), 1, 1))
             reporter(TaskCompleted(0, job, _record(error="boom"), 1, 2))
@@ -156,7 +156,7 @@ class PlainReporterTests(unittest.TestCase):
     ) -> None:
         console = _console(record=True)
         reporter = _Reporter(console, verbose=False)
-        job = JobSpec("model", "quickbench", None)
+        job = JobSpec("model", "sanity", None)
         reporter(RunStarted([job], 2))
         reporter(JobStarted(0, job, 2, 2, concurrency=2))
 
@@ -216,10 +216,10 @@ class PlainReporterTests(unittest.TestCase):
     def test_serial_job_summary_only_shows_stream_speed_as_tok_s(self) -> None:
         console = _console(record=True, width=200)
         reporter = _Reporter(console, verbose=False)
-        job = JobSpec("model", "quickbench", None)
+        job = JobSpec("model", "sanity", None)
         result = {
             "model": "model",
-            "benchmark": "quickbench",
+            "benchmark": "sanity",
             "score": 50.0,
             "passed": 1,
             "total": 2,
@@ -242,10 +242,10 @@ class PlainReporterTests(unittest.TestCase):
     def test_parallel_job_summary_keeps_parallel_throughput_metrics(self) -> None:
         console = _console(record=True, width=200)
         reporter = _Reporter(console, verbose=False)
-        job = JobSpec("model", "quickbench", None)
+        job = JobSpec("model", "sanity", None)
         result = {
             "model": "model",
-            "benchmark": "quickbench",
+            "benchmark": "sanity",
             "score": 50.0,
             "passed": 1,
             "total": 2,

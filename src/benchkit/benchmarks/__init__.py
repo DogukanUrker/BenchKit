@@ -15,8 +15,8 @@ from benchkit.benchmarks.mmlu import MMLU
 from benchkit.benchmarks.mmlu_pro import MMLUPro
 from benchkit.benchmarks.openbookqa import OpenBookQA
 from benchkit.benchmarks.piqa import PIQA
-from benchkit.benchmarks.quickbench import QuickBench
 from benchkit.benchmarks.ruler import RULER
+from benchkit.benchmarks.sanity import Sanity
 from benchkit.benchmarks.truthfulqa import TruthfulQA
 from benchkit.benchmarks.winogrande import WinoGrande
 
@@ -24,7 +24,7 @@ REGISTRY: dict[str, type] = {
     # Generative suites first, then the multiple-choice ones.
     "aider-polyglot": AiderPolyglot,
     "git-surgery": GitSurgery,
-    "quickbench": QuickBench,
+    "sanity": Sanity,
     "humaneval": HumanEval,
     "humaneval-plus": HumanEvalPlus,
     "mbpp": MBPP,
@@ -57,7 +57,16 @@ REGISTRY: dict[str, type] = {
 TAGS: dict[str, tuple[str, ...]] = {
     "aider-polyglot": ("code", "generative", "agent", "polyglot"),
     "git-surgery": ("code", "generative", "agent", "git"),
-    "quickbench": ("code", "generative", "smoke"),
+    "sanity": (
+        "code",
+        "math",
+        "knowledge",
+        "commonsense",
+        "instruction",
+        "generative",
+        "mcq",
+        "smoke",
+    ),
     "humaneval": ("code", "generative"),
     "humaneval-plus": ("code", "generative"),
     "mbpp": ("code", "generative"),

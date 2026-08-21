@@ -8,7 +8,7 @@ BenchKit is a Python 3.11 package using a `src/` layout. `src/benchkit/cli.py` p
 - `uv run benchkit`: launch the terminal app against the configured host.
 - `uv run benchkit --demo`: drive the whole UI offline with fake models - the fastest way to check TUI changes.
 - `OLLAMA_HOST=http://localhost:11434 uv run benchkit`: run against an explicit local or remote Ollama endpoint.
-- `uv run benchkit --headless --models MODEL --benchmarks quickbench:5 --verbose`: scripted run that prints per-task prompts and responses.
+- `uv run benchkit --headless --models MODEL --benchmarks sanity:5 --verbose`: scripted run that prints per-task prompts and responses.
 - `uv run benchkit --list`: print the benchmark registry with task counts.
 - `uv run pre-commit install`: install the hooks (ruff on commit, pytest on push).
 - `uv run ruff check .` / `uv run ruff format .`: lint and format.
@@ -17,7 +17,7 @@ BenchKit is a Python 3.11 package using a `src/` layout. `src/benchkit/cli.py` p
 The package metadata and CLI entrypoint are defined in `pyproject.toml`; `uv build` produces the sdist and wheel. Two workflows run on every pull request: `.github/workflows/lint.yml` (ruff check and format) and `.github/workflows/tests.yml` (the test suite on Python 3.11-3.13, an offline `--demo` smoke run and the package build).
 
 ## Coding Style & Naming Conventions
-Ruff owns formatting and linting; its configuration lives in `pyproject.toml` (88 columns, `py311` target). Run `uv run ruff format .` rather than hand-wrapping, and fence hand-aligned data tables with `# fmt: off` / `# fmt: on` when the layout matters. Use 4-space indentation, type hints, and short module docstrings consistent with the existing codebase. Prefer `snake_case` for modules and functions, `PascalCase` for classes, and lowercase benchmark registry keys such as `quickbench` or `humaneval`. Keep new benchmark code narrow in scope: implement `load_tasks()`, `build_prompt()`, and `evaluate()`, store dataset payloads as JSONL, and register new classes in `src/benchkit/benchmarks/__init__.py`.
+Ruff owns formatting and linting; its configuration lives in `pyproject.toml` (88 columns, `py311` target). Run `uv run ruff format .` rather than hand-wrapping, and fence hand-aligned data tables with `# fmt: off` / `# fmt: on` when the layout matters. Use 4-space indentation, type hints, and short module docstrings consistent with the existing codebase. Prefer `snake_case` for modules and functions, `PascalCase` for classes, and lowercase benchmark registry keys such as `sanity` or `humaneval`. Keep new benchmark code narrow in scope: implement `load_tasks()`, `build_prompt()`, and `evaluate()`, store dataset payloads as JSONL, and register new classes in `src/benchkit/benchmarks/__init__.py`.
 
 ## Testing Guidelines
 Streaming, parser, and loop-detection behavior is covered by `tests/`; run it with `uv run pytest`. Everything else depends on manual validation. Before opening a PR, run `uv run benchkit`, confirm model discovery and benchmark execution, and inspect generated `results.json`, `results.csv`, and `results.md` for correctness. For scoring or parser changes, validate with a small benchmark slice before running larger suites. TUI changes can be driven without a terminal via Textual's pilot (`async with BenchKitApp(demo=True).run_test() as pilot`), which also captures SVG screenshots with `app.save_screenshot()`.

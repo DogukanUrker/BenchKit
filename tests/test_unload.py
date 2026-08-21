@@ -189,11 +189,11 @@ class ForceUnloadSchedulingTests(unittest.TestCase):
         client = _OrderingClient()
         controls = RunControls(force_unload=True)
         jobs = [
-            JobSpec("model-a", "quickbench", "6"),
-            JobSpec("model-b", "quickbench", "6"),
+            JobSpec("model-a", "sanity", "6"),
+            JobSpec("model-b", "sanity", "6"),
         ]
 
-        with patch.object(benchmark("quickbench"), "evaluate", return_value=True):
+        with patch.object(benchmark("sanity"), "evaluate", return_value=True):
             Engine(client=client, jobs=jobs, controls=controls).run()
 
         events = client.events
@@ -231,11 +231,11 @@ class ForceUnloadSchedulingTests(unittest.TestCase):
     def test_unload_stays_off_unless_forced(self) -> None:
         client = _OrderingClient()
         jobs = [
-            JobSpec("model-a", "quickbench", "3"),
-            JobSpec("model-b", "quickbench", "3"),
+            JobSpec("model-a", "sanity", "3"),
+            JobSpec("model-b", "sanity", "3"),
         ]
 
-        with patch.object(benchmark("quickbench"), "evaluate", return_value=True):
+        with patch.object(benchmark("sanity"), "evaluate", return_value=True):
             Engine(client=client, jobs=jobs).run()
 
         self.assertNotIn(
@@ -253,11 +253,11 @@ class ForceUnloadSchedulingTests(unittest.TestCase):
         controls = RunControls(force_unload=True)
         events: list[object] = []
         jobs = [
-            JobSpec("model-a", "quickbench", "2"),
-            JobSpec("model-b", "quickbench", "2"),
+            JobSpec("model-a", "sanity", "2"),
+            JobSpec("model-b", "sanity", "2"),
         ]
 
-        with patch.object(benchmark("quickbench"), "evaluate", return_value=True):
+        with patch.object(benchmark("sanity"), "evaluate", return_value=True):
             Engine(
                 client=client, jobs=jobs, controls=controls, sink=events.append
             ).run()

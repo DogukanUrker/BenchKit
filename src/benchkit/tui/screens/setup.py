@@ -42,7 +42,7 @@ from benchkit.tui.theme import score_palette
 from benchkit.tui.widgets import SectionTitle
 
 DESCRIPTIONS = {
-    "quickbench": "tiny Python tasks for a fast end-to-end sanity check",
+    "sanity": "25 curated checks across code, math, instructions, science, and commonsense",
     "humaneval": "Python function completions with the original unit tests",
     "humaneval-plus": "HumanEval with 122k+ tougher EvalPlus test inputs",
     "mbpp": "short Python functions from natural-language specifications",
@@ -234,7 +234,7 @@ class SetupScreen(Screen[None]):
         }
         if not self.selected_models and len(self.model_order) == 1:
             self.selected_models = set(self.model_order)
-        self.selected_benchmarks = {"quickbench"} if "quickbench" in REGISTRY else set()
+        self.selected_benchmarks = {"sanity"} if "sanity" in REGISTRY else set()
 
         self._rebuild_models()
         self._rebuild_benchmarks()

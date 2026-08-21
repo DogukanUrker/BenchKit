@@ -77,11 +77,11 @@ uv run benchkit --headless --models qwen3:8b --benchmarks humaneval:20
 # Run multiple models and benchmarks
 uv run benchkit --headless \
   --models qwen3:8b,gemma3:12b \
-  --benchmarks quickbench,gsm8k:50
+  --benchmarks sanity,gsm8k:50
 
 # Print prompts, reasoning traces, and responses
 uv run benchkit --headless --models qwen3:8b \
-  --benchmarks quickbench --verbose
+  --benchmarks sanity --verbose
 
 # Select benchmarks by tag
 uv run benchkit --headless --models qwen3:8b --tag code
@@ -104,7 +104,7 @@ uv run benchkit --help
 | --- | --- | ---: | --- |
 | Aider Polyglot | `aider-polyglot` | 225 | Repository editing across six languages with Pi |
 | Git Surgery | `git-surgery` | 5 | Stateful Git operations with Pi |
-| QuickBench | `quickbench` | 20 | Fast Python smoke test |
+| Sanity | `sanity` | 25 | Fast checks across five core capabilities |
 | HumanEval | `humaneval` | 164 | Python function completion |
 | HumanEval+ | `humaneval-plus` | 164 | HumanEval with expanded EvalPlus tests |
 | MBPP | `mbpp` | 500 | Short Python programming tasks |

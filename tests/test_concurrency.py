@@ -437,7 +437,7 @@ class ConcurrentEngineTests(unittest.TestCase):
     def test_thinking_and_answer_medians_use_the_same_task_cohort(self) -> None:
         engine = Engine(
             client=LatencyCohortClient(),
-            jobs=[JobSpec("model", "quickbench", "2")],
+            jobs=[JobSpec("model", "sanity", "2")],
         )
 
         with patch.object(
@@ -459,7 +459,7 @@ class ConcurrentEngineTests(unittest.TestCase):
         client = MixedCoverageClient()
         engine = Engine(
             client=client,
-            jobs=[JobSpec("model", "quickbench", "2")],
+            jobs=[JobSpec("model", "sanity", "2")],
         )
 
         with patch.object(
@@ -480,7 +480,7 @@ class ConcurrentEngineTests(unittest.TestCase):
         client = CompleteTimeoutClient()
         engine = Engine(
             client=client,
-            jobs=[JobSpec("model", "quickbench", "2")],
+            jobs=[JobSpec("model", "sanity", "2")],
         )
 
         with patch.object(
@@ -502,7 +502,7 @@ class ConcurrentEngineTests(unittest.TestCase):
         engine = Engine(client=client, jobs=[])
 
         concurrency = engine._max_parallel_requests(
-            JobSpec("model", "quickbench", "5", harness="pi"),
+            JobSpec("model", "sanity", "5", harness="pi"),
             5,
         )
 
@@ -512,14 +512,14 @@ class ConcurrentEngineTests(unittest.TestCase):
         client = ParallelClient({"model-x": 4, "model-y": 6})
         events: list[object] = []
         jobs = [
-            JobSpec("model-x", "quickbench", "8"),
-            JobSpec("model-y", "quickbench", "12"),
+            JobSpec("model-x", "sanity", "8"),
+            JobSpec("model-y", "sanity", "10"),
         ]
 
-        with patch.object(benchmark("quickbench"), "evaluate", return_value=True):
+        with patch.object(benchmark("sanity"), "evaluate", return_value=True):
             results = Engine(client=client, jobs=jobs, sink=events.append).run()
 
-        self.assertEqual(client.calls, {"model-x": 8, "model-y": 12})
+        self.assertEqual(client.calls, {"model-x": 8, "model-y": 10})
         self.assertEqual(client.max_active, {"model-x": 4, "model-y": 6})
         self.assertEqual([result["concurrency"] for result in results], [4, 6])
         self.assertEqual([result["tok_s_per_stream"] for result in results], [10, 10])
@@ -527,14 +527,14 @@ class ConcurrentEngineTests(unittest.TestCase):
             [result["tok_s"] for result in results],
             [result["tok_s_per_stream"] for result in results],
         )
-        self.assertEqual([result["total_output_tokens"] for result in results], [8, 12])
+        self.assertEqual([result["total_output_tokens"] for result in results], [8, 10])
         self.assertEqual(
             [result["sum_generation_time"] for result in results],
-            [0.8, 1.2],
+            [0.8, 1.0],
         )
         self.assertEqual(
             [result["sum_request_time"] for result in results],
-            [0.16, 0.24],
+            [0.16, 0.2],
         )
         self.assertTrue(all(result["tok_s_aggregate"] > 0 for result in results))
         self.assertTrue(all(result["concurrency_eff"] > 0 for result in results))
@@ -542,16 +542,16 @@ class ConcurrentEngineTests(unittest.TestCase):
         self.assertEqual([event.concurrency for event in starts], [4, 6])
         self.assertEqual(
             [task["task_id"] for task in results[1]["tasks"]],
-            [f"QuickBench/{index}" for index in range(12)],
+            [f"Sanity/{index}" for index in range(10)],
         )
 
     def test_task_count_caps_a_larger_server_capacity(self) -> None:
         client = ParallelClient({"model": 16})
 
-        with patch.object(benchmark("quickbench"), "evaluate", return_value=True):
+        with patch.object(benchmark("sanity"), "evaluate", return_value=True):
             result = Engine(
                 client=client,
-                jobs=[JobSpec("model", "quickbench", "3")],
+                jobs=[JobSpec("model", "sanity", "3")],
             ).run()[0]
 
         self.assertEqual(result["concurrency"], 3)
@@ -567,7 +567,7 @@ class ConcurrentEngineTests(unittest.TestCase):
         try:
             results = Engine(
                 client=client,
-                jobs=[JobSpec("model", "quickbench", "10")],
+                jobs=[JobSpec("model", "sanity", "10")],
                 controls=controls,
             ).run()
         finally:
@@ -597,7 +597,7 @@ class ConcurrentTUITests(unittest.IsolatedAsyncioTestCase):
                 self.results: list[dict] | None = None
 
             def on_mount(self) -> None:
-                self.push_screen(RunScreen([JobSpec("model", "quickbench", "6")]))
+                self.push_screen(RunScreen([JobSpec("model", "sanity", "6")]))
 
             def show_results(self, results: list[dict], output: Path | None) -> None:
                 self.results = results
@@ -607,7 +607,7 @@ class ConcurrentTUITests(unittest.IsolatedAsyncioTestCase):
 
         app = Harness()
         with (
-            patch.object(benchmark("quickbench"), "evaluate", return_value=True),
+            patch.object(benchmark("sanity"), "evaluate", return_value=True),
             patch(
                 "benchkit.tui.screens.run.save",
                 return_value=Path("/tmp/benchkit-test-results"),
@@ -634,7 +634,7 @@ class ConcurrentTUITests(unittest.IsolatedAsyncioTestCase):
                 )
                 live_card = screen.query_one("#stat-live", StatCard)
                 self.assertIn("24 chars generated", job_summary)
-                self.assertNotIn("QuickBench/", job_summary)
+                self.assertNotIn("Sanity/", job_summary)
                 self.assertEqual(live_card.hint, "24 chars generated this job")
 
 

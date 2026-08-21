@@ -78,20 +78,20 @@ class DirectRepairTests(unittest.TestCase):
         client = RepairClient(["wrong", "right"])
         job = JobSpec(
             "model",
-            "quickbench",
+            "sanity",
             "1",
             harness="direct",
             repair_attempts=1,
         )
         engine = Engine(client=client, jobs=[job])
-        quickbench = benchmark("quickbench")
+        general = benchmark("sanity")
 
         def verify(_task, response: str) -> EvaluationResult:
             if response == "right":
                 return EvaluationResult(1.0)
             return EvaluationResult(0.0, "Sanitized verifier failure.")
 
-        with patch.object(quickbench, "evaluate_with_feedback", side_effect=verify):
+        with patch.object(general, "evaluate_with_feedback", side_effect=verify):
             result = engine.run()[0]
 
         self.assertEqual(len(client.prompts), 2)
@@ -114,12 +114,12 @@ class DirectRepairTests(unittest.TestCase):
 
     def test_direct_repair_stops_after_exactly_one_retry(self) -> None:
         client = RepairClient(["wrong-one", "wrong-two", "unused"])
-        job = JobSpec("model", "quickbench", "1", repair_attempts=1)
+        job = JobSpec("model", "sanity", "1", repair_attempts=1)
         engine = Engine(client=client, jobs=[job])
-        quickbench = benchmark("quickbench")
+        general = benchmark("sanity")
 
         with patch.object(
-            quickbench,
+            general,
             "evaluate_with_feedback",
             return_value=EvaluationResult(0.0, "Still incorrect."),
         ):
@@ -133,16 +133,16 @@ class DirectRepairTests(unittest.TestCase):
 
     def test_direct_repair_supports_multiple_retries(self) -> None:
         client = RepairClient(["wrong-one", "wrong-two", "right"])
-        job = JobSpec("model", "quickbench", "1", repair_attempts=3)
+        job = JobSpec("model", "sanity", "1", repair_attempts=3)
         engine = Engine(client=client, jobs=[job])
-        quickbench = benchmark("quickbench")
+        general = benchmark("sanity")
 
         def verify(_task, response: str) -> EvaluationResult:
             if response == "right":
                 return EvaluationResult(1.0)
             return EvaluationResult(0.0, "Sanitized verifier failure.")
 
-        with patch.object(quickbench, "evaluate_with_feedback", side_effect=verify):
+        with patch.object(general, "evaluate_with_feedback", side_effect=verify):
             result = engine.run()[0]
 
         self.assertEqual(len(client.prompts), 3)
@@ -194,11 +194,11 @@ class DirectRepairTests(unittest.TestCase):
         self.assertEqual(result["tasks"][0]["repair_attempts_used"], 2)
 
     def test_repair_limit_is_bounded(self) -> None:
-        JobSpec("model", "quickbench", repair_attempts=MAX_REPAIR_ATTEMPTS)
+        JobSpec("model", "sanity", repair_attempts=MAX_REPAIR_ATTEMPTS)
         with self.assertRaisesRegex(ValueError, "between 0 and"):
             JobSpec(
                 "model",
-                "quickbench",
+                "sanity",
                 repair_attempts=MAX_REPAIR_ATTEMPTS + 1,
             )
 
@@ -209,7 +209,7 @@ class DirectRepairTests(unittest.TestCase):
                 "--models",
                 "model",
                 "--benchmarks",
-                "quickbench:1",
+                "sanity:1",
                 "--harness",
                 "both",
                 "--repair-attempts",

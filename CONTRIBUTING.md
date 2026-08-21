@@ -56,7 +56,7 @@ offline demo client and the report writers without needing an inference server.
 
 - Run `uv run pytest` and `uv run pre-commit run -a`.
 - For scoring or parser changes, validate against a small benchmark slice first
-  (`uv run benchkit --headless --models MODEL --benchmarks quickbench:5 -v`).
+  (`uv run benchkit --headless --models MODEL --benchmarks sanity:5 -v`).
 - For TUI changes, `uv run benchkit --demo` is the fastest check.
 - Keep commits focused, with short imperative subjects.
 - Don't commit `.env`, local caches, or generated `results/` artifacts.

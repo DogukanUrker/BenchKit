@@ -484,7 +484,7 @@ class EngineIntegrationTests(unittest.TestCase):
         ):
             results = Engine(
                 client=client,
-                jobs=[JobSpec("looping-model", "quickbench", "1")],
+                jobs=[JobSpec("looping-model", "sanity", "1")],
                 sink=events.append,
             ).run()
 
@@ -505,7 +505,7 @@ class EngineIntegrationTests(unittest.TestCase):
 
         results = Engine(
             client=client,
-            jobs=[JobSpec("slow-model", "quickbench", "2")],
+            jobs=[JobSpec("slow-model", "sanity", "2")],
         ).run()
 
         result = results[0]
@@ -532,7 +532,7 @@ class EngineIntegrationTests(unittest.TestCase):
         try:
             results = Engine(
                 client=client,
-                jobs=[JobSpec("looping-model", "quickbench", "2")],
+                jobs=[JobSpec("looping-model", "sanity", "2")],
                 controls=controls,
             ).run()
         finally:
@@ -554,8 +554,8 @@ class EngineIntegrationTests(unittest.TestCase):
             results = Engine(
                 client=client,
                 jobs=[
-                    JobSpec("looping-model", "quickbench", "1"),
-                    JobSpec("looping-model", "quickbench", "1"),
+                    JobSpec("looping-model", "sanity", "1"),
+                    JobSpec("looping-model", "sanity", "1"),
                 ],
                 controls=controls,
             ).run()
@@ -572,7 +572,7 @@ class EngineIntegrationTests(unittest.TestCase):
         with patch("benchkit.engine.time.monotonic", side_effect=[0.0, 1.0, 3.0]):
             results = Engine(
                 client=SustainedLoopClient(),
-                jobs=[JobSpec("doom-model", "quickbench", "1")],
+                jobs=[JobSpec("doom-model", "sanity", "1")],
                 sink=events.append,
                 loop_kill_percent=80,
                 loop_kill_seconds=1,
@@ -601,7 +601,7 @@ class EngineIntegrationTests(unittest.TestCase):
         with patch("benchkit.engine.time.monotonic", side_effect=[0.0, 1.0, 2.0]):
             results = Engine(
                 client=ResettingLoopClient(),
-                jobs=[JobSpec("recovering-model", "quickbench", "1")],
+                jobs=[JobSpec("recovering-model", "sanity", "1")],
                 loop_kill_percent=80,
                 loop_kill_seconds=1.5,
             ).run()
@@ -613,7 +613,7 @@ class EngineIntegrationTests(unittest.TestCase):
         with patch("benchkit.engine.time.monotonic", side_effect=[0.0, 2.0]):
             results = Engine(
                 client=CompletedLoopClient(),
-                jobs=[JobSpec("recovering-model", "quickbench", "1")],
+                jobs=[JobSpec("recovering-model", "sanity", "1")],
                 loop_kill_percent=80,
                 loop_kill_seconds=1,
             ).run()
@@ -645,7 +645,7 @@ class EngineIntegrationTests(unittest.TestCase):
     def test_disabled_loop_kill_lets_the_generation_finish(self) -> None:
         results = Engine(
             client=SurvivingLoopClient(),
-            jobs=[JobSpec("doom-model", "quickbench", "1")],
+            jobs=[JobSpec("doom-model", "sanity", "1")],
             loop_kill_enabled=False,
             loop_kill_percent=80,
             loop_kill_seconds=1,
@@ -730,8 +730,7 @@ class TimeoutClient:
             )
         return {
             "thinking": "partial reasoning",
-            # This is deliberately a valid first QuickBench solution. A zero
-            # score proves the evaluator was skipped after the timeout.
+            # The score remains zero because evaluation is skipped after timeout.
             "response": "return len(set(string.lower()))",
             "trace_status": "observed",
             "tok_s": 0.0,
