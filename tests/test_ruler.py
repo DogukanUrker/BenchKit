@@ -7,7 +7,7 @@ import unittest
 from collections import Counter
 from unittest.mock import Mock, patch
 
-from benchkit.benchmarks.ruler import RULER
+from benchkit.benchmarks.ruler import RULER, RULERFull
 from benchkit.benchmarks.ruler_generator import (
     CONTEXT_BUCKETS,
     OUTPUT_RESERVE_TOKENS,
@@ -62,6 +62,18 @@ class ContextClient:
 
 
 class RulerGenerationTests(unittest.TestCase):
+    def test_lite_and_full_presets_declare_expected_sizes(self) -> None:
+        self.assertEqual(RULER.tasks_per_variant, len(TASK_KINDS) * 3)
+        self.assertEqual(
+            RULER.task_count,
+            len(TASK_KINDS) * 3 * len(CONTEXT_BUCKETS),
+        )
+        self.assertEqual(RULERFull.tasks_per_variant, TASKS_PER_BUCKET)
+        self.assertEqual(
+            RULERFull.task_count,
+            TASKS_PER_BUCKET * len(CONTEXT_BUCKETS),
+        )
+
     def test_generates_all_thirteen_lightweight_specs_per_context(self) -> None:
         tasks = generate_tasks(samples_per_kind=1)
         counts = Counter(task.metadata["context_tokens"] for task in tasks)
@@ -75,6 +87,19 @@ class RulerGenerationTests(unittest.TestCase):
         self.assertEqual(
             {task.metadata["task_type"] for task in tasks},
             set(TASK_KINDS),
+        )
+
+    def test_small_slice_covers_each_task_family_once(self) -> None:
+        tasks = generate_tasks(samples_per_kind=2)
+        first_bucket = [
+            task
+            for task in tasks
+            if task.metadata["context_tokens"] == CONTEXT_BUCKETS[0]
+        ]
+
+        self.assertEqual(
+            [task.metadata["task_type"] for task in first_bucket[: len(TASK_KINDS)]],
+            list(TASK_KINDS),
         )
 
     def test_leakage_guard_rejects_old_markers_and_accepts_fixed_distribution(
@@ -153,7 +178,7 @@ class RulerJobTests(unittest.TestCase):
         )
         self.assertTrue(all(job.planned_total() == 3 for job in jobs))
         self.assertTrue(
-            all(len(tasks_for_job(job)) == TASKS_PER_BUCKET for job in jobs)
+            all(len(tasks_for_job(job)) == RULER.tasks_per_variant for job in jobs)
         )
 
     def test_unknown_context_keeps_the_128k_bucket(self) -> None:

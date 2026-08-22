@@ -19,6 +19,7 @@ from benchkit.leakage import assert_candidate_parity
 # run the bucket instead of being rejected for falling 3,072 tokens short.
 CONTEXT_BUCKETS = (4096, 8192, 16384, 32768, 65536, 128000)
 DEFAULT_SAMPLES_PER_KIND = 500
+PRACTICAL_SAMPLES_PER_KIND = 3
 TASK_KINDS = (
     "niah_single_1",
     "niah_single_2",
@@ -168,8 +169,10 @@ def generate_tasks(*, samples_per_kind: int = DEFAULT_SAMPLES_PER_KIND) -> list[
         raise ValueError("RULER samples per task must be positive")
     tasks: list[Task] = []
     for bucket in CONTEXT_BUCKETS:
-        for kind in TASK_KINDS:
-            for sample in range(samples_per_kind):
+        # Keep each sample's 13 task families together so small CLI slices are
+        # representative instead of containing only the first NIAH family.
+        for sample in range(samples_per_kind):
+            for kind in TASK_KINDS:
                 tasks.append(
                     _variable_task(bucket, sample)
                     if kind == "variable_tracking"

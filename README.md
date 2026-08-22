@@ -107,7 +107,8 @@ uv run benchkit --help
 | MBPP+ | `mbpp-plus` | 378 | MBPP with expanded EvalPlus tests |
 | GSM8K | `gsm8k` | 1,319 | Multi-step grade-school math |
 | IFEval | `ifeval` | 541 | Verifiable instruction following |
-| RULER | `ruler` | 20 × 6 | Long-context retrieval from 4K to 128K |
+| RULER | `ruler` | 39 × 6 | Practical long-context retrieval from 4K to 128K |
+| RULER Full | `ruler-full` | 6,500 × 6 | Research-scale RULER (explicit opt-in) |
 | XSTest | `xstest` | 450 | Safe compliance and unsafe refusal with an offline checker |
 | GPQA | `gpqa` | 198 | Graduate-level science questions |
 | MMLU-Pro | `mmlu-pro` | 12,032 | Reasoning across 14 knowledge categories |

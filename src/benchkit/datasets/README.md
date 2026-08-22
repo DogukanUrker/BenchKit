@@ -99,6 +99,12 @@ essay corpus is generated with NVIDIA/RULER's
 `download_paulgraham_essay.py`.
 retrieval and variable-tracking prompts at runtime for each context bucket.
 
+The `ruler` benchmark is the practical preset: three samples from each of the
+13 task families in every supported context bucket (234 generations at
+4K–128K). Use `ruler-full` to opt into the research-scale configuration of 500
+samples per family (39,000 generations), or slice it explicitly (for example,
+`ruler-full:13`) for round-robin coverage of all task families.
+
 - Source design: <https://github.com/NVIDIA/RULER>
 - Paper: <https://arxiv.org/abs/2404.06654>
 - Reference implementation license: Apache 2.0

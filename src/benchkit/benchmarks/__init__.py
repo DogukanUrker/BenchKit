@@ -15,7 +15,7 @@ from benchkit.benchmarks.mmlu import MMLU
 from benchkit.benchmarks.mmlu_pro import MMLUPro
 from benchkit.benchmarks.openbookqa import OpenBookQA
 from benchkit.benchmarks.piqa import PIQA
-from benchkit.benchmarks.ruler import RULER
+from benchkit.benchmarks.ruler import RULER, RULERFull
 from benchkit.benchmarks.sanity import Sanity
 from benchkit.benchmarks.truthfulqa import TruthfulQA
 from benchkit.benchmarks.winogrande import WinoGrande
@@ -33,6 +33,7 @@ REGISTRY: dict[str, type] = {
     "gsm8k": GSM8K,
     "ifeval": IFEval,
     "ruler": RULER,
+    "ruler-full": RULERFull,
     "xstest": XSTest,
     "gpqa": GPQA,
     "mmlu-pro": MMLUPro,
@@ -57,7 +58,8 @@ DESCRIPTIONS: dict[str, str] = {
     "mbpp-plus": "sanitized MBPP tasks with 39k+ EvalPlus test inputs",
     "gsm8k": "multi-step grade-school math problems with exact numeric answers",
     "ifeval": "prompts with code-checkable instruction-following constraints",
-    "ruler": "13 RULER tasks per context at 4k–128k; very slow",
+    "ruler": "practical long-context retrieval across all 13 RULER task families",
+    "ruler-full": "research-scale RULER with 500 samples per task and context",
     "xstest": "safe compliance and unsafe refusal using an offline string matcher",
     "arc": "challenging grade-school science questions with four choices",
     "gpqa": "expert-written graduate science questions designed to resist search",

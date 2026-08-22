@@ -58,7 +58,7 @@ jobs:
       - name: Headless demo run
         run: |
           uv run --no-sync benchkit --demo --headless \
-            --models demo-nano:0.5b --benchmarks quickbench:3
+            --models demo-nano:0.5b --benchmarks sanity:3
 
       - name: Check report artifacts
         run: |

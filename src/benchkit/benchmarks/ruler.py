@@ -9,6 +9,9 @@ from collections.abc import Callable
 from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.ruler_generator import (
     CONTEXT_BUCKETS,
+    DEFAULT_SAMPLES_PER_KIND,
+    PRACTICAL_SAMPLES_PER_KIND,
+    TASK_KINDS,
     TASKS_PER_BUCKET,
     context_label,
     fit_prompt,
@@ -18,17 +21,18 @@ from benchkit.benchmarks.utils import strip_think_tags
 
 
 class RULER:
-    """The complete 13-task RULER effective-context suite."""
+    """Consumer-friendly RULER suite with repeated task-family coverage."""
 
     name = "ruler"
-    task_count = TASKS_PER_BUCKET * len(CONTEXT_BUCKETS)
-    tasks_per_variant = TASKS_PER_BUCKET
+    samples_per_kind = PRACTICAL_SAMPLES_PER_KIND
+    tasks_per_variant = samples_per_kind * len(TASK_KINDS)
+    task_count = tasks_per_variant * len(CONTEXT_BUCKETS)
     context_buckets = CONTEXT_BUCKETS
     variant_labels = tuple(context_label(bucket) for bucket in CONTEXT_BUCKETS)
     variant_count = len(CONTEXT_BUCKETS)
-    list_task_count = f"{TASKS_PER_BUCKET} × 6"
+    list_task_count = f"{tasks_per_variant} × 6"
     include_in_overall = False
-    list_note = "13 tasks · 500 samples each · 4k–128k · very slow"
+    list_note = "practical · 13 tasks × 3 samples · 4k–128k"
     evaluation_activity = "checking retrieved values"
 
     def __init__(self) -> None:
@@ -36,7 +40,7 @@ class RULER:
         self._hint_lock = threading.Lock()
 
     def load_tasks(self) -> list[Task]:
-        return generate_tasks()
+        return generate_tasks(samples_per_kind=self.samples_per_kind)
 
     def variants(self, client: object, model: str) -> list[str]:
         """Return buckets that fit the model's discovered served context."""
@@ -139,3 +143,14 @@ class RULER:
                 }
             )
         return rows
+
+
+class RULERFull(RULER):
+    """Complete RULER suite for research-scale, explicitly opted-in runs."""
+
+    name = "ruler-full"
+    samples_per_kind = DEFAULT_SAMPLES_PER_KIND
+    tasks_per_variant = TASKS_PER_BUCKET
+    task_count = tasks_per_variant * len(CONTEXT_BUCKETS)
+    list_task_count = f"{tasks_per_variant:,} × 6"
+    list_note = "full · 13 tasks × 500 samples · 4k–128k · extremely slow"
