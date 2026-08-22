@@ -11,6 +11,7 @@ from benchkit.benchmarks.hellaswag import HellaSwag
 from benchkit.benchmarks.humaneval import HumanEval
 from benchkit.benchmarks.ifeval import IFEval
 from benchkit.benchmarks.mbpp import MBPP
+from benchkit.benchmarks.medfailbench import MedFailBench
 from benchkit.benchmarks.mmlu import MMLU
 from benchkit.benchmarks.mmlu_pro import MMLUPro
 from benchkit.benchmarks.openbookqa import OpenBookQA
@@ -35,6 +36,7 @@ REGISTRY: dict[str, type] = {
     "ruler": RULER,
     "ruler-full": RULERFull,
     "xstest": XSTest,
+    "medfailbench": MedFailBench,
     "gpqa": GPQA,
     "mmlu-pro": MMLUPro,
     # Multiple-choice suites.
@@ -61,6 +63,7 @@ DESCRIPTIONS: dict[str, str] = {
     "ruler": "practical long-context retrieval across all 13 RULER task families",
     "ruler-full": "research-scale RULER with 500 samples per task and context",
     "xstest": "safe compliance and unsafe refusal using an offline string matcher",
+    "medfailbench": "clinical safety screening with deterministic offline rules",
     "arc": "challenging grade-school science questions with four choices",
     "gpqa": "expert-written graduate science questions designed to resist search",
     "mmlu-pro": "harder MMLU successor: ten options and reasoning-heavy questions",
