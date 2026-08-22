@@ -174,12 +174,6 @@ DataTable > .datatable--cursor {
     width: 7fr;
 }
 
-#bench-tags {
-    height: auto;
-    padding: 0 0 1 1;
-    text-wrap: wrap;
-}
-
 /* Sized to the rows it holds, so a filtered list does not leave a tall gap. */
 #bench-list {
     height: auto;

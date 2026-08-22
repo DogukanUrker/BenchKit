@@ -22,13 +22,7 @@ from textual.widgets import (
 )
 from textual.widgets.selection_list import Selection
 
-from benchkit.benchmarks import (
-    DESCRIPTIONS,
-    REGISTRY,
-    all_tags,
-    signal_tag,
-    tags_for,
-)
+from benchkit.benchmarks import DESCRIPTIONS, REGISTRY
 from benchkit.demo import DemoClient
 from benchkit.engine import (
     MAX_REPAIR_ATTEMPTS,
@@ -50,48 +44,6 @@ from benchkit.tui.widgets import SectionTitle
 MODEL_NAME_WIDTH = 40
 BENCHMARK_NAME_WIDTH = 15
 BENCHMARK_COUNT_WIDTH = 13
-
-
-def parse_filter(needle: str) -> tuple[list[str], list[str]]:
-    """Split a filter box query into required and excluded terms.
-
-    Terms are whitespace separated and a leading `-` excludes, so
-    `mcq -saturated` reads as "multiple choice, minus the saturated ones".
-    """
-    include: list[str] = []
-    exclude: list[str] = []
-    for term in needle.lower().split():
-        if term.startswith("-") and len(term) > 1:
-            exclude.append(term[1:])
-        elif not term.startswith("-"):
-            include.append(term)
-    return include, exclude
-
-
-def benchmark_matches(key: str, include: list[str], exclude: list[str]) -> bool:
-    """Match a benchmark against filter terms by key, tag or description.
-
-    A term that is itself a tag matches tags only, so typing `code` selects the
-    same benchmarks as `--tag code` rather than also catching IFEval for the
-    "code-checkable" in its description. Anything else is a free-text search
-    over the key, the description and tag prefixes.
-    """
-    tags = set(tags_for(key))
-    description = DESCRIPTIONS.get(key, "").lower()
-    known_tags = set(all_tags())
-
-    def hit(term: str) -> bool:
-        if term in known_tags:
-            return term in tags
-        return (
-            term in key.lower()
-            or term in description
-            or any(tag.startswith(term) for tag in tags)
-        )
-
-    if any(hit(term) for term in exclude):
-        return False
-    return all(hit(term) for term in include)
 
 
 class SetupScreen(Screen[None]):
@@ -134,14 +86,9 @@ class SetupScreen(Screen[None]):
             with Vertical(classes="pane", id="bench-pane"):
                 yield SectionTitle("Benchmarks", id="bench-title")
                 yield Input(
-                    placeholder="Filter benchmarks or tags…",
+                    placeholder="Filter benchmarks…",
                     id="bench-filter",
                     classes="filter",
-                )
-                yield Static(
-                    "tags: " + " · ".join(all_tags()) + "   [dim](-tag excludes)[/dim]",
-                    id="bench-tags",
-                    classes="hint",
                 )
                 yield SelectionList(id="bench-list")
         with Horizontal(id="setup-options"):
@@ -288,10 +235,6 @@ class SetupScreen(Screen[None]):
         text = Text()
         text.append(_clip(key, BENCHMARK_NAME_WIDTH).ljust(BENCHMARK_NAME_WIDTH))
         text.append(count_text.rjust(BENCHMARK_COUNT_WIDTH), style="dim")
-        signal = signal_tag(key)
-        if signal:
-            text.append(f"  {signal}", style="dim italic")
-
         limit = self.limits.get(key)
         if limit:
             accent = score_palette(self.app.current_theme.dark)["mid"]
@@ -320,11 +263,11 @@ class SetupScreen(Screen[None]):
 
     def _rebuild_benchmarks(self) -> None:
         widget = self.query_one("#bench-list", SelectionList)
-        include, exclude = parse_filter(
-            self.query_one("#bench-filter", Input).value.strip()
-        )
+        needle = self.query_one("#bench-filter", Input).value.strip().lower()
         visible = [
-            key for key in self.bench_order if benchmark_matches(key, include, exclude)
+            key
+            for key in self.bench_order
+            if needle in key.lower() or needle in DESCRIPTIONS.get(key, "").lower()
         ]
         highlighted = widget.highlighted
         widget.clear_options()

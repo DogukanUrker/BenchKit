@@ -82,9 +82,6 @@ uv run benchkit --headless \
 # Print prompts, reasoning traces, and responses
 uv run benchkit --headless --models qwen3:8b \
   --benchmarks sanity --verbose
-
-# Select benchmarks by tag
-uv run benchkit --headless --models qwen3:8b --tag code
 ```
 
 Task slices accept `20` for the first 20 tasks, `-20` for the last 20, and
@@ -94,7 +91,6 @@ Useful commands:
 
 ```bash
 uv run benchkit --list
-uv run benchkit --list --tag mcq,-saturated
 uv run benchkit --help
 ```
 
@@ -125,7 +121,7 @@ uv run benchkit --help
 | HellaSwag | `hellaswag` | 1,000 | Plausible real-world continuations |
 
 The CLI registry is the canonical source for current counts, descriptions,
-tags, and supported perturbations:
+and supported perturbations:
 
 ```bash
 uv run benchkit --list

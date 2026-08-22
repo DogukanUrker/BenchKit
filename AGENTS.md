@@ -99,7 +99,7 @@ tables in the README.
   `results.html`. Performance runs write matching `perf.*` artifacts. Keep old
   reports readable when adding fields; missing historical fields mean “not
   captured,” not zero.
-- Benchmark metadata, counts, tags, perturbation support, and descriptions are
+- Benchmark metadata, counts, perturbation support, and descriptions are
   canonical in `src/benchkit/benchmarks/__init__.py`; inspect it or run
   `uv run benchkit --list` instead of maintaining a second table.
 - RULER is generated deterministically at runtime and reported by context
