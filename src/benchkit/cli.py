@@ -15,7 +15,13 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from benchkit.benchmarks import REGISTRY, all_tags, keys_for_tags, tags_for
+from benchkit.benchmarks import (
+    DESCRIPTIONS,
+    REGISTRY,
+    all_tags,
+    keys_for_tags,
+    tags_for,
+)
 from benchkit.client import InferenceClient
 from benchkit.engine import (
     MAX_REPAIR_ATTEMPTS,
@@ -258,6 +264,7 @@ def _list_benchmarks(tag: str = "") -> None:
     table = Table(box=box.MINIMAL, border_style="dim", header_style="bold")
     table.add_column("Benchmark")
     table.add_column("Tasks", justify="right")
+    table.add_column("Description")
     table.add_column("Tags")
     table.add_column("Perturbations")
     table.add_column("Notes")
@@ -271,6 +278,7 @@ def _list_benchmarks(tag: str = "") -> None:
         table.add_row(
             key,
             count,
+            DESCRIPTIONS.get(key, ""),
             f"[dim]{' '.join(tags_for(key))}[/dim]",
             f"[cyan]{' '.join(perturbations_for(key))}[/cyan]",
             f"[yellow]{note}[/yellow]" if note else "",

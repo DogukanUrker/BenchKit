@@ -13,6 +13,17 @@ JSONL schema.
 
 [cc-by-4.0]: https://creativecommons.org/licenses/by/4.0/
 
+## XSTest
+
+`xstest.csv` is the complete 450-prompt XSTest suite: 250 safe prompts across
+ten prompt types and 200 unsafe contrast prompts. BenchKit uses the authors'
+offline string-matching evaluator, which is less reliable than manual or
+LLM-based classification and cannot identify partial refusals.
+
+- Source: <https://github.com/paul-rottger/xstest>
+- Paper: <https://aclanthology.org/2024.naacl-long.301/>
+- Dataset license: [Creative Commons Attribution 4.0 International][cc-by-4.0]
+
 ## WinoGrande
 
 `winogrande.jsonl` is a transformed copy of the 1,267-example labeled

@@ -19,6 +19,7 @@ from benchkit.benchmarks.ruler import RULER
 from benchkit.benchmarks.sanity import Sanity
 from benchkit.benchmarks.truthfulqa import TruthfulQA
 from benchkit.benchmarks.winogrande import WinoGrande
+from benchkit.benchmarks.xstest import XSTest
 
 REGISTRY: dict[str, type] = {
     # Generative suites first, then the multiple-choice ones.
@@ -32,6 +33,7 @@ REGISTRY: dict[str, type] = {
     "gsm8k": GSM8K,
     "ifeval": IFEval,
     "ruler": RULER,
+    "xstest": XSTest,
     "gpqa": GPQA,
     "mmlu-pro": MMLUPro,
     # Classic suites - kept for comparability, largely saturated.
@@ -43,6 +45,30 @@ REGISTRY: dict[str, type] = {
     "boolq": BoolQ,
     "truthfulqa": TruthfulQA,
     "hellaswag": HellaSwag,
+}
+
+DESCRIPTIONS: dict[str, str] = {
+    "aider-polyglot": "repository editing across six languages with the Pi agent",
+    "git-surgery": "stateful Git operations in isolated repositories with Pi",
+    "sanity": "25 curated checks across code, math, instructions, science, and commonsense",
+    "humaneval": "Python function completions with the original unit tests",
+    "humaneval-plus": "HumanEval with 122k+ tougher EvalPlus test inputs",
+    "mbpp": "short Python functions from natural-language specifications",
+    "mbpp-plus": "sanitized MBPP tasks with 39k+ EvalPlus test inputs",
+    "gsm8k": "multi-step grade-school math problems with exact numeric answers",
+    "ifeval": "prompts with code-checkable instruction-following constraints",
+    "ruler": "13 RULER tasks per context at 4k–128k; very slow",
+    "xstest": "safe compliance and unsafe refusal using an offline string matcher",
+    "arc": "challenging grade-school science questions with four choices",
+    "gpqa": "expert-written graduate science questions designed to resist search",
+    "mmlu-pro": "harder MMLU successor: ten options and reasoning-heavy questions",
+    "mmlu": "zero-shot coverage of 57 academic and professional subjects",
+    "openbookqa": "elementary science questions requiring facts plus reasoning",
+    "winogrande": "commonsense pronoun resolution in ambiguous sentences",
+    "piqa": "choose the most physically plausible solution to everyday tasks",
+    "boolq": "answer yes/no questions using evidence from a passage",
+    "truthfulqa": "avoid common misconceptions and select the truthful answer",
+    "hellaswag": "choose the most plausible continuation of a real-world scenario",
 }
 
 # Tags describe what a benchmark measures (`code`, `math`, `knowledge`,
@@ -74,6 +100,7 @@ TAGS: dict[str, tuple[str, ...]] = {
     "gsm8k": ("math", "generative"),
     "ifeval": ("instruction", "generative"),
     "ruler": ("long-context", "retrieval", "generative"),
+    "xstest": ("safety", "refusal", "generative"),
     "gpqa": ("knowledge", "mcq", "low-signal"),
     "mmlu-pro": ("knowledge", "mcq"),
     "mmlu": ("knowledge", "mcq", "saturated", "low-signal"),

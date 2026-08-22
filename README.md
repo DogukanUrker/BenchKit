@@ -10,7 +10,7 @@ Not vibes. Actual scores.
 
 <img src="https://img.shields.io/badge/Python-3.11%2B-2563EB?style=flat-square&logo=python&logoColor=white&labelColor=0b0b0b" alt="Python 3.11+">
 <img src="https://img.shields.io/badge/TUI-Textual-60A5FA?style=flat-square&labelColor=0b0b0b" alt="Built with Textual">
-<img src="https://img.shields.io/badge/Suites-20-34D399?style=flat-square&labelColor=0b0b0b" alt="20 benchmark suites">
+<img src="https://img.shields.io/badge/Suites-21-34D399?style=flat-square&labelColor=0b0b0b" alt="21 benchmark suites">
 <img src="https://img.shields.io/badge/License-Apache%202.0-6B7280?style=flat-square&labelColor=0b0b0b" alt="Apache 2.0">
 
 </div>
@@ -112,6 +112,7 @@ uv run benchkit --help
 | GSM8K | `gsm8k` | 1,319 | Multi-step grade-school math |
 | IFEval | `ifeval` | 541 | Verifiable instruction following |
 | RULER | `ruler` | 20 × 6 | Long-context retrieval from 4K to 128K |
+| XSTest | `xstest` | 450 | Safe compliance and unsafe refusal with an offline checker |
 | GPQA | `gpqa` | 198 | Graduate-level science questions |
 | MMLU-Pro | `mmlu-pro` | 12,032 | Reasoning across 14 knowledge categories |
 | MMLU | `mmlu` | 14,042 | Academic and professional knowledge |

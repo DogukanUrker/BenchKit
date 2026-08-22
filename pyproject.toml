@@ -31,6 +31,7 @@ include = ["benchkit*"]
 benchkit = [
     "answer_key_guard.ts",
     "datasets/*.jsonl",
+    "datasets/*.csv",
     "datasets/*.md",
     "datasets/*.txt",
     "git_surgery/**/*.sh",

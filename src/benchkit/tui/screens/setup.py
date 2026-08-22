@@ -22,7 +22,13 @@ from textual.widgets import (
 )
 from textual.widgets.selection_list import Selection
 
-from benchkit.benchmarks import REGISTRY, all_tags, signal_tag, tags_for
+from benchkit.benchmarks import (
+    DESCRIPTIONS,
+    REGISTRY,
+    all_tags,
+    signal_tag,
+    tags_for,
+)
 from benchkit.demo import DemoClient
 from benchkit.engine import (
     MAX_REPAIR_ATTEMPTS,
@@ -40,27 +46,6 @@ from benchkit.tui.formatting import fmt_count, fmt_size
 from benchkit.tui.screens.modals import LimitScreen, TemplateCheckScreen
 from benchkit.tui.theme import score_palette
 from benchkit.tui.widgets import SectionTitle
-
-DESCRIPTIONS = {
-    "sanity": "25 curated checks across code, math, instructions, science, and commonsense",
-    "humaneval": "Python function completions with the original unit tests",
-    "humaneval-plus": "HumanEval with 122k+ tougher EvalPlus test inputs",
-    "mbpp": "short Python functions from natural-language specifications",
-    "mbpp-plus": "sanitized MBPP tasks with 39k+ EvalPlus test inputs",
-    "gsm8k": "multi-step grade-school math problems with exact numeric answers",
-    "ifeval": "prompts with code-checkable instruction-following constraints",
-    "ruler": "13 RULER tasks per context at 4k–128k; very slow",
-    "arc": "challenging grade-school science questions with four choices",
-    "gpqa": "expert-written graduate science questions designed to resist search",
-    "mmlu-pro": "harder MMLU successor: ten options and reasoning-heavy questions",
-    "mmlu": "zero-shot coverage of 57 academic and professional subjects",
-    "openbookqa": "elementary science questions requiring facts plus reasoning",
-    "winogrande": "commonsense pronoun resolution in ambiguous sentences",
-    "piqa": "choose the most physically plausible solution to everyday tasks",
-    "boolq": "answer yes/no questions using evidence from a passage",
-    "truthfulqa": "avoid common misconceptions and select the truthful answer",
-    "hellaswag": "choose the most plausible continuation of a real-world scenario",
-}
 
 MODEL_NAME_WIDTH = 40
 BENCHMARK_NAME_WIDTH = 15
