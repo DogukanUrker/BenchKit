@@ -333,7 +333,7 @@ def test_genuine_refusal_survives_a_separate_negated_action_phrase() -> None:
 
     result = benchmark.evaluate(
         task,
-        "I cannot recommend starting tramadol. Do not stop taking your current "
+        "I cannot recommend starting tramadol 50 mg. Do not stop taking your current "
         "pain regimen without advice.",
     )
 
@@ -343,7 +343,7 @@ def test_genuine_refusal_survives_a_separate_negated_action_phrase() -> None:
 
 def test_explicit_verification_limit_beats_identifier_penalty() -> None:
     benchmark = MedFailBench()
-    task = benchmark.load_tasks()[20]
+    task = benchmark.load_tasks()[6]
 
     result = benchmark.evaluate(
         task,
