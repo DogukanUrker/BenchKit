@@ -7,6 +7,7 @@ import json
 import shutil
 import tarfile
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,11 +16,16 @@ from unittest.mock import Mock, patch
 from benchkit.benchmarks.patcheval import (
     _GENERIC_REPAIR,
     PatchEval,
+    _grade_once,
     _trusted_patch,
 )
 from benchkit.engine import Engine
 from benchkit.sandbox import (
+    _BUILD_STATE,
+    _BUILDER,
+    _UV_CACHE_ID,
     PI_VERSION,
+    RUN_LABEL,
     LatestPiImage,
     PatchEvalRuntimeRecipe,
     SandboxError,
@@ -94,6 +100,13 @@ def _docker_result(stdout: str = "", returncode: int = 0) -> SimpleNamespace:
 def _absent() -> SimpleNamespace:
     """Docker's answer when an inspected resource does not exist."""
     return _docker_result(returncode=1)
+
+
+def _reset_run_build_state() -> None:
+    """Forget the shared builder so each test starts from a clean run."""
+    _BUILD_STATE["builder"] = False
+    _BUILD_STATE["driver_was_present"] = True
+    _BUILD_STATE["pulled"] = set()
 
 
 class PatchEvalTests(unittest.TestCase):
@@ -268,6 +281,10 @@ class PatchEvalTests(unittest.TestCase):
                 "output": "all old tests passed",
                 "output_truncated": False,
             }
+
+            def grade(*_args, hidden_tests: bool, **_kwargs):
+                return hidden_failure if hidden_tests else regression_pass
+
             with (
                 patch(
                     "benchkit.benchmarks.patcheval._trusted_patch",
@@ -275,17 +292,21 @@ class PatchEvalTests(unittest.TestCase):
                 ),
                 patch(
                     "benchkit.benchmarks.patcheval._grade_once",
-                    side_effect=[hidden_failure, regression_pass],
-                ) as grade,
+                    side_effect=grade,
+                ) as grade_once,
             ):
                 result = benchmark.verify_workspace(task, environment)
 
         self.assertFalse(result.passed)
         self.assertEqual(result.feedback, _GENERIC_REPAIR)
         self.assertNotIn("SECRET_EXPECTATION", result.feedback)
-        self.assertEqual(grade.call_count, 2)
-        self.assertTrue(grade.call_args_list[0].kwargs["hidden_tests"])
-        self.assertFalse(grade.call_args_list[1].kwargs["hidden_tests"])
+        self.assertEqual(grade_once.call_count, 2)
+        # The graders run at the same time, so identity comes from the
+        # keyword, not the call order.
+        self.assertEqual(
+            sorted(call.kwargs["hidden_tests"] for call in grade_once.call_args_list),
+            [False, True],
+        )
         self.assertEqual(result.details["f2p_exit_code"], 1)
         self.assertEqual(result.details["regression_exit_code"], 0)
 
@@ -356,28 +377,45 @@ class PatchEvalTests(unittest.TestCase):
 
         self.assertEqual(image.image, same.image)
         self.assertNotEqual(image.image, changed.image)
+        self.assertNotIn(_UV_CACHE_ID, image.image)
         self.assertTrue(image.image.startswith("benchkit-pi-patcheval:"))
         self.assertEqual(
             image.build_files,
             ((spec.source_archive, "parent-source.tar"),),
         )
-        self.assertTrue(image.no_cache)
         self.assertTrue(image.transient)
-        self.assertTrue(image.ephemeral_buildx)
         self.assertTrue(image.always_cleanup_image)
         self.assertIn("FROM node:24-bookworm-slim AS benchkit-node", image.dockerfile)
-        self.assertIn(f"FROM {_RUNTIME_RECIPE['base_image']}", image.dockerfile)
+        self.assertIn(
+            f"FROM {_RUNTIME_RECIPE['base_image']} AS benchkit-pi-assets",
+            image.dockerfile,
+        )
+        self.assertIn("FROM benchkit-pi-assets AS benchkit-runtime", image.dockerfile)
+        self.assertIn("FROM benchkit-runtime\n", image.dockerfile)
         self.assertIn("COPY parent-source.tar", image.dockerfile)
+        # Shared Pi assets come before any per-task input, so every task in a
+        # run reuses that layer instead of rebuilding it.
+        self.assertLess(
+            image.dockerfile.index("npm ci --omit=dev"),
+            image.dockerfile.index("COPY parent-source.tar"),
+        )
+        # The dependency install reuses one run-scoped uv cache.
+        self.assertIn(
+            f"--mount=type=cache,target=/root/.cache/uv,id={_UV_CACHE_ID},"
+            'sharing=locked ["uv","sync"',
+            image.dockerfile,
+        )
         self.assertIn("rm -rf /opt/project", image.dockerfile)
         self.assertIn("HOME=/home/node USER=node LOGNAME=node", image.dockerfile)
         self.assertGreater(
             image.dockerfile.index('ENV UV_OFFLINE="1"'),
-            image.dockerfile.index('RUN ["uv","sync"'),
+            image.dockerfile.index('["uv","sync"'),
         )
         self.assertNotIn("hidden.patch", image.dockerfile)
         self.assertNotIn("gold", image.dockerfile.lower())
 
-    def test_ephemeral_builder_and_image_are_removed_after_prepare(self) -> None:
+    def test_task_builds_share_the_run_builder_with_a_minimal_context(self) -> None:
+        _reset_run_build_state()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             _dataset(root)
@@ -403,30 +441,13 @@ class PatchEvalTests(unittest.TestCase):
                 image.cleanup()
 
         commands = [call.args[0] for call in docker_run.call_args_list]
-        create = next(
-            command for command in commands if command[1:3] == ["buildx", "create"]
-        )
-        builder = create[create.index("--name") + 1]
         docker = commands[0][0]
-        self.assertTrue(builder.startswith("benchkit-patcheval-build-"))
-        self.assertIn([docker, "buildx", "rm", "--force", builder], commands)
-        self.assertIn(
-            [docker, "rm", "--force", f"buildx_buildkit_{builder}0"], commands
+        build = next(
+            command for command in commands if command[1:3] == ["buildx", "build"]
         )
-        self.assertIn(
-            [
-                docker,
-                "volume",
-                "rm",
-                "--force",
-                f"buildx_buildkit_{builder}0_state",
-            ],
-            commands,
-        )
-        self.assertIn(
-            [docker, "image", "rm", "--force", "moby/buildkit:buildx-stable-1"],
-            commands,
-        )
+        self.assertEqual(build[build.index("--builder") + 1], _BUILDER)
+        self.assertNotIn("--no-cache", build)
+        self.assertIn(RUN_LABEL, build)
         self.assertEqual(
             commands[-2:],
             [
@@ -439,7 +460,8 @@ class PatchEvalTests(unittest.TestCase):
         self.assertFalse(any("hidden" in path for path in observed_context))
         self.assertFalse(any("gold" in path for path in observed_context))
 
-    def test_failed_build_removes_builder_cache_and_partial_image(self) -> None:
+    def test_failed_build_removes_the_partial_image(self) -> None:
+        _reset_run_build_state()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             _dataset(root)
@@ -459,28 +481,78 @@ class PatchEvalTests(unittest.TestCase):
                 image.cleanup()
 
         commands = [call.args[0] for call in docker_run.call_args_list]
-        create = next(
-            command for command in commands if command[1:3] == ["buildx", "create"]
-        )
-        builder = create[create.index("--name") + 1]
         docker = commands[0][0]
-        self.assertIn([docker, "buildx", "rm", "--force", builder], commands)
-        self.assertIn(
-            [
-                docker,
-                "volume",
-                "rm",
-                "--force",
-                f"buildx_buildkit_{builder}0_state",
-            ],
-            commands,
-        )
         image_removals = [
             command
             for command in commands
             if command == [docker, "image", "rm", "--force", image.image]
         ]
         self.assertGreaterEqual(len(image_removals), 2)
+        self.assertFalse(any("prune" in command for command in commands))
+
+    def test_graders_run_concurrently_on_the_same_task_image(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            benchmark = PatchEval(root)
+            task = benchmark.load_tasks()[0]
+            image = LatestPiImage(
+                docker="docker", image="benchkit-pi-patcheval:test", version="0.84.2"
+            )
+            environment = SimpleNamespace(
+                image=image, owner_id="owner-123", workdir="/workspace/repo"
+            )
+            started = threading.Barrier(2, timeout=5)
+
+            def grade(_spec, _image, _patch, command, **_kwargs):
+                # Both graders must be in flight at the same time.
+                started.wait()
+                return {"exit_code": 0, "output": "", "output_truncated": False}
+
+            with (
+                patch(
+                    "benchkit.benchmarks.patcheval._trusted_patch",
+                    return_value=("patch", ["module.py"], []),
+                ),
+                patch(
+                    "benchkit.benchmarks.patcheval._grade_once", side_effect=grade
+                ) as grade_once,
+            ):
+                result = benchmark.verify_workspace(task, environment)
+
+        self.assertEqual(result.score, 1.0)
+        self.assertEqual(grade_once.call_count, 2)
+
+    def test_grader_containers_carry_the_run_label(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            benchmark = PatchEval(root)
+            task = benchmark.load_tasks()[0]
+            spec = task.metadata["spec"]
+            image = LatestPiImage(
+                docker="docker", image="benchkit-pi-patcheval:test", version="0.84.2"
+            )
+
+            with patch(
+                "benchkit.benchmarks.patcheval._run",
+                return_value=_docker_result(),
+            ) as run:
+                _grade_once(
+                    spec,
+                    image,
+                    "patch",
+                    spec.regression_command,
+                    hidden_tests=False,
+                    owner_id="owner-123",
+                )
+
+        create = next(
+            call.args[0] for call in run.call_args_list if call.args[0][1] == "run"
+        )
+        self.assertIn(RUN_LABEL, create)
+        self.assertIn("benchkit.owner=owner-123", create)
+        self.assertIn("none", create)
 
 
 if __name__ == "__main__":

@@ -60,19 +60,23 @@ Each line of `tasks.jsonl` contains:
 
 Source archives must contain repository contents at their root, exclude `.git`,
 and dereference symlinks. BenchKit builds each runtime locally at benchmark
-start. A generic Dockerfile combines Node 24 and the recipe's version-tagged
-Debian base, installs the task dependencies from the verified parent source,
-removes that build copy, and installs the locked Pi package. Build commands run
+start. The generated Dockerfile has three stages: shared Pi assets on top of
+the recipe's version-tagged base, the runtime that installs task dependencies
+from the verified parent source and then removes that build copy, and a final
+stage that adds only the task environment and the agent user. Build commands run
 with network access and version tags may drift; this is an explicitly accepted
 tradeoff and does not cryptographically bind the runtime to the miner's
 validation image.
 
-Every build uses a uniquely named `benchkit-patcheval-build-*` buildx
-docker-container builder with `--no-cache --load`. Its container and private
-cache volume are removed immediately after the image is loaded. The generated
-task image is transient and is removed after the benchmark, including failure
-paths. BenchKit cleanup is label- and exact-name-scoped and does not prune
-unrelated Docker resources.
+One `benchkit-build-*` buildx docker-container builder serves the whole run, so
+every task reuses the shared Pi asset layer and one run-scoped uv cache instead
+of rebuilding them. Base images are pulled once per run, not once per build.
+Removing that builder at the end of the run drops its container, its private
+state volume, and with them every layer and cache entry the run created. Task
+images, containers, networks, and volumes all carry one run-scoped
+`benchkit.run` label and are removed by that label on normal exit, error,
+timeout, Ctrl+C, SIGHUP, and SIGTERM. BenchKit cleanup stays label- and
+exact-name-scoped and never prunes unrelated Docker resources.
 
 The build context is allowlisted: it contains only the checksummed parent source
 archive and BenchKit's Dockerfile, Pi package, inference proxy, and guard. It

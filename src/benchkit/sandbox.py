@@ -31,6 +31,33 @@ _PI_PACKAGE_ROOT = Path(__file__).with_name("pi_package")
 _PATCHEVAL_IMAGE_SESSION = uuid.uuid4().hex[:12]
 _BUILDKIT_DRIVER_IMAGE = "moby/buildkit:buildx-stable-1"
 
+# One label scopes every image, container, network, volume, and build-cache
+# entry that this process creates, so cleanup can remove exactly its own
+# resources instead of pruning Docker globally.
+RUN_ID = uuid.uuid4().hex[:16]
+RUN_LABEL = f"benchkit.run={RUN_ID}"
+MANAGED_LABEL = "benchkit.managed=true"
+_BUILDER = f"benchkit-build-{RUN_ID}"
+_BUILDKIT_CONTAINER = f"buildx_buildkit_{_BUILDER}0"
+_BUILDKIT_VOLUME = f"buildx_buildkit_{_BUILDER}0_state"
+_UV_CACHE_ID = f"benchkit-uv-{RUN_ID}"
+_UV_CACHE_DIR = "/root/.cache/uv"
+_BUILD_LOCK = threading.Lock()
+_BUILD_STATE: dict[str, object] = {
+    "builder": False,
+    "driver_was_present": True,
+    "pulled": set(),
+}
+
+
+def resource_labels(owner_id: str | None = None) -> list[str]:
+    """Return the label flags every managed Docker resource must carry."""
+    labels = ["--label", MANAGED_LABEL, "--label", RUN_LABEL]
+    if owner_id is not None:
+        labels.extend(["--label", f"benchkit.owner={owner_id}"])
+    return labels
+
+
 _PI_INSTALL = """\
 COPY pi-package/package.json pi-package/package-lock.json /opt/benchkit/pi/
 RUN cd /opt/benchkit/pi \\
@@ -280,12 +307,10 @@ class LatestPiImage:
     docker: str = field(default_factory=_docker_binary)
     image: str = PI_IMAGE
     dockerfile: str = PI_DOCKERFILE
-    no_cache: bool = True
     transient: bool = True
     pids_limit: int = 256
     build_assets: Path | None = None
     build_files: tuple[tuple[Path, str], ...] = ()
-    ephemeral_buildx: bool = True
     always_cleanup_image: bool = True
     resource_scope: str = "pi"
     answer_key_guard: bool = False
@@ -344,69 +369,37 @@ class LatestPiImage:
                     "\n".join(dockerignore) + "\n", encoding="utf-8"
                 )
                 try:
-                    if self.ephemeral_buildx:
-                        _run(
-                            [
-                                self.docker,
-                                "image",
-                                "rm",
-                                "--force",
-                                self.image,
-                            ],
-                            timeout=60,
-                            check=False,
-                        )
-                        _build_with_ephemeral_buildx(
-                            self.docker,
-                            self.image,
-                            context,
-                            self.resource_scope,
-                            no_cache=self.no_cache,
-                        )
-                    else:
-                        command = [self.docker, "build", "--pull"]
-                        if self.no_cache:
-                            command.append("--no-cache")
-                        command.extend(["--tag", self.image, str(context)])
-                        _run(command, timeout=1800)
-                    if self.ephemeral_buildx:
-                        smoke = (
-                            f"benchkit-{self.resource_scope}-smoke-"
-                            f"{uuid.uuid4().hex[:16]}"
-                        )
-                        try:
-                            result = _run(
-                                [
-                                    self.docker,
-                                    "run",
-                                    "--name",
-                                    smoke,
-                                    "--rm",
-                                    self.image,
-                                    "pi",
-                                    "--version",
-                                ],
-                                timeout=30,
-                            )
-                        finally:
-                            with contextlib.suppress(Exception):
-                                _run(
-                                    [self.docker, "rm", "--force", smoke],
-                                    timeout=30,
-                                    check=False,
-                                )
-                    else:
+                    _build_with_run_builder(
+                        self.docker,
+                        self.image,
+                        self.dockerfile,
+                        context,
+                    )
+                    smoke = (
+                        f"benchkit-{self.resource_scope}-smoke-{uuid.uuid4().hex[:16]}"
+                    )
+                    try:
                         result = _run(
                             [
                                 self.docker,
                                 "run",
+                                "--name",
+                                smoke,
                                 "--rm",
+                                *resource_labels(),
                                 self.image,
                                 "pi",
                                 "--version",
                             ],
                             timeout=30,
                         )
+                    finally:
+                        with contextlib.suppress(Exception):
+                            _run(
+                                [self.docker, "rm", "--force", smoke],
+                                timeout=30,
+                                check=False,
+                            )
                     self.version = result.stdout.strip() or "latest"
                     if self.version != PI_VERSION:
                         raise SandboxError(
@@ -456,59 +449,171 @@ class LatestPiImage:
             self.version = ""
 
 
-def _build_with_ephemeral_buildx(
+def _base_image_refs(dockerfile: str) -> tuple[str, ...]:
+    """Return the external images a Dockerfile pulls, ignoring its own stages."""
+    stages: set[str] = set()
+    refs: list[str] = []
+    for line in dockerfile.splitlines():
+        match = re.match(r"\s*FROM\s+(\S+)(?:\s+[Aa][Ss]\s+(\S+))?\s*$", line)
+        if match is None:
+            continue
+        reference, alias = match.group(1), match.group(2)
+        if reference not in stages and reference not in refs:
+            refs.append(reference)
+        if alias:
+            stages.add(alias)
+    return tuple(refs)
+
+
+def _run_builder(docker: str) -> str:
+    """Create this run's single private Buildx builder on first use.
+
+    Every build in the run shares one builder, so layers and cache mounts are
+    reused instead of rebuilt per task. The builder keeps its BuildKit state in
+    its own container and volume, which cleanup removes by exact name. That is
+    what keeps a run's build cache separable from the host's own cache without
+    ever running a global prune.
+    """
+    with _BUILD_LOCK:
+        if not _BUILD_STATE["builder"]:
+            _BUILD_STATE["driver_was_present"] = bool(
+                _run(
+                    [
+                        docker,
+                        "image",
+                        "inspect",
+                        "--format",
+                        "{{.Id}}",
+                        _BUILDKIT_DRIVER_IMAGE,
+                    ],
+                    timeout=30,
+                    check=False,
+                ).stdout.strip()
+            )
+            _run(
+                [
+                    docker,
+                    "buildx",
+                    "create",
+                    "--name",
+                    _BUILDER,
+                    "--driver",
+                    "docker-container",
+                    "--driver-opt",
+                    f"image={_BUILDKIT_DRIVER_IMAGE}",
+                ],
+                timeout=60,
+            )
+            _BUILD_STATE["builder"] = True
+    return _BUILDER
+
+
+def _build_with_run_builder(
     docker: str,
     image: str,
+    dockerfile: str,
     context: Path,
-    resource_scope: str,
-    *,
-    no_cache: bool = True,
 ) -> None:
-    """Build without shared cache, then remove the private buildkit session."""
-    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", resource_scope):
-        raise SandboxError("invalid Pi Docker resource scope")
-    builder = f"benchkit-{resource_scope}-build-{uuid.uuid4().hex[:16]}"
-    buildkit_container = f"buildx_buildkit_{builder}0"
-    cache_volume = f"buildx_buildkit_{builder}0_state"
-    driver_was_present = bool(
-        _run(
-            [
-                docker,
-                "image",
-                "inspect",
-                "--format",
-                "{{.Id}}",
-                _BUILDKIT_DRIVER_IMAGE,
-            ],
-            timeout=30,
-            check=False,
-        ).stdout.strip()
+    """Build one image on the run's shared builder, pulling bases once."""
+    builder = _run_builder(docker)
+    with _BUILD_LOCK:
+        pulled = _BUILD_STATE["pulled"]
+        assert isinstance(pulled, set)
+        fresh = [
+            reference
+            for reference in _base_image_refs(dockerfile)
+            if reference not in pulled
+        ]
+        pulled.update(fresh)
+    _run(
+        [docker, "image", "rm", "--force", image],
+        timeout=60,
+        check=False,
     )
-    try:
-        _run(
-            [
-                docker,
-                "buildx",
-                "create",
-                "--name",
-                builder,
-                "--driver",
-                "docker-container",
-                "--driver-opt",
-                f"image={_BUILDKIT_DRIVER_IMAGE}",
-            ],
-            timeout=60,
-        )
-        build = [docker, "buildx", "build", "--builder", builder, "--pull"]
-        if no_cache:
-            build.append("--no-cache")
-        build.extend(["--load", "--tag", image, str(context)])
-        _run(build, timeout=1800)
-    finally:
+    build = [docker, "buildx", "build", "--builder", builder]
+    if fresh:
+        # Recipe and harness tags are pinned, so one pull per run is enough.
+        build.append("--pull")
+    build.extend(
+        [
+            "--label",
+            MANAGED_LABEL,
+            "--label",
+            RUN_LABEL,
+            "--load",
+            "--tag",
+            image,
+            str(context),
+        ]
+    )
+    _run(build, timeout=1800)
+
+
+def _remove_labelled(docker: str, errors: list[str]) -> None:
+    """Remove every container, network, volume, and image of this run."""
+    queries = (
+        (
+            "containers",
+            [docker, "ps", "--all", "--quiet", "--filter", f"label={RUN_LABEL}"],
+            lambda ids: [docker, "rm", "--force", *ids],
+        ),
+        (
+            "networks",
+            [docker, "network", "ls", "--quiet", "--filter", f"label={RUN_LABEL}"],
+            lambda ids: [docker, "network", "rm", *ids],
+        ),
+        (
+            "volumes",
+            [docker, "volume", "ls", "--quiet", "--filter", f"label={RUN_LABEL}"],
+            lambda ids: [docker, "volume", "rm", "--force", *ids],
+        ),
+        (
+            "images",
+            [docker, "image", "ls", "--quiet", "--filter", f"label={RUN_LABEL}"],
+            lambda ids: [docker, "image", "rm", "--force", *ids],
+        ),
+    )
+    for kind, query, removal in queries:
+        try:
+            listed = _run(query, timeout=30, check=False)
+        except Exception as exc:
+            errors.append(f"could not inspect run {kind}: {exc}")
+            continue
+        if listed.returncode:
+            detail = _tail(listed.stderr or listed.stdout) or "unknown Docker error"
+            errors.append(f"could not inspect run {kind}: {detail}")
+            continue
+        identifiers = sorted(set(listed.stdout.split()))
+        if not identifiers:
+            continue
+        with contextlib.suppress(Exception):
+            _run(removal(identifiers), timeout=120, check=False)
+        remaining = _run(query, timeout=30, check=False)
+        if remaining.returncode == 0 and remaining.stdout.split():
+            errors.append(
+                f"run {kind} remain: "
+                + ", ".join(sorted(set(remaining.stdout.split())))
+            )
+
+
+def cleanup_run_resources(docker: str | None = None) -> None:
+    """Tear down every Docker resource this run created, and nothing else."""
+    docker = docker or _docker_binary()
+    errors: list[str] = []
+    with _BUILD_LOCK:
+        builder_created = bool(_BUILD_STATE["builder"])
+        driver_was_present = bool(_BUILD_STATE["driver_was_present"])
+        _BUILD_STATE["builder"] = False
+        pulled = _BUILD_STATE["pulled"]
+        assert isinstance(pulled, set)
+        pulled.clear()
+    if builder_created:
+        # Removing the builder drops its BuildKit state volume, and with it
+        # every layer and uv cache entry the run created.
         cleanup_commands = (
-            ([docker, "buildx", "rm", "--force", builder], 60),
-            ([docker, "rm", "--force", buildkit_container], 30),
-            ([docker, "volume", "rm", "--force", cache_volume], 30),
+            ([docker, "buildx", "rm", "--force", _BUILDER], 60),
+            ([docker, "rm", "--force", _BUILDKIT_CONTAINER], 30),
+            ([docker, "volume", "rm", "--force", _BUILDKIT_VOLUME], 30),
         )
         for command, timeout in cleanup_commands:
             with contextlib.suppress(Exception):
@@ -520,20 +625,21 @@ def _build_with_ephemeral_buildx(
                     timeout=60,
                     check=False,
                 )
-        errors: list[str] = []
+    _remove_labelled(docker, errors)
+    if builder_created:
         _verify_absent(
-            [docker, "buildx", "inspect", builder],
-            f"Buildx builder {builder}",
+            [docker, "buildx", "inspect", _BUILDER],
+            f"Buildx builder {_BUILDER}",
             errors,
         )
         _verify_absent(
-            [docker, "container", "inspect", buildkit_container],
-            f"BuildKit container {buildkit_container}",
+            [docker, "container", "inspect", _BUILDKIT_CONTAINER],
+            f"BuildKit container {_BUILDKIT_CONTAINER}",
             errors,
         )
         _verify_absent(
-            [docker, "volume", "inspect", cache_volume],
-            f"BuildKit volume {cache_volume}",
+            [docker, "volume", "inspect", _BUILDKIT_VOLUME],
+            f"BuildKit volume {_BUILDKIT_VOLUME}",
             errors,
         )
         if not driver_was_present:
@@ -542,8 +648,8 @@ def _build_with_ephemeral_buildx(
                 f"BuildKit driver image {_BUILDKIT_DRIVER_IMAGE}",
                 errors,
             )
-        if errors:
-            raise SandboxError("Pi Docker cleanup failed: " + "; ".join(errors))
+    if errors:
+        raise SandboxError("Pi Docker cleanup failed: " + "; ".join(errors))
 
 
 def aider_pi_image() -> LatestPiImage:
@@ -551,7 +657,6 @@ def aider_pi_image() -> LatestPiImage:
     return LatestPiImage(
         image=AIDER_PI_IMAGE,
         dockerfile=AIDER_PI_DOCKERFILE,
-        no_cache=False,
         transient=True,
         # cpp/bank-account creates 1,000 simultaneous std::threads. Linux
         # accounts threads against Docker's PID cgroup, so the generic Pi
@@ -567,7 +672,6 @@ def git_surgery_pi_image() -> LatestPiImage:
     return LatestPiImage(
         image=GIT_SURGERY_PI_IMAGE,
         dockerfile=GIT_SURGERY_PI_DOCKERFILE,
-        no_cache=False,
         transient=True,
         build_assets=Path(__file__).with_name("git_surgery"),
         resource_scope="git-surgery",
@@ -611,9 +715,27 @@ def _docker_run(command: tuple[str, ...]) -> str:
     return f"RUN {json.dumps(list(command), separators=(',', ':'))}\n"
 
 
-def _patcheval_dockerfile(recipe: PatchEvalRuntimeRecipe) -> str:
+def _docker_run_cached(command: tuple[str, ...], uv_cache_id: str) -> str:
+    """Run a build command with the run's shared, private uv cache mounted."""
+    mount = f"--mount=type=cache,target={_UV_CACHE_DIR},id={uv_cache_id},sharing=locked"
+    return f"RUN {mount} {json.dumps(list(command), separators=(',', ':'))}\n"
+
+
+def _patcheval_dockerfile(recipe: PatchEvalRuntimeRecipe, uv_cache_id: str) -> str:
+    """Generate the three-stage task runtime.
+
+    The stages are split by what actually changes between tasks:
+
+    1. ``benchkit-pi-assets`` depends only on the base image and the pinned Pi
+       assets, so the run's shared builder builds it once.
+    2. ``benchkit-runtime`` adds the parent source and the frozen sync and
+       bootstrap commands, and reuses the run's uv cache.
+    3. the final stage only adds task environment and the agent user.
+    """
     bootstrap = (
-        _docker_run(recipe.bootstrap_command) if recipe.bootstrap_command else ""
+        _docker_run_cached(recipe.bootstrap_command, uv_cache_id)
+        if recipe.bootstrap_command
+        else ""
     )
     environment = "".join(
         f"ENV {key}={json.dumps(value)}\n"
@@ -621,7 +743,8 @@ def _patcheval_dockerfile(recipe: PatchEvalRuntimeRecipe) -> str:
     )
     return f"""\
 FROM node:24-bookworm-slim AS benchkit-node
-FROM {recipe.base_image}
+
+FROM {recipe.base_image} AS benchkit-pi-assets
 
 USER root
 COPY --from=benchkit-node /usr/local/ /usr/local/
@@ -632,19 +755,24 @@ RUN apt-get update \\
     && (getent group node >/dev/null || groupadd --gid 1000 node) \\
     && (id --user node >/dev/null 2>&1 || \\
         useradd --uid 1000 --gid node --create-home --shell /bin/bash node)
-ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy
-WORKDIR /opt/project
-COPY parent-source.tar /tmp/patcheval-parent.tar
-RUN tar -xf /tmp/patcheval-parent.tar -C /opt/project \\
-    && rm /tmp/patcheval-parent.tar
-{_docker_run(recipe.sync_command)}{bootstrap}RUN rm -rf /opt/project \\
-    && test -d /opt/venv \\
-    && chmod -R a+rwX /opt/venv
 {_PI_INSTALL}
 COPY inference_proxy.py /opt/benchkit/inference_proxy.py
 COPY answer_key_guard.ts /opt/benchkit/answer_key_guard.ts
 RUN mkdir -p /workspace /home/node/.pi/agent \\
     && chown -R node:node /workspace /home/node/.pi
+
+FROM benchkit-pi-assets AS benchkit-runtime
+
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy
+WORKDIR /opt/project
+COPY parent-source.tar /tmp/patcheval-parent.tar
+RUN tar -xf /tmp/patcheval-parent.tar -C /opt/project \\
+    && rm /tmp/patcheval-parent.tar
+{_docker_run_cached(recipe.sync_command, uv_cache_id)}{bootstrap}RUN rm -rf /opt/project \\
+    && test -d /opt/venv \\
+    && chmod -R a+rwX /opt/venv
+
+FROM benchkit-runtime
 
 {environment}USER node
 WORKDIR /workspace
@@ -666,7 +794,10 @@ def patcheval_pi_image(
         raise ValueError("PatchEval source_sha256 must be a lowercase SHA-256")
     if _regular_file_sha256(source_archive) != source_sha256:
         raise ValueError("PatchEval source archive checksum mismatch")
-    dockerfile = _patcheval_dockerfile(recipe)
+    # Hash a run-independent Dockerfile so the same task keeps one identity
+    # across runs even though the uv cache mount is run-scoped.
+    dockerfile = _patcheval_dockerfile(recipe, _UV_CACHE_ID)
+    identity_dockerfile = _patcheval_dockerfile(recipe, "benchkit-uv")
     recipe_json = json.dumps(
         {
             "schema_version": recipe.schema_version,
@@ -680,7 +811,7 @@ def patcheval_pi_image(
     )
     identity = hashlib.sha256()
     for value in (
-        dockerfile,
+        identity_dockerfile,
         source_sha256,
         recipe_json,
         _tree_sha256(_PI_PACKAGE_ROOT),
@@ -693,10 +824,8 @@ def patcheval_pi_image(
     return LatestPiImage(
         image=f"benchkit-pi-patcheval:{_PATCHEVAL_IMAGE_SESSION}-{image_id}",
         dockerfile=dockerfile,
-        no_cache=True,
         transient=True,
         build_files=((source_archive, "parent-source.tar"),),
-        ephemeral_buildx=True,
         always_cleanup_image=True,
         resource_scope="patcheval",
     )
@@ -736,19 +865,14 @@ class DockerTaskEnvironment:
         if not self.image.version:
             raise SandboxError("Pi image must be prepared before starting a task")
         try:
-            resource_labels = [
-                "--label",
-                "benchkit.managed=true",
-                "--label",
-                f"benchkit.owner={self.owner_id}",
-            ]
+            labels = resource_labels(self.owner_id)
             _run(
                 [
                     self.docker,
                     "network",
                     "create",
                     "--internal",
-                    *resource_labels,
+                    *labels,
                     self.network_name,
                 ]
             )
@@ -758,7 +882,7 @@ class DockerTaskEnvironment:
                 "--detach",
                 "--name",
                 self.proxy_name,
-                *resource_labels,
+                *labels,
                 "--network",
                 self.network_name,
                 "--network-alias",
@@ -800,7 +924,7 @@ class DockerTaskEnvironment:
                     "--detach",
                     "--name",
                     self.container_name,
-                    *resource_labels,
+                    *labels,
                     "--network",
                     self.network_name,
                     "--cap-drop",

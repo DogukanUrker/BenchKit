@@ -13,6 +13,7 @@ import subprocess
 import tarfile
 import tempfile
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -25,6 +26,7 @@ from benchkit.sandbox import (
     SandboxError,
     _run,
     patcheval_pi_image,
+    resource_labels,
 )
 
 _SCHEMA_VERSION = 1
@@ -427,12 +429,7 @@ def _grade_once(
     docker = image.docker
     label = "f2p" if hidden_tests else "regression"
     container = f"benchkit-patcheval-{label}-{uuid.uuid4().hex[:12]}"
-    resource_labels = [
-        "--label",
-        "benchkit.managed=true",
-        "--label",
-        f"benchkit.owner={owner_id}",
-    ]
+    labels = resource_labels(owner_id)
     with tempfile.TemporaryDirectory(prefix="benchkit-patcheval-grade-") as directory:
         patch_path = Path(directory) / "submission.patch"
         patch_path.write_text(patch, encoding="utf-8")
@@ -444,7 +441,7 @@ def _grade_once(
                     "--detach",
                     "--name",
                     container,
-                    *resource_labels,
+                    *labels,
                     "--network",
                     "none",
                     "--cap-drop",
@@ -668,22 +665,29 @@ class PatchEval:
         spec = self._spec(task)
         try:
             patch, changed, excluded = _trusted_patch(spec, environment)
-            f2p = _grade_once(
-                spec,
-                environment.image,
-                patch,
-                spec.fail_to_pass_command,
-                hidden_tests=True,
-                owner_id=environment.owner_id,
-            )
-            regression = _grade_once(
-                spec,
-                environment.image,
-                patch,
-                spec.regression_command,
-                hidden_tests=False,
-                owner_id=environment.owner_id,
-            )
+            # The two graders share nothing but the read-only task image and
+            # the submitted patch, so they run at the same time.
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                f2p_grade = pool.submit(
+                    _grade_once,
+                    spec,
+                    environment.image,
+                    patch,
+                    spec.fail_to_pass_command,
+                    hidden_tests=True,
+                    owner_id=environment.owner_id,
+                )
+                regression_grade = pool.submit(
+                    _grade_once,
+                    spec,
+                    environment.image,
+                    patch,
+                    spec.regression_command,
+                    hidden_tests=False,
+                    owner_id=environment.owner_id,
+                )
+                f2p = f2p_grade.result()
+                regression = regression_grade.result()
         except (OSError, RuntimeError, ValueError, SandboxError) as exc:
             return EvaluationResult(
                 0.0,

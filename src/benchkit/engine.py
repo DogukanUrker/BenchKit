@@ -33,6 +33,7 @@ from benchkit.looping import LoopAnalyzer
 from benchkit.metrics import throughput_metrics
 from benchkit.perturbations import annotate_robustness, perturb_task
 from benchkit.pi_agent import PiAgentRunner
+from benchkit.sandbox import cleanup_run_resources
 
 MAX_REPAIR_ATTEMPTS = 10
 
@@ -892,12 +893,19 @@ class Engine:
                     results.append(result)
                 self._maybe_unload(index, job)
         finally:
+            used_pi = self._pi_runner is not None or bool(self._workspace_pi_runners)
             if self._pi_runner is not None:
                 with contextlib.suppress(Exception):
                     self._pi_runner.cleanup()
             for runner in self._workspace_pi_runners.values():
                 with contextlib.suppress(Exception):
                     runner.cleanup()
+            if used_pi:
+                # Removes the run's shared builder, its build cache, and any
+                # image, container, network, or volume still carrying the run
+                # label. Scoped by label, never a global prune.
+                with contextlib.suppress(Exception):
+                    cleanup_run_resources()
 
         annotate_robustness(results)
         annotate_harness_effect(results)
