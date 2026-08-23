@@ -347,7 +347,7 @@ RUN mkdir -p /workspace /home/node/.pi/agent \\
 
 USER node
 WORKDIR /workspace
-ENV PI_OFFLINE=1 PI_TELEMETRY=0
+ENV HOME=/home/node USER=node LOGNAME=node PI_OFFLINE=1 PI_TELEMETRY=0
 CMD ["sleep", "infinity"]
 """
     return LatestPiImage(

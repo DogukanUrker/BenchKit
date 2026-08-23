@@ -6,6 +6,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -36,6 +37,7 @@ _GENERIC_REPAIR = (
 _MAX_PATCH_BYTES = 5 * 1024 * 1024
 _MAX_CANDIDATE_FILES = 50_000
 _MAX_CANDIDATE_BYTES = 512 * 1024 * 1024
+_RUNTIME_IMAGE_RE = re.compile(r"[A-Za-z0-9._/:+@-]+@sha256:[0-9a-f]{64}")
 _PYTHON_TEST_GLOBS = (
     "tests/**",
     "test/**",
@@ -116,6 +118,10 @@ def _load_spec(root: Path, record: object) -> PatchEvalSpec:
     for field in required_strings:
         if not isinstance(record.get(field), str) or not record[field].strip():
             raise ValueError(f"{field} must be a non-empty string")
+    if not _RUNTIME_IMAGE_RE.fullmatch(record["runtime_image"]):
+        raise ValueError(
+            "runtime_image must be a canonical OCI reference pinned by sha256 digest"
+        )
     if record.get("validated") is not True:
         raise ValueError(f"PatchEval task {record['id']!r} is not miner-validated")
 

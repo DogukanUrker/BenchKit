@@ -105,6 +105,17 @@ class PatchEvalTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "not miner-validated"):
                 PatchEval(root).load_tasks()
 
+    def test_rejects_runtime_image_without_registry_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = _dataset(root)
+            record["runtime_image"] = "example.invalid/patcheval/python:latest"
+            (root / "tasks.jsonl").write_text(
+                json.dumps(record) + "\n", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(RuntimeError, "runtime_image"):
+                PatchEval(root).load_tasks()
+
     def test_rejects_modified_dataset_assets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -256,6 +267,9 @@ class PatchEvalTests(unittest.TestCase):
     def test_runtime_image_requires_a_named_oci_digest(self) -> None:
         with self.assertRaisesRegex(ValueError, "pinned by sha256"):
             patcheval_pi_image("sha256:" + "a" * 64)
+
+        image = patcheval_pi_image(_RUNTIME_IMAGE)
+        self.assertIn("HOME=/home/node USER=node LOGNAME=node", image.dockerfile)
 
 
 if __name__ == "__main__":
