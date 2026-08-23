@@ -37,9 +37,13 @@ the generic instruction to re-examine the issue and continue.
 ```text
 dataset.json
 tasks.jsonl
-artifacts/
-  <task-id>/source.tar.gz
-  <task-id>/hidden-tests.patch
+SHA256SUMS
+sources/
+  <task-id>.tar
+hidden-tests/
+  <task-id>.patch
+attestations/
+  <task-id>.json
 ```
 
 `dataset.json` uses schema version 1 and contains `release` and `task_count`.
@@ -95,5 +99,19 @@ Fix the following issue in the current repository. Inspect the code, make the ne
 {issue_body}
 ```
 
-Set `BENCHKIT_PATCHEVAL_DATASET` to an immutable local snapshot of the published
-dataset before running `patcheval`.
+Download and verify the immutable release, then point BenchKit at its root:
+
+```console
+hf download DogukanUrker/PatchEval \
+  --repo-type dataset \
+  --revision pilot-20 \
+  --local-dir /path/to/PatchEval
+cd /path/to/PatchEval
+sha256sum --check SHA256SUMS
+export BENCHKIT_PATCHEVAL_DATASET=/path/to/PatchEval
+```
+
+The release is published at
+<https://huggingface.co/datasets/DogukanUrker/PatchEval> and the `pilot-20` tag
+is the immutable 20-task snapshot. Do not run against a moving branch when
+recording benchmark results.

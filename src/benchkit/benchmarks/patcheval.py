@@ -521,8 +521,9 @@ class PatchEval:
     def _root(self) -> Path:
         if self.dataset_root is None:
             raise RuntimeError(
-                "PatchEval's frozen dataset is not published yet; set "
-                "BENCHKIT_PATCHEVAL_DATASET to a local dataset snapshot"
+                "PatchEval's frozen dataset is not configured; download the "
+                "pilot-20 release from DogukanUrker/PatchEval and set "
+                "BENCHKIT_PATCHEVAL_DATASET to its local root"
             )
         return self.dataset_root.resolve()
 
