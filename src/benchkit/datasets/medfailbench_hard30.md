@@ -9,4 +9,5 @@ deterministic scoring rules are distributed under BenchKit's Apache-2.0 license.
 The dataset contains synthetic evaluation scenarios, not patient records.
 
 MedFailBench is an automated safety screen. Its scores are not clinical
-validation, medical advice, or a basis for ranking models for clinical use.
+validation, medical advice, certification, deployment evidence, or a basis for
+ranking models for clinical use.
