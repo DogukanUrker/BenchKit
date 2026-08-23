@@ -21,6 +21,7 @@ from benchkit.evaluation import EvaluationResult
 from benchkit.sandbox import (
     DockerTaskEnvironment,
     LatestPiImage,
+    PatchEvalRuntimeRecipe,
     SandboxError,
     _run,
     patcheval_pi_image,
@@ -37,7 +38,8 @@ _GENERIC_REPAIR = (
 _MAX_PATCH_BYTES = 5 * 1024 * 1024
 _MAX_CANDIDATE_FILES = 50_000
 _MAX_CANDIDATE_BYTES = 512 * 1024 * 1024
-_RUNTIME_IMAGE_RE = re.compile(r"[A-Za-z0-9._/:+@-]+@sha256:[0-9a-f]{64}")
+_BASE_IMAGE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:+-]*")
+_ENVIRONMENT_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _PYTHON_TEST_GLOBS = (
     "tests/**",
     "test/**",
@@ -60,7 +62,7 @@ class PatchEvalSpec:
     repository: str
     issue_title: str
     issue_body: str
-    runtime_image: str
+    runtime_recipe: PatchEvalRuntimeRecipe
     source_archive: Path
     hidden_test_patch: Path
     source_sha256: str
@@ -103,25 +105,85 @@ def _strings(record: dict, field: str, *, required: bool = True) -> tuple[str, .
     return tuple(value)
 
 
+def _runtime_recipe(record: dict) -> PatchEvalRuntimeRecipe:
+    value = record.get("runtime_recipe")
+    if not isinstance(value, dict):
+        raise ValueError("runtime_recipe must be an object")
+    allowed = {
+        "schema_version",
+        "base_image",
+        "sync_command",
+        "bootstrap_command",
+        "environment",
+    }
+    unknown = set(value).difference(allowed)
+    if unknown:
+        raise ValueError(
+            "runtime_recipe contains unsupported fields: " + ", ".join(sorted(unknown))
+        )
+    if (
+        isinstance(value.get("schema_version"), bool)
+        or value.get("schema_version") != 1
+    ):
+        raise ValueError("runtime_recipe schema_version must be 1")
+    base_image = value.get("base_image")
+    if not isinstance(base_image, str) or not base_image:
+        raise ValueError("runtime_recipe base_image must be a versioned image tag")
+    if (
+        "@" in base_image
+        or any(character.isspace() for character in base_image)
+        or _BASE_IMAGE_RE.fullmatch(base_image) is None
+        or ":" not in base_image.rsplit("/", 1)[-1]
+    ):
+        raise ValueError("runtime_recipe base_image must be a versioned image tag")
+    tag = base_image.rsplit(":", 1)[-1]
+    if tag == "latest" or not any(character.isdigit() for character in tag):
+        raise ValueError("runtime_recipe base_image must be a versioned image tag")
+    try:
+        sync_command = _strings(value, "sync_command")
+        bootstrap_command = _strings(value, "bootstrap_command", required=False)
+        environment = _strings(value, "environment", required=False)
+    except ValueError as exc:
+        raise ValueError(f"runtime_recipe {exc}") from exc
+    keys: list[str] = []
+    for item in environment:
+        key, separator, _environment_value = item.partition("=")
+        if (
+            not separator
+            or _ENVIRONMENT_KEY_RE.fullmatch(key) is None
+            or "\n" in item
+            or "\r" in item
+            or "\0" in item
+        ):
+            raise ValueError("runtime_recipe environment entries must use KEY=value")
+        keys.append(key)
+    if len(keys) != len(set(keys)):
+        raise ValueError("runtime_recipe environment keys must be unique")
+    return PatchEvalRuntimeRecipe(
+        schema_version=1,
+        base_image=base_image,
+        sync_command=sync_command,
+        bootstrap_command=bootstrap_command,
+        environment=environment,
+    )
+
+
 def _load_spec(root: Path, record: object) -> PatchEvalSpec:
     if not isinstance(record, dict):
         raise ValueError("each PatchEval task must be a JSON object")
+    if "runtime_image" in record:
+        raise ValueError("runtime_image is unsupported; use runtime_recipe")
     required_strings = (
         "id",
         "repository",
         "issue_title",
         "issue_body",
-        "runtime_image",
         "source_sha256",
         "hidden_test_sha256",
     )
     for field in required_strings:
         if not isinstance(record.get(field), str) or not record[field].strip():
             raise ValueError(f"{field} must be a non-empty string")
-    if not _RUNTIME_IMAGE_RE.fullmatch(record["runtime_image"]):
-        raise ValueError(
-            "runtime_image must be a canonical OCI reference pinned by sha256 digest"
-        )
     if record.get("validated") is not True:
         raise ValueError(f"PatchEval task {record['id']!r} is not miner-validated")
 
@@ -139,6 +201,7 @@ def _load_spec(root: Path, record: object) -> PatchEvalSpec:
                 f"{field} checksum mismatch for task {record['id']!r}: "
                 f"expected {expected}, got {actual}"
             )
+    _validate_source_archive(source)
 
     timeout_s = record.get("timeout_s", 300)
     if isinstance(timeout_s, bool) or not isinstance(timeout_s, int):
@@ -151,7 +214,7 @@ def _load_spec(root: Path, record: object) -> PatchEvalSpec:
         repository=record["repository"],
         issue_title=record["issue_title"].strip(),
         issue_body=record["issue_body"].strip(),
-        runtime_image=record["runtime_image"],
+        runtime_recipe=_runtime_recipe(record),
         source_archive=source,
         hidden_test_patch=hidden,
         source_sha256=record["source_sha256"],
@@ -167,20 +230,28 @@ def _load_spec(root: Path, record: object) -> PatchEvalSpec:
     )
 
 
+def _source_archive_members(handle: tarfile.TarFile) -> list[tarfile.TarInfo]:
+    members = handle.getmembers()
+    for member in members:
+        path = PurePosixPath(member.name)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError(f"unsafe path in source archive: {member.name!r}")
+        if member.issym() or member.islnk():
+            raise ValueError(f"source archives must dereference links: {member.name!r}")
+        if not member.isdir() and not member.isreg():
+            raise ValueError(f"unsupported archive entry: {member.name!r}")
+    return members
+
+
+def _validate_source_archive(archive: Path) -> None:
+    with tarfile.open(archive, "r:*") as handle:
+        _source_archive_members(handle)
+
+
 def _safe_extract(archive: Path, destination: Path) -> None:
     """Extract a miner-produced source archive without following archive links."""
     with tarfile.open(archive, "r:*") as handle:
-        members = handle.getmembers()
-        for member in members:
-            path = PurePosixPath(member.name)
-            if path.is_absolute() or ".." in path.parts:
-                raise ValueError(f"unsafe path in source archive: {member.name!r}")
-            if member.issym() or member.islnk():
-                raise ValueError(
-                    f"source archives must dereference links: {member.name!r}"
-                )
-            if member.isdev() or member.isfifo():
-                raise ValueError(f"unsupported archive entry: {member.name!r}")
+        members = _source_archive_members(handle)
         handle.extractall(destination, members=members, filter="fully_trusted")
 
 
@@ -518,7 +589,12 @@ class PatchEval:
         raise RuntimeError("PatchEval must be evaluated by its external grader")
 
     def pi_image_for_task(self, task: Task) -> LatestPiImage:
-        return patcheval_pi_image(self._spec(task).runtime_image)
+        spec = self._spec(task)
+        return patcheval_pi_image(
+            spec.source_archive,
+            spec.source_sha256,
+            spec.runtime_recipe,
+        )
 
     def prepare_workspace(self, task: Task, environment: DockerTaskEnvironment) -> None:
         spec = self._spec(task)

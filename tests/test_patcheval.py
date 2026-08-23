@@ -18,9 +18,21 @@ from benchkit.benchmarks.patcheval import (
     _trusted_patch,
 )
 from benchkit.engine import Engine
-from benchkit.sandbox import LatestPiImage, patcheval_pi_image
+from benchkit.sandbox import (
+    PI_VERSION,
+    LatestPiImage,
+    PatchEvalRuntimeRecipe,
+    SandboxError,
+    patcheval_pi_image,
+)
 
-_RUNTIME_IMAGE = "example.invalid/patcheval/python@sha256:" + "a" * 64
+_RUNTIME_RECIPE = {
+    "schema_version": 1,
+    "base_image": "ghcr.io/astral-sh/uv:0.12.1-python3.14-trixie-slim",
+    "sync_command": ["uv", "sync", "--frozen", "--no-install-project"],
+    "bootstrap_command": ["uv", "pip", "install", "setuptools==80.9.0"],
+    "environment": ["UV_OFFLINE=1", "PYTHONHASHSEED=0"],
+}
 
 
 def _digest(path: Path) -> str:
@@ -45,7 +57,7 @@ def _dataset(root: Path, *, validated: bool = True) -> dict:
         "repository": "owner/repo",
         "issue_title": "Handle empty input",
         "issue_body": "Calling parse with an empty value should return None.",
-        "runtime_image": _RUNTIME_IMAGE,
+        "runtime_recipe": _RUNTIME_RECIPE,
         "source_archive": archive.name,
         "hidden_test_patch": hidden.name,
         "source_sha256": _digest(archive),
@@ -105,16 +117,33 @@ class PatchEvalTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "not miner-validated"):
                 PatchEval(root).load_tasks()
 
-    def test_rejects_runtime_image_without_registry_digest(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            record = _dataset(root)
-            record["runtime_image"] = "example.invalid/patcheval/python:latest"
-            (root / "tasks.jsonl").write_text(
-                json.dumps(record) + "\n", encoding="utf-8"
-            )
-            with self.assertRaisesRegex(RuntimeError, "runtime_image"):
-                PatchEval(root).load_tasks()
+    def test_rejects_invalid_runtime_recipes(self) -> None:
+        invalid_recipes = (
+            {**_RUNTIME_RECIPE, "schema_version": True},
+            {**_RUNTIME_RECIPE, "schema_version": 2},
+            {**_RUNTIME_RECIPE, "base_image": "python"},
+            {**_RUNTIME_RECIPE, "base_image": "python:latest"},
+            {
+                **_RUNTIME_RECIPE,
+                "base_image": "python@sha256:" + "a" * 64,
+            },
+            {**_RUNTIME_RECIPE, "sync_command": []},
+            {**_RUNTIME_RECIPE, "environment": ["NOT-VALID"]},
+            {**_RUNTIME_RECIPE, "unexpected": True},
+        )
+        for runtime_recipe in invalid_recipes:
+            with (
+                self.subTest(runtime_recipe=runtime_recipe),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                record = _dataset(root)
+                record["runtime_recipe"] = runtime_recipe
+                (root / "tasks.jsonl").write_text(
+                    json.dumps(record) + "\n", encoding="utf-8"
+                )
+                with self.assertRaisesRegex(RuntimeError, "runtime_recipe"):
+                    PatchEval(root).load_tasks()
 
     def test_rejects_modified_dataset_assets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -248,7 +277,7 @@ class PatchEvalTests(unittest.TestCase):
         self.assertNotIn("verifier", prompt.lower())
         self.assertNotIn("test output", prompt.lower())
 
-    def test_engine_caches_one_runner_per_task_runtime_image(self) -> None:
+    def test_engine_caches_one_runner_per_locally_built_task_image(self) -> None:
         image = LatestPiImage(
             docker="docker", image="benchkit-pi-patcheval:runtime", transient=False
         )
@@ -264,12 +293,147 @@ class PatchEvalTests(unittest.TestCase):
         self.assertIs(first, second)
         self.assertEqual(benchmark.pi_image_for_task.call_count, 2)
 
-    def test_runtime_image_requires_a_named_oci_digest(self) -> None:
-        with self.assertRaisesRegex(ValueError, "pinned by sha256"):
-            patcheval_pi_image("sha256:" + "a" * 64)
+    def test_runtime_image_is_local_content_addressed_and_context_is_minimal(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            benchmark = PatchEval(root)
+            task = benchmark.load_tasks()[0]
+            spec = task.metadata["spec"]
 
-        image = patcheval_pi_image(_RUNTIME_IMAGE)
+            image = benchmark.pi_image_for_task(task)
+            same = benchmark.pi_image_for_task(task)
+            changed_recipe = PatchEvalRuntimeRecipe(
+                **{
+                    **spec.runtime_recipe.__dict__,
+                    "environment": (*spec.runtime_recipe.environment, "TZ=UTC"),
+                }
+            )
+            changed = patcheval_pi_image(
+                spec.source_archive, spec.source_sha256, changed_recipe
+            )
+
+        self.assertEqual(image.image, same.image)
+        self.assertNotEqual(image.image, changed.image)
+        self.assertTrue(image.image.startswith("benchkit-pi-patcheval:"))
+        self.assertEqual(
+            image.build_files,
+            ((spec.source_archive, "parent-source.tar"),),
+        )
+        self.assertTrue(image.no_cache)
+        self.assertTrue(image.transient)
+        self.assertTrue(image.ephemeral_buildx)
+        self.assertTrue(image.always_cleanup_image)
+        self.assertIn("FROM node:24-bookworm-slim AS benchkit-node", image.dockerfile)
+        self.assertIn(f"FROM {_RUNTIME_RECIPE['base_image']}", image.dockerfile)
+        self.assertIn("COPY parent-source.tar", image.dockerfile)
+        self.assertIn("rm -rf /opt/project", image.dockerfile)
         self.assertIn("HOME=/home/node USER=node LOGNAME=node", image.dockerfile)
+        self.assertGreater(
+            image.dockerfile.index('ENV UV_OFFLINE="1"'),
+            image.dockerfile.index('RUN ["uv","sync"'),
+        )
+        self.assertNotIn("hidden.patch", image.dockerfile)
+        self.assertNotIn("gold", image.dockerfile.lower())
+
+    def test_ephemeral_builder_and_image_are_removed_after_prepare(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            benchmark = PatchEval(root)
+            task = benchmark.load_tasks()[0]
+            image = benchmark.pi_image_for_task(task)
+            observed_context: set[str] = set()
+
+            def run(args, **_kwargs):
+                if args[1:3] == ["image", "inspect"]:
+                    return SimpleNamespace(stdout="")
+                if args[1:3] == ["buildx", "build"]:
+                    context = Path(args[-1])
+                    observed_context.update(
+                        path.relative_to(context).as_posix()
+                        for path in context.rglob("*")
+                        if path.is_file()
+                    )
+                return SimpleNamespace(stdout=f"{PI_VERSION}\n")
+
+            with patch("benchkit.sandbox._run", side_effect=run) as docker_run:
+                self.assertEqual(image.prepare(), PI_VERSION)
+                image.cleanup()
+
+        commands = [call.args[0] for call in docker_run.call_args_list]
+        create = next(
+            command for command in commands if command[1:3] == ["buildx", "create"]
+        )
+        builder = create[create.index("--name") + 1]
+        docker = commands[0][0]
+        self.assertTrue(builder.startswith("benchkit-patcheval-build-"))
+        self.assertIn([docker, "buildx", "rm", "--force", builder], commands)
+        self.assertIn(
+            [docker, "rm", "--force", f"buildx_buildkit_{builder}0"], commands
+        )
+        self.assertIn(
+            [
+                docker,
+                "volume",
+                "rm",
+                "--force",
+                f"buildx_buildkit_{builder}0_state",
+            ],
+            commands,
+        )
+        self.assertIn(
+            [docker, "image", "rm", "--force", "moby/buildkit:buildx-stable-1"],
+            commands,
+        )
+        self.assertEqual(commands[-1], [docker, "image", "rm", "--force", image.image])
+        self.assertIn("parent-source.tar", observed_context)
+        self.assertIn("Dockerfile", observed_context)
+        self.assertFalse(any("hidden" in path for path in observed_context))
+        self.assertFalse(any("gold" in path for path in observed_context))
+
+    def test_failed_build_removes_builder_cache_and_partial_image(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            benchmark = PatchEval(root)
+            image = benchmark.pi_image_for_task(benchmark.load_tasks()[0])
+
+            def run(args, **_kwargs):
+                if args[1:3] == ["buildx", "build"]:
+                    raise SandboxError("build failed")
+                return SimpleNamespace(stdout=f"{PI_VERSION}\n")
+
+            with patch("benchkit.sandbox._run", side_effect=run) as docker_run:
+                with self.assertRaisesRegex(SandboxError, "build failed"):
+                    image.prepare()
+                image.cleanup()
+
+        commands = [call.args[0] for call in docker_run.call_args_list]
+        create = next(
+            command for command in commands if command[1:3] == ["buildx", "create"]
+        )
+        builder = create[create.index("--name") + 1]
+        docker = commands[0][0]
+        self.assertIn([docker, "buildx", "rm", "--force", builder], commands)
+        self.assertIn(
+            [
+                docker,
+                "volume",
+                "rm",
+                "--force",
+                f"buildx_buildkit_{builder}0_state",
+            ],
+            commands,
+        )
+        image_removals = [
+            command
+            for command in commands
+            if command == [docker, "image", "rm", "--force", image.image]
+        ]
+        self.assertGreaterEqual(len(image_removals), 2)
 
 
 if __name__ == "__main__":

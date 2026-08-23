@@ -46,18 +46,35 @@ artifacts/
 Each line of `tasks.jsonl` contains:
 
 - `id`, `repository`, `issue_title`, and reviewed `issue_body`
-- `runtime_image`, pinned as an OCI `name@sha256:...` reference
+- `runtime_recipe`, containing schema version 1, an explicitly version-tagged
+  Debian-compatible `base_image`, required `sync_command`, and optional
+  `bootstrap_command` and `environment`
 - relative `source_archive` and `hidden_test_patch` paths plus SHA-256 hashes
 - argv arrays for `setup_command`, `fail_to_pass_command`, and
   `regression_command`
 - `protected_globs`, `ignored_globs`, `timeout_s`, and `validated: true`
 
 Source archives must contain repository contents at their root, exclude `.git`,
-and dereference symlinks. Runtime images are immutable, Debian-compatible
-Python environments that provide Node 22.19 or newer, npm, Git, GNU tar,
-coreutils `timeout`, ripgrep, a non-root `node` user, and all task dependencies.
-BenchKit wraps each runtime image with the locked Pi package and verifies that
-`pi --version` is exactly 0.84.2.
+and dereference symlinks. BenchKit builds each runtime locally at benchmark
+start. A generic Dockerfile combines Node 24 and the recipe's version-tagged
+Debian base, installs the task dependencies from the verified parent source,
+removes that build copy, and installs the locked Pi package. Build commands run
+with network access and version tags may drift; this is an explicitly accepted
+tradeoff and does not cryptographically bind the runtime to the miner's
+validation image.
+
+Every build uses a uniquely named `benchkit-patcheval-build-*` buildx
+docker-container builder with `--no-cache --load`. Its container and private
+cache volume are removed immediately after the image is loaded. The generated
+task image is transient and is removed after the benchmark, including failure
+paths. BenchKit cleanup is label- and exact-name-scoped and does not prune
+unrelated Docker resources.
+
+The build context is allowlisted: it contains only the checksummed parent source
+archive and BenchKit's Dockerfile, Pi package, inference proxy, and guard. It
+never contains the hidden-test patch, gold source, repository history, dataset
+root, or validation attestations. Agent containers retain only the internal
+inference network; grader containers continue to use `--network none`.
 
 The miner must set `validated: true` only after checking, in clean containers,
 that the hidden test fails on the parent, passes on the original fix, and the

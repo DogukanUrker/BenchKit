@@ -12,7 +12,7 @@ import tempfile
 import threading
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit, urlunsplit
 
 from benchkit.client import InferenceClient, _openai_base
@@ -26,6 +26,8 @@ AIDER_POLYGLOT_COMMIT = "7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f"
 _PROXY_SOURCE = Path(__file__).with_name("_pi_proxy.py")
 _ANSWER_KEY_GUARD_SOURCE = Path(__file__).with_name("answer_key_guard.ts")
 _PI_PACKAGE_ROOT = Path(__file__).with_name("pi_package")
+_PATCHEVAL_IMAGE_SESSION = uuid.uuid4().hex[:12]
+_BUILDKIT_DRIVER_IMAGE = "moby/buildkit:buildx-stable-1"
 
 _PI_INSTALL = """\
 COPY pi-package/package.json pi-package/package-lock.json /opt/benchkit/pi/
@@ -242,6 +244,9 @@ class LatestPiImage:
     transient: bool = True
     pids_limit: int = 256
     build_assets: Path | None = None
+    build_files: tuple[tuple[Path, str], ...] = ()
+    ephemeral_buildx: bool = False
+    always_cleanup_image: bool = False
     answer_key_guard: bool = False
     version: str = ""
     _ready: bool = field(default=False, init=False, repr=False)
@@ -273,33 +278,193 @@ class LatestPiImage:
                 shutil.copytree(_PI_PACKAGE_ROOT, context / "pi-package")
                 if self.build_assets is not None:
                     shutil.copytree(self.build_assets, context / "git-surgery")
-                command = [self.docker, "build", "--pull"]
-                if self.no_cache:
-                    command.append("--no-cache")
-                command.extend(["--tag", self.image, str(context)])
-                _run(command, timeout=1800)
-            result = _run(
-                [self.docker, "run", "--rm", self.image, "pi", "--version"],
-                timeout=30,
-            )
-            self.version = result.stdout.strip() or "latest"
-            if self.version != PI_VERSION:
-                raise SandboxError(
-                    f"Pi image reported {self.version!r}; expected {PI_VERSION!r}"
+                allowed = {
+                    "Dockerfile",
+                    "inference_proxy.py",
+                    "answer_key_guard.ts",
+                    "pi-package",
+                    "git-surgery",
+                }
+                for source, destination in self.build_files:
+                    target = PurePosixPath(destination)
+                    if (
+                        target.is_absolute()
+                        or len(target.parts) != 1
+                        or target.name in allowed
+                        or source.is_symlink()
+                        or not source.is_file()
+                    ):
+                        raise SandboxError("invalid explicit Pi build-context file")
+                    shutil.copyfile(source, context / target.name)
+                    allowed.add(target.name)
+                dockerignore = ["*", *sorted(f"!{item}" for item in allowed)]
+                dockerignore.extend(("!pi-package/**", "!git-surgery/**"))
+                (context / ".dockerignore").write_text(
+                    "\n".join(dockerignore) + "\n", encoding="utf-8"
                 )
+                try:
+                    if self.ephemeral_buildx:
+                        _run(
+                            [
+                                self.docker,
+                                "image",
+                                "rm",
+                                "--force",
+                                self.image,
+                            ],
+                            timeout=60,
+                            check=False,
+                        )
+                        _build_with_ephemeral_buildx(self.docker, self.image, context)
+                    else:
+                        command = [self.docker, "build", "--pull"]
+                        if self.no_cache:
+                            command.append("--no-cache")
+                        command.extend(["--tag", self.image, str(context)])
+                        _run(command, timeout=1800)
+                    if self.ephemeral_buildx:
+                        smoke = f"benchkit-patcheval-smoke-{uuid.uuid4().hex[:16]}"
+                        try:
+                            result = _run(
+                                [
+                                    self.docker,
+                                    "run",
+                                    "--name",
+                                    smoke,
+                                    "--rm",
+                                    self.image,
+                                    "pi",
+                                    "--version",
+                                ],
+                                timeout=30,
+                            )
+                        finally:
+                            _run(
+                                [self.docker, "rm", "--force", smoke],
+                                timeout=30,
+                                check=False,
+                            )
+                    else:
+                        result = _run(
+                            [
+                                self.docker,
+                                "run",
+                                "--rm",
+                                self.image,
+                                "pi",
+                                "--version",
+                            ],
+                            timeout=30,
+                        )
+                    self.version = result.stdout.strip() or "latest"
+                    if self.version != PI_VERSION:
+                        raise SandboxError(
+                            f"Pi image reported {self.version!r}; "
+                            f"expected {PI_VERSION!r}"
+                        )
+                except Exception:
+                    if self.transient:
+                        _run(
+                            [self.docker, "image", "rm", "--force", self.image],
+                            timeout=60,
+                            check=False,
+                        )
+                    self.version = ""
+                    raise
             self._ready = True
             return self.version
 
     def cleanup(self) -> None:
         """Remove the transient Pi image after its benchmark run."""
-        if not self._ready or not self.transient:
+        if not self.transient or (not self._ready and not self.always_cleanup_image):
             return
-        _run(
-            [self.docker, "image", "rm", "--force", self.image],
-            timeout=60,
-        )
+        if self.always_cleanup_image:
+            _run(
+                [self.docker, "image", "rm", "--force", self.image],
+                timeout=60,
+                check=False,
+            )
+        else:
+            _run(
+                [self.docker, "image", "rm", "--force", self.image],
+                timeout=60,
+            )
         self._ready = False
         self.version = ""
+
+
+def _build_with_ephemeral_buildx(docker: str, image: str, context: Path) -> None:
+    """Build without shared cache, then remove the private buildkit session."""
+    builder = f"benchkit-patcheval-build-{uuid.uuid4().hex[:16]}"
+    buildkit_container = f"buildx_buildkit_{builder}0"
+    cache_volume = f"buildx_buildkit_{builder}0_state"
+    driver_was_present = bool(
+        _run(
+            [
+                docker,
+                "image",
+                "inspect",
+                "--format",
+                "{{.Id}}",
+                _BUILDKIT_DRIVER_IMAGE,
+            ],
+            timeout=30,
+            check=False,
+        ).stdout.strip()
+    )
+    try:
+        _run(
+            [
+                docker,
+                "buildx",
+                "create",
+                "--name",
+                builder,
+                "--driver",
+                "docker-container",
+                "--driver-opt",
+                f"image={_BUILDKIT_DRIVER_IMAGE}",
+            ],
+            timeout=60,
+        )
+        _run(
+            [
+                docker,
+                "buildx",
+                "build",
+                "--builder",
+                builder,
+                "--pull",
+                "--no-cache",
+                "--load",
+                "--tag",
+                image,
+                str(context),
+            ],
+            timeout=1800,
+        )
+    finally:
+        _run(
+            [docker, "buildx", "rm", "--force", builder],
+            timeout=60,
+            check=False,
+        )
+        _run(
+            [docker, "rm", "--force", buildkit_container],
+            timeout=30,
+            check=False,
+        )
+        _run(
+            [docker, "volume", "rm", "--force", cache_volume],
+            timeout=30,
+            check=False,
+        )
+        if not driver_was_present:
+            _run(
+                [docker, "image", "rm", "--force", _BUILDKIT_DRIVER_IMAGE],
+                timeout=60,
+                check=False,
+            )
 
 
 def aider_pi_image() -> LatestPiImage:
@@ -328,33 +493,130 @@ def git_surgery_pi_image() -> LatestPiImage:
     )
 
 
-def patcheval_pi_image(runtime_image: str) -> LatestPiImage:
-    """Wrap one immutable PatchEval runtime with the pinned stock Pi agent."""
-    if not re.fullmatch(r"[A-Za-z0-9._/:+@-]+@sha256:[0-9a-f]{64}", runtime_image):
-        raise ValueError(
-            "PatchEval runtime_image must be an OCI reference pinned by sha256 digest"
-        )
-    image_id = hashlib.sha256(runtime_image.encode()).hexdigest()[:16]
-    dockerfile = f"""\\
-FROM {runtime_image}
+@dataclass(frozen=True)
+class PatchEvalRuntimeRecipe:
+    """Trusted build instructions shipped with one validated PatchEval task."""
+
+    base_image: str
+    sync_command: tuple[str, ...]
+    bootstrap_command: tuple[str, ...] = ()
+    environment: tuple[str, ...] = ()
+    schema_version: int = 1
+
+
+def _regular_file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _tree_sha256(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise ValueError("Pi package build assets must not contain symlinks")
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix().encode()
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update(bytes.fromhex(_regular_file_sha256(path)))
+    return digest.hexdigest()
+
+
+def _docker_run(command: tuple[str, ...]) -> str:
+    return f"RUN {json.dumps(list(command), separators=(',', ':'))}\n"
+
+
+def _patcheval_dockerfile(recipe: PatchEvalRuntimeRecipe) -> str:
+    bootstrap = (
+        _docker_run(recipe.bootstrap_command) if recipe.bootstrap_command else ""
+    )
+    environment = "".join(
+        f"ENV {key}={json.dumps(value)}\n"
+        for key, value in (item.split("=", 1) for item in recipe.environment)
+    )
+    return f"""\\
+FROM node:24-bookworm-slim AS benchkit-node
+FROM {recipe.base_image}
 
 USER root
+COPY --from=benchkit-node /usr/local/ /usr/local/
+RUN apt-get update \\
+    && apt-get install -y --no-install-recommends \\
+       bash ca-certificates coreutils git passwd ripgrep tar \\
+    && rm -rf /var/lib/apt/lists/* \\
+    && (getent group node >/dev/null || groupadd --gid 1000 node) \\
+    && (id --user node >/dev/null 2>&1 || \\
+        useradd --uid 1000 --gid node --create-home --shell /bin/bash node)
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy
+WORKDIR /opt/project
+COPY parent-source.tar /tmp/patcheval-parent.tar
+RUN tar -xf /tmp/patcheval-parent.tar -C /opt/project \\
+    && rm /tmp/patcheval-parent.tar
+{_docker_run(recipe.sync_command)}{bootstrap}RUN rm -rf /opt/project \\
+    && test -d /opt/venv \\
+    && chmod -R a+rwX /opt/venv
 {_PI_INSTALL}
 COPY inference_proxy.py /opt/benchkit/inference_proxy.py
 COPY answer_key_guard.ts /opt/benchkit/answer_key_guard.ts
 RUN mkdir -p /workspace /home/node/.pi/agent \\
     && chown -R node:node /workspace /home/node/.pi
 
-USER node
+{environment}USER node
 WORKDIR /workspace
-ENV HOME=/home/node USER=node LOGNAME=node PI_OFFLINE=1 PI_TELEMETRY=0
+ENV PATH=/opt/venv/bin:$PATH HOME=/home/node USER=node LOGNAME=node \\
+    PI_OFFLINE=1 PI_TELEMETRY=0
 CMD ["sleep", "infinity"]
 """
+
+
+def patcheval_pi_image(
+    source_archive: Path,
+    source_sha256: str,
+    recipe: PatchEvalRuntimeRecipe,
+) -> LatestPiImage:
+    """Build one task runtime locally without retaining buildkit state."""
+    if source_archive.is_symlink() or not source_archive.is_file():
+        raise ValueError("PatchEval source archive must be a regular file")
+    if not re.fullmatch(r"[0-9a-f]{64}", source_sha256):
+        raise ValueError("PatchEval source_sha256 must be a lowercase SHA-256")
+    if _regular_file_sha256(source_archive) != source_sha256:
+        raise ValueError("PatchEval source archive checksum mismatch")
+    dockerfile = _patcheval_dockerfile(recipe)
+    recipe_json = json.dumps(
+        {
+            "schema_version": recipe.schema_version,
+            "base_image": recipe.base_image,
+            "sync_command": list(recipe.sync_command),
+            "bootstrap_command": list(recipe.bootstrap_command),
+            "environment": list(recipe.environment),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    identity = hashlib.sha256()
+    for value in (
+        dockerfile,
+        source_sha256,
+        recipe_json,
+        _tree_sha256(_PI_PACKAGE_ROOT),
+        _regular_file_sha256(_PROXY_SOURCE),
+        _regular_file_sha256(_ANSWER_KEY_GUARD_SOURCE),
+    ):
+        identity.update(value.encode())
+        identity.update(b"\0")
+    image_id = identity.hexdigest()[:16]
     return LatestPiImage(
-        image=f"benchkit-pi-patcheval:{image_id}",
+        image=f"benchkit-pi-patcheval:{_PATCHEVAL_IMAGE_SESSION}-{image_id}",
         dockerfile=dockerfile,
-        no_cache=False,
-        transient=False,
+        no_cache=True,
+        transient=True,
+        build_files=((source_archive, "parent-source.tar"),),
+        ephemeral_buildx=True,
+        always_cleanup_image=True,
     )
 
 
