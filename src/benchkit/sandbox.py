@@ -211,34 +211,66 @@ def _docker_upstream(url: str) -> str:
 def cleanup_owned_resources(docker: str, owner_id: str) -> None:
     """Remove every container and network belonging to one Pi runner."""
     label = f"benchkit.owner={owner_id}"
-    containers: list[str] = []
-    with contextlib.suppress(Exception):
-        containers = _run(
-            [docker, "ps", "--all", "--quiet", "--filter", f"label={label}"],
-            timeout=30,
-            check=False,
-        ).stdout.split()
+    errors: list[str] = []
+
+    def listed(command: list[str], kind: str) -> list[str]:
+        try:
+            result = _run(command, timeout=30, check=False)
+        except Exception as exc:
+            errors.append(f"could not inspect owned {kind}: {exc}")
+            return []
+        if result.returncode:
+            detail = _tail(result.stderr or result.stdout) or "unknown Docker error"
+            errors.append(f"could not inspect owned {kind}: {detail}")
+            return []
+        return result.stdout.split()
+
+    container_query = [
+        docker,
+        "ps",
+        "--all",
+        "--quiet",
+        "--filter",
+        f"label={label}",
+    ]
+    network_query = [
+        docker,
+        "network",
+        "ls",
+        "--quiet",
+        "--filter",
+        f"label={label}",
+    ]
+    containers = listed(container_query, "containers")
     if containers:
         with contextlib.suppress(Exception):
-            _run(
-                [docker, "rm", "--force", *containers],
-                timeout=30,
-                check=False,
-            )
-    networks: list[str] = []
-    with contextlib.suppress(Exception):
-        networks = _run(
-            [docker, "network", "ls", "--quiet", "--filter", f"label={label}"],
-            timeout=30,
-            check=False,
-        ).stdout.split()
+            _run([docker, "rm", "--force", *containers], timeout=30, check=False)
+    networks = listed(network_query, "networks")
     if networks:
         with contextlib.suppress(Exception):
-            _run(
-                [docker, "network", "rm", *networks],
-                timeout=30,
-                check=False,
-            )
+            _run([docker, "network", "rm", *networks], timeout=30, check=False)
+
+    remaining_containers = listed(container_query, "containers after cleanup")
+    remaining_networks = listed(network_query, "networks after cleanup")
+    if remaining_containers:
+        errors.append("owned containers remain: " + ", ".join(remaining_containers))
+    if remaining_networks:
+        errors.append("owned networks remain: " + ", ".join(remaining_networks))
+    if errors:
+        raise SandboxError("Pi Docker cleanup failed: " + "; ".join(errors))
+
+
+def _verify_absent(
+    command: list[str], description: str, errors: list[str], *, timeout: int = 30
+) -> None:
+    """Record an error unless an exact Docker resource is confirmed absent."""
+    try:
+        result = _run(command, timeout=timeout, check=False)
+    except Exception as exc:
+        errors.append(f"could not verify {description}: {exc}")
+        return
+    if result.returncode == 0:
+        errors.append(f"{description} remains")
 
 
 @dataclass
@@ -403,19 +435,24 @@ class LatestPiImage:
         """Remove the transient Pi image after its benchmark run."""
         if not self.transient or (not self._ready and not self.always_cleanup_image):
             return
-        if self.always_cleanup_image:
+        try:
             _run(
                 [self.docker, "image", "rm", "--force", self.image],
                 timeout=60,
-                check=False,
+                check=not self.always_cleanup_image,
             )
-        else:
-            _run(
-                [self.docker, "image", "rm", "--force", self.image],
-                timeout=60,
-            )
-        self._ready = False
-        self.version = ""
+            if self.always_cleanup_image:
+                errors: list[str] = []
+                _verify_absent(
+                    [self.docker, "image", "inspect", self.image],
+                    f"transient image {self.image}",
+                    errors,
+                )
+                if errors:
+                    raise SandboxError("Pi Docker cleanup failed: " + "; ".join(errors))
+        finally:
+            self._ready = False
+            self.version = ""
 
 
 def _build_with_ephemeral_buildx(
@@ -491,6 +528,30 @@ def _build_with_ephemeral_buildx(
                     timeout=60,
                     check=False,
                 )
+        errors: list[str] = []
+        _verify_absent(
+            [docker, "buildx", "inspect", builder],
+            f"Buildx builder {builder}",
+            errors,
+        )
+        _verify_absent(
+            [docker, "container", "inspect", buildkit_container],
+            f"BuildKit container {buildkit_container}",
+            errors,
+        )
+        _verify_absent(
+            [docker, "volume", "inspect", cache_volume],
+            f"BuildKit volume {cache_volume}",
+            errors,
+        )
+        if not driver_was_present:
+            _verify_absent(
+                [docker, "image", "inspect", _BUILDKIT_DRIVER_IMAGE],
+                f"BuildKit driver image {_BUILDKIT_DRIVER_IMAGE}",
+                errors,
+            )
+        if errors:
+            raise SandboxError("Pi Docker cleanup failed: " + "; ".join(errors))
 
 
 def aider_pi_image() -> LatestPiImage:

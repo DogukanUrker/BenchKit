@@ -89,7 +89,18 @@ def _safe_relative(root: Path, value: object, field: str) -> Path:
     path = PurePosixPath(value)
     if path.is_absolute() or ".." in path.parts:
         raise ValueError(f"{field} must stay inside the dataset root")
-    return root.joinpath(*path.parts)
+    resolved_root = root.resolve(strict=True)
+    candidate = root
+    for part in path.parts:
+        candidate = candidate / part
+        if candidate.is_symlink():
+            raise ValueError(f"{field} must not traverse symlinks")
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(resolved_root)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        raise ValueError(f"{field} must stay inside the dataset root") from exc
+    return resolved
 
 
 def _strings(record: dict, field: str, *, required: bool = True) -> tuple[str, ...]:
