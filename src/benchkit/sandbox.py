@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -18,10 +20,19 @@ from benchkit.client import InferenceClient, _openai_base
 PI_IMAGE = "benchkit-pi:latest"
 AIDER_PI_IMAGE = "benchkit-pi-aider-polyglot:latest"
 GIT_SURGERY_PI_IMAGE = "benchkit-pi-git-surgery:latest"
-PI_PACKAGE = "@earendil-works/pi-coding-agent@latest"
+PI_PACKAGE = "@earendil-works/pi-coding-agent@0.84.2"
+PI_VERSION = "0.84.2"
 AIDER_POLYGLOT_COMMIT = "7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f"
 _PROXY_SOURCE = Path(__file__).with_name("_pi_proxy.py")
 _ANSWER_KEY_GUARD_SOURCE = Path(__file__).with_name("answer_key_guard.ts")
+_PI_PACKAGE_ROOT = Path(__file__).with_name("pi_package")
+
+_PI_INSTALL = """\
+COPY pi-package/package.json pi-package/package-lock.json /opt/benchkit/pi/
+RUN cd /opt/benchkit/pi \\
+    && npm ci --omit=dev \\
+    && ln -s /opt/benchkit/pi/node_modules/.bin/pi /usr/local/bin/pi
+"""
 
 PI_DOCKERFILE = f"""\
 FROM node:24-bookworm-slim
@@ -29,7 +40,7 @@ FROM node:24-bookworm-slim
 RUN apt-get update \\
     && apt-get install -y --no-install-recommends bash ca-certificates git python3 ripgrep \\
     && rm -rf /var/lib/apt/lists/*
-RUN npm install -g {PI_PACKAGE}
+{_PI_INSTALL}
 
 COPY inference_proxy.py /opt/benchkit/inference_proxy.py
 COPY answer_key_guard.ts /opt/benchkit/answer_key_guard.ts
@@ -51,7 +62,7 @@ RUN apt-get update \\
        openjdk-17-jdk \\
        python3 ripgrep unzip \\
     && rm -rf /var/lib/apt/lists/*
-RUN npm install -g {PI_PACKAGE}
+{_PI_INSTALL}
 ARG TARGETARCH
 RUN curl -fsSL "https://go.dev/dl/go1.21.5.linux-${{TARGETARCH}}.tar.gz" \\
       -o /tmp/go.tar.gz \\
@@ -121,7 +132,7 @@ RUN apt-get update \\
        bash ca-certificates git=${{GIT_DEBIAN_VERSION}} python3 ripgrep \\
     && test "$(git --version)" = "git version 2.39.5" \\
     && rm -rf /var/lib/apt/lists/*
-RUN npm install -g {PI_PACKAGE}
+{_PI_INSTALL}
 
 COPY inference_proxy.py /opt/benchkit/inference_proxy.py
 COPY answer_key_guard.ts /opt/benchkit/answer_key_guard.ts
@@ -222,7 +233,7 @@ def cleanup_owned_resources(docker: str, owner_id: str) -> None:
 
 @dataclass
 class LatestPiImage:
-    """Build the stock Pi image once per run, resolving npm's latest release."""
+    """Build the reproducibly pinned stock Pi image once per run."""
 
     docker: str = field(default_factory=_docker_binary)
     image: str = PI_IMAGE
@@ -259,6 +270,7 @@ class LatestPiImage:
                     _ANSWER_KEY_GUARD_SOURCE.read_text(encoding="utf-8"),
                     encoding="utf-8",
                 )
+                shutil.copytree(_PI_PACKAGE_ROOT, context / "pi-package")
                 if self.build_assets is not None:
                     shutil.copytree(self.build_assets, context / "git-surgery")
                 command = [self.docker, "build", "--pull"]
@@ -271,6 +283,10 @@ class LatestPiImage:
                 timeout=30,
             )
             self.version = result.stdout.strip() or "latest"
+            if self.version != PI_VERSION:
+                raise SandboxError(
+                    f"Pi image reported {self.version!r}; expected {PI_VERSION!r}"
+                )
             self._ready = True
             return self.version
 
@@ -309,6 +325,36 @@ def git_surgery_pi_image() -> LatestPiImage:
         no_cache=False,
         transient=True,
         build_assets=Path(__file__).with_name("git_surgery"),
+    )
+
+
+def patcheval_pi_image(runtime_image: str) -> LatestPiImage:
+    """Wrap one immutable PatchEval runtime with the pinned stock Pi agent."""
+    if not re.fullmatch(r"(?:[A-Za-z0-9._/:+@-]+@)?sha256:[0-9a-f]{64}", runtime_image):
+        raise ValueError(
+            "PatchEval runtime_image must be an OCI reference pinned by sha256 digest"
+        )
+    image_id = hashlib.sha256(runtime_image.encode()).hexdigest()[:16]
+    dockerfile = f"""\\
+FROM {runtime_image}
+
+USER root
+{_PI_INSTALL}
+COPY inference_proxy.py /opt/benchkit/inference_proxy.py
+COPY answer_key_guard.ts /opt/benchkit/answer_key_guard.ts
+RUN mkdir -p /workspace /home/node/.pi/agent \\
+    && chown -R node:node /workspace /home/node/.pi
+
+USER node
+WORKDIR /workspace
+ENV PI_OFFLINE=1 PI_TELEMETRY=0
+CMD ["sleep", "infinity"]
+"""
+    return LatestPiImage(
+        image=f"benchkit-pi-patcheval:{image_id}",
+        dockerfile=dockerfile,
+        no_cache=False,
+        transient=False,
     )
 
 

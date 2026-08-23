@@ -14,6 +14,7 @@ from benchkit.benchmarks.mbpp import MBPP
 from benchkit.benchmarks.mmlu import MMLU
 from benchkit.benchmarks.mmlu_pro import MMLUPro
 from benchkit.benchmarks.openbookqa import OpenBookQA
+from benchkit.benchmarks.patcheval import PatchEval
 from benchkit.benchmarks.piqa import PIQA
 from benchkit.benchmarks.ruler import RULER, RULERFull
 from benchkit.benchmarks.sanity import Sanity
@@ -25,6 +26,7 @@ REGISTRY: dict[str, type] = {
     # Generative suites first, then the multiple-choice ones.
     "aider-polyglot": AiderPolyglot,
     "git-surgery": GitSurgery,
+    "patcheval": PatchEval,
     "sanity": Sanity,
     "humaneval": HumanEval,
     "humaneval-plus": HumanEvalPlus,
@@ -51,6 +53,7 @@ REGISTRY: dict[str, type] = {
 DESCRIPTIONS: dict[str, str] = {
     "aider-polyglot": "repository editing across six languages with the Pi agent",
     "git-surgery": "stateful Git operations in isolated repositories with Pi",
+    "patcheval": "real Python bug fixes with externally isolated hidden tests",
     "sanity": "25 curated checks across code, math, instructions, science, and commonsense",
     "humaneval": "Python function completions with the original unit tests",
     "humaneval-plus": "HumanEval with 122k+ tougher EvalPlus test inputs",

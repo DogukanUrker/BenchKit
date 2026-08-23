@@ -20,6 +20,7 @@ from benchkit.pi_agent import PiAgentRunner, _RpcTrace
 from benchkit.sandbox import (
     PI_DOCKERFILE,
     PI_PACKAGE,
+    PI_VERSION,
     DockerTaskEnvironment,
     LatestPiImage,
     _docker_upstream,
@@ -31,17 +32,19 @@ class LatestPiImageTests(unittest.TestCase):
     def test_generic_pi_sandbox_keeps_the_restricted_pid_limit(self) -> None:
         self.assertEqual(LatestPiImage(docker="docker").pids_limit, 256)
 
-    def test_package_deliberately_tracks_npm_latest(self) -> None:
-        self.assertEqual(PI_PACKAGE, "@earendil-works/pi-coding-agent@latest")
-        self.assertIn(f"npm install -g {PI_PACKAGE}", PI_DOCKERFILE)
+    def test_package_and_transitive_dependencies_are_pinned(self) -> None:
+        self.assertEqual(PI_PACKAGE, "@earendil-works/pi-coding-agent@0.84.2")
+        self.assertEqual(PI_VERSION, "0.84.2")
+        self.assertIn("npm ci --omit=dev", PI_DOCKERFILE)
+        self.assertNotIn("@latest", PI_DOCKERFILE)
 
     def test_prepare_pulls_and_bypasses_build_cache_once_per_run(self) -> None:
         image = LatestPiImage(docker="docker")
 
         with patch("benchkit.sandbox._run") as run:
-            run.return_value = SimpleNamespace(stdout="0.83.0\n")
-            self.assertEqual(image.prepare(), "0.83.0")
-            self.assertEqual(image.prepare(), "0.83.0")
+            run.return_value = SimpleNamespace(stdout=f"{PI_VERSION}\n")
+            self.assertEqual(image.prepare(), PI_VERSION)
+            self.assertEqual(image.prepare(), PI_VERSION)
 
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(commands[0][:2], ["docker", "version"])

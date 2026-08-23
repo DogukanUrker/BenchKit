@@ -303,6 +303,7 @@ class PiRepairTests(unittest.TestCase):
                 EvaluationResult(1.0),
             ]
         )
+        repair_prompt_builder = Mock(return_value="Continue fixing the issue.")
 
         with patch(
             "benchkit.pi_agent.DockerTaskEnvironment",
@@ -313,6 +314,7 @@ class PiRepairTests(unittest.TestCase):
                 "original prompt",
                 verifier=verifier,
                 repair_attempts=1,
+                repair_prompt_builder=repair_prompt_builder,
             )
 
         task_environment.assert_called_once()
@@ -321,7 +323,8 @@ class PiRepairTests(unittest.TestCase):
         prompts = [item for item in sent if item.get("type") == "prompt"]
         self.assertEqual(len(prompts), 2)
         self.assertEqual(prompts[0]["message"], "original prompt")
-        self.assertIn("Sanitized failure.", prompts[1]["message"])
+        self.assertEqual(prompts[1]["message"], "Continue fixing the issue.")
+        repair_prompt_builder.assert_called_once_with("Sanitized failure.", 1, 1)
         self.assertEqual(result["response"], "right")
         self.assertTrue(result["repaired"])
         self.assertEqual(result["repair_attempts_used"], 1)
