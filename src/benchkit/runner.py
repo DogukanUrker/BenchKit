@@ -727,9 +727,21 @@ def run(
             Text("Interrupted, cancelling active requests…", style="bold yellow")
         )
 
-    previous = None
-    with contextlib.suppress(ValueError):  # not on the main thread
-        previous = signal.signal(signal.SIGINT, on_interrupt)
+    def on_terminate(signum: int, frame: FrameType | None) -> None:
+        # SIGHUP (for example, a dropped SSH session) and SIGTERM do not offer
+        # an interactive second signal. Unwind immediately so Engine.finally
+        # can remove its containers, networks, images, builders, and volumes.
+        controls.stop()
+        signal.signal(signum, signal.SIG_IGN)
+        raise SystemExit(128 + signum)
+
+    handlers = [(signal.SIGINT, on_interrupt), (signal.SIGTERM, on_terminate)]
+    if hasattr(signal, "SIGHUP"):
+        handlers.append((signal.SIGHUP, on_terminate))
+    previous: dict[int, signal.Handlers] = {}
+    for signum, handler in handlers:
+        with contextlib.suppress(ValueError):  # not on the main thread
+            previous[signum] = signal.signal(signum, handler)
 
     try:
         with reporter:
@@ -738,7 +750,7 @@ def run(
         console.print(Text("Aborted.", style="bold yellow"))
         return [], "interrupted"
     finally:
-        if previous is not None:
-            signal.signal(signal.SIGINT, previous)
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
     return results, engine.failure

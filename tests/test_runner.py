@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import io
+import signal
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from rich.console import Console
 
@@ -18,7 +21,15 @@ from benchkit.engine import (
     TaskPhase,
     TaskRecord,
 )
-from benchkit.runner import _bar, _counters, _Glyphs, _LiveStats, _Reporter, _spread
+from benchkit.runner import (
+    _bar,
+    _counters,
+    _Glyphs,
+    _LiveStats,
+    _Reporter,
+    _spread,
+    run,
+)
 
 
 def _record(
@@ -263,6 +274,48 @@ class PlainReporterTests(unittest.TestCase):
         self.assertIn("116.8 aggregate tok/s", output)
         self.assertIn("62.6 stream tok/s", output)
         self.assertIn("1.87x effective", output)
+
+
+class HeadlessSignalTests(unittest.TestCase):
+    def test_sigterm_unwinds_engine_cleanup_and_restores_handlers(self) -> None:
+        console = _console(record=True)
+        installed: dict[int, object] = {}
+        original = object()
+        engine = Mock()
+
+        def install(signum: int, handler: object) -> object:
+            installed[signum] = handler
+            return original
+
+        def interrupt_run() -> list[dict]:
+            handler = installed[signal.SIGTERM]
+            assert callable(handler)
+            handler(signal.SIGTERM, None)
+            return []
+
+        engine.run.side_effect = interrupt_run
+        with (
+            patch("benchkit.runner.Engine", return_value=engine),
+            patch("benchkit.runner.signal.signal", side_effect=install) as set_signal,
+            self.assertRaisesRegex(SystemExit, str(128 + signal.SIGTERM)),
+        ):
+            run(
+                SimpleNamespace(),
+                [JobSpec("model", "sanity", "1")],
+                console,
+            )
+
+        self.assertIn(
+            (signal.SIGTERM, signal.SIG_IGN),
+            [call.args for call in set_signal.call_args_list],
+        )
+        restored = {
+            call.args[0]: call.args[1]
+            for call in set_signal.call_args_list
+            if call.args[1] is original
+        }
+        self.assertEqual(restored[signal.SIGINT], original)
+        self.assertEqual(restored[signal.SIGTERM], original)
 
 
 if __name__ == "__main__":

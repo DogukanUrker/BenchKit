@@ -785,6 +785,22 @@ class HarnessPairingTests(unittest.TestCase):
         self.assertEqual(results, [])
         runner.cleanup.assert_called_once_with()
 
+    def test_engine_cleans_the_image_when_process_termination_unwinds(self) -> None:
+        runner = Mock()
+        engine = Engine(
+            client=SimpleNamespace(),
+            jobs=[JobSpec("model", "sanity", "1", harness="pi")],
+        )
+        engine._pi_runner = runner
+
+        with (
+            patch.object(engine, "_run_job", side_effect=SystemExit(143)),
+            self.assertRaisesRegex(SystemExit, "143"),
+        ):
+            engine.run()
+
+        runner.cleanup.assert_called_once_with()
+
     def test_cli_both_creates_matching_direct_and_pi_jobs(self) -> None:
         args = _parse_args(
             [
