@@ -18,7 +18,7 @@ from benchkit.benchmarks.patcheval import (
     _trusted_patch,
 )
 from benchkit.engine import Engine
-from benchkit.sandbox import LatestPiImage
+from benchkit.sandbox import LatestPiImage, patcheval_pi_image
 
 _RUNTIME_IMAGE = "example.invalid/patcheval/python@sha256:" + "a" * 64
 
@@ -147,6 +147,29 @@ class PatchEvalTests(unittest.TestCase):
         )
         self.assertEqual(excluded, ["tests/test_agent.py", "tests/test_existing.py"])
 
+    def test_standard_root_python_tests_are_always_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            task = PatchEval(root).load_tasks()[0]
+            spec = task.metadata["spec"]
+            candidate = root / "candidate"
+            candidate.mkdir()
+            (candidate / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+            shutil.copytree(root / "source" / "tests", candidate / "tests")
+            (candidate / "test_agent.py").write_text(
+                "def test_agent(): pass\n", encoding="utf-8"
+            )
+
+            submission, changed, excluded = _trusted_patch(
+                spec, DownloadEnvironment(candidate)
+            )
+
+        self.assertIn("module.py", submission)
+        self.assertNotIn("test_agent.py", submission)
+        self.assertIn("test_agent.py", changed)
+        self.assertIn("test_agent.py", excluded)
+
     def test_verifier_runs_hidden_and_regression_graders_separately(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -229,6 +252,10 @@ class PatchEvalTests(unittest.TestCase):
 
         self.assertIs(first, second)
         self.assertEqual(benchmark.pi_image_for_task.call_count, 2)
+
+    def test_runtime_image_requires_a_named_oci_digest(self) -> None:
+        with self.assertRaisesRegex(ValueError, "pinned by sha256"):
+            patcheval_pi_image("sha256:" + "a" * 64)
 
 
 if __name__ == "__main__":

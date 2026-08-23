@@ -36,6 +36,18 @@ _GENERIC_REPAIR = (
 _MAX_PATCH_BYTES = 5 * 1024 * 1024
 _MAX_CANDIDATE_FILES = 50_000
 _MAX_CANDIDATE_BYTES = 512 * 1024 * 1024
+_PYTHON_TEST_GLOBS = (
+    "tests/**",
+    "test/**",
+    "**/tests/**",
+    "**/test/**",
+    "test_*.py",
+    "*_test.py",
+    "**/test_*.py",
+    "**/*_test.py",
+    "conftest.py",
+    "**/conftest.py",
+)
 
 
 @dataclass(frozen=True)
@@ -141,7 +153,9 @@ def _load_spec(root: Path, record: object) -> PatchEvalSpec:
         fail_to_pass_command=_strings(record, "fail_to_pass_command"),
         regression_command=_strings(record, "regression_command"),
         setup_command=_strings(record, "setup_command", required=False),
-        protected_globs=_strings(record, "protected_globs"),
+        protected_globs=tuple(
+            dict.fromkeys(_PYTHON_TEST_GLOBS + _strings(record, "protected_globs"))
+        ),
         ignored_globs=_strings(record, "ignored_globs", required=False),
         timeout_s=timeout_s,
     )

@@ -14,8 +14,11 @@ restricted inference proxy already used by BenchKit's Pi harness.
 After each attempt, BenchKit copies the workspace to the trusted host and diffs
 it against a fresh extraction of the checksummed source archive. Agent Git
 metadata is ignored. Changes matching `protected_globs` or `ignored_globs` are
-left out of the submitted patch. Protected globs must cover every test tree so
-an agent may write tests for itself without making those tests part of scoring.
+left out of the submitted patch. The runner always protects conventional Python
+test paths (`tests/`, `test/`, `test_*.py`, `*_test.py`, and `conftest.py`);
+dataset `protected_globs` must cover any repository-specific test locations.
+An agent may therefore write tests for itself without making those tests part
+of scoring.
 
 BenchKit then starts two new containers with `--network none`:
 

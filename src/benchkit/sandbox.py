@@ -330,7 +330,7 @@ def git_surgery_pi_image() -> LatestPiImage:
 
 def patcheval_pi_image(runtime_image: str) -> LatestPiImage:
     """Wrap one immutable PatchEval runtime with the pinned stock Pi agent."""
-    if not re.fullmatch(r"(?:[A-Za-z0-9._/:+@-]+@)?sha256:[0-9a-f]{64}", runtime_image):
+    if not re.fullmatch(r"[A-Za-z0-9._/:+@-]+@sha256:[0-9a-f]{64}", runtime_image):
         raise ValueError(
             "PatchEval runtime_image must be an OCI reference pinned by sha256 digest"
         )
