@@ -86,6 +86,16 @@ class DownloadEnvironment:
         shutil.copytree(self.candidate, destination, dirs_exist_ok=True, symlinks=True)
 
 
+def _docker_result(stdout: str = "", returncode: int = 0) -> SimpleNamespace:
+    """Stand in for the CompletedProcess that sandbox._run returns."""
+    return SimpleNamespace(stdout=stdout, stderr="", returncode=returncode)
+
+
+def _absent() -> SimpleNamespace:
+    """Docker's answer when an inspected resource does not exist."""
+    return _docker_result(returncode=1)
+
+
 class PatchEvalTests(unittest.TestCase):
     def test_loads_only_validated_checksum_pinned_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -348,8 +358,8 @@ class PatchEvalTests(unittest.TestCase):
             observed_context: set[str] = set()
 
             def run(args, **_kwargs):
-                if args[1:3] == ["image", "inspect"]:
-                    return SimpleNamespace(stdout="")
+                if args[2:3] == ["inspect"]:
+                    return _absent()
                 if args[1:3] == ["buildx", "build"]:
                     context = Path(args[-1])
                     observed_context.update(
@@ -357,7 +367,7 @@ class PatchEvalTests(unittest.TestCase):
                         for path in context.rglob("*")
                         if path.is_file()
                     )
-                return SimpleNamespace(stdout=f"{PI_VERSION}\n")
+                return _docker_result(f"{PI_VERSION}\n")
 
             with patch("benchkit.sandbox._run", side_effect=run) as docker_run:
                 self.assertEqual(image.prepare(), PI_VERSION)
@@ -388,7 +398,13 @@ class PatchEvalTests(unittest.TestCase):
             [docker, "image", "rm", "--force", "moby/buildkit:buildx-stable-1"],
             commands,
         )
-        self.assertEqual(commands[-1], [docker, "image", "rm", "--force", image.image])
+        self.assertEqual(
+            commands[-2:],
+            [
+                [docker, "image", "rm", "--force", image.image],
+                [docker, "image", "inspect", image.image],
+            ],
+        )
         self.assertIn("parent-source.tar", observed_context)
         self.assertIn("Dockerfile", observed_context)
         self.assertFalse(any("hidden" in path for path in observed_context))
@@ -404,7 +420,9 @@ class PatchEvalTests(unittest.TestCase):
             def run(args, **_kwargs):
                 if args[1:3] == ["buildx", "build"]:
                     raise SandboxError("build failed")
-                return SimpleNamespace(stdout=f"{PI_VERSION}\n")
+                if args[2:3] == ["inspect"]:
+                    return _absent()
+                return _docker_result(f"{PI_VERSION}\n")
 
             with patch("benchkit.sandbox._run", side_effect=run) as docker_run:
                 with self.assertRaisesRegex(SandboxError, "build failed"):

@@ -34,6 +34,23 @@ from benchkit.sandbox import (
 )
 
 
+def _docker_result(stdout: str = "", returncode: int = 0) -> SimpleNamespace:
+    """Stand in for the CompletedProcess that sandbox._run returns."""
+    return SimpleNamespace(stdout=stdout, stderr="", returncode=returncode)
+
+
+def _absent() -> SimpleNamespace:
+    """Docker's answer when an inspected resource does not exist."""
+    return _docker_result(returncode=1)
+
+
+def _docker_without_resources(args, **_kwargs) -> SimpleNamespace:
+    """Fake Docker where every command works and no resource is left behind."""
+    if args[2:3] == ["inspect"]:
+        return _absent()
+    return _docker_result()
+
+
 class LatestPiImageTests(unittest.TestCase):
     def test_generic_pi_sandbox_keeps_the_restricted_pid_limit(self) -> None:
         self.assertEqual(LatestPiImage(docker="docker").pids_limit, 256)
@@ -48,11 +65,9 @@ class LatestPiImageTests(unittest.TestCase):
         image = LatestPiImage(docker="docker")
 
         def docker_run(args, **_kwargs):
-            if args[1:3] == ["image", "inspect"]:
-                return SimpleNamespace(stdout="")
             if args[1] == "run":
-                return SimpleNamespace(stdout=f"{PI_VERSION}\n")
-            return SimpleNamespace(stdout="")
+                return _docker_result(f"{PI_VERSION}\n")
+            return _docker_without_resources(args)
 
         with patch("benchkit.sandbox._run", side_effect=docker_run) as run:
             self.assertEqual(image.prepare(), PI_VERSION)
@@ -95,49 +110,59 @@ class LatestPiImageTests(unittest.TestCase):
         )
         image._ready = True
 
-        with patch("benchkit.sandbox._run") as run:
+        with patch(
+            "benchkit.sandbox._run", side_effect=_docker_without_resources
+        ) as run:
             image.cleanup()
 
-        run.assert_called_once_with(
-            ["docker", "image", "rm", "--force", "benchkit-pi:latest"],
-            timeout=60,
-            check=False,
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [
+                ["docker", "image", "rm", "--force", "benchkit-pi:latest"],
+                ["docker", "image", "inspect", "benchkit-pi:latest"],
+            ],
         )
         self.assertFalse(image._ready)
         self.assertEqual(image.version, "")
 
     def test_cleanup_removes_every_resource_owned_by_the_runner(self) -> None:
+        container_query = [
+            "docker",
+            "ps",
+            "--all",
+            "--quiet",
+            "--filter",
+            "label=benchkit.owner=owner-123",
+        ]
+        network_query = [
+            "docker",
+            "network",
+            "ls",
+            "--quiet",
+            "--filter",
+            "label=benchkit.owner=owner-123",
+        ]
         responses = [
-            SimpleNamespace(stdout="container-one\ncontainer-two\n"),
-            SimpleNamespace(stdout=""),
-            SimpleNamespace(stdout="network-one\n"),
-            SimpleNamespace(stdout=""),
+            _docker_result("container-one\ncontainer-two\n"),
+            _docker_result(),
+            _docker_result("network-one\n"),
+            _docker_result(),
+            # Cleanup lists both kinds again to prove nothing is left.
+            _docker_result(),
+            _docker_result(),
         ]
         with patch("benchkit.sandbox._run", side_effect=responses) as run:
             cleanup_owned_resources("docker", "owner-123")
 
-        commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(
-            commands,
+            [call.args[0] for call in run.call_args_list],
             [
-                [
-                    "docker",
-                    "ps",
-                    "--all",
-                    "--quiet",
-                    "--filter",
-                    "label=benchkit.owner=owner-123",
-                ],
+                container_query,
                 ["docker", "rm", "--force", "container-one", "container-two"],
-                [
-                    "docker",
-                    "network",
-                    "ls",
-                    "--quiet",
-                    "--filter",
-                    "label=benchkit.owner=owner-123",
-                ],
+                network_query,
                 ["docker", "network", "rm", "network-one"],
+                container_query,
+                network_query,
             ],
         )
 
@@ -145,13 +170,11 @@ class LatestPiImageTests(unittest.TestCase):
         image = LatestPiImage(docker="docker")
 
         def docker_run(args, **_kwargs):
-            if args[1:3] == ["image", "inspect"]:
-                return SimpleNamespace(stdout="")
             if args[1:3] == ["buildx", "rm"]:
                 raise SandboxError("builder removal failed")
             if args[1] == "run":
-                return SimpleNamespace(stdout=f"{PI_VERSION}\n")
-            return SimpleNamespace(stdout="")
+                return _docker_result(f"{PI_VERSION}\n")
+            return _docker_without_resources(args)
 
         with patch("benchkit.sandbox._run", side_effect=docker_run) as run:
             self.assertEqual(image.prepare(), PI_VERSION)
