@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -17,9 +18,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 from benchkit.client import InferenceClient, _openai_base
 
-PI_IMAGE = "benchkit-pi:latest"
-AIDER_PI_IMAGE = "benchkit-pi-aider-polyglot:latest"
-GIT_SURGERY_PI_IMAGE = "benchkit-pi-git-surgery:latest"
+_PI_IMAGE_SESSION = uuid.uuid4().hex[:12]
+PI_IMAGE = f"benchkit-pi:{_PI_IMAGE_SESSION}"
+AIDER_PI_IMAGE = f"benchkit-pi-aider-polyglot:{_PI_IMAGE_SESSION}"
+GIT_SURGERY_PI_IMAGE = f"benchkit-pi-git-surgery:{_PI_IMAGE_SESSION}"
 PI_PACKAGE = "@earendil-works/pi-coding-agent@0.84.2"
 PI_VERSION = "0.84.2"
 AIDER_POLYGLOT_COMMIT = "7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f"
@@ -209,28 +211,34 @@ def _docker_upstream(url: str) -> str:
 def cleanup_owned_resources(docker: str, owner_id: str) -> None:
     """Remove every container and network belonging to one Pi runner."""
     label = f"benchkit.owner={owner_id}"
-    containers = _run(
-        [docker, "ps", "--all", "--quiet", "--filter", f"label={label}"],
-        timeout=30,
-        check=False,
-    ).stdout.split()
+    containers: list[str] = []
+    with contextlib.suppress(Exception):
+        containers = _run(
+            [docker, "ps", "--all", "--quiet", "--filter", f"label={label}"],
+            timeout=30,
+            check=False,
+        ).stdout.split()
     if containers:
-        _run(
-            [docker, "rm", "--force", *containers],
+        with contextlib.suppress(Exception):
+            _run(
+                [docker, "rm", "--force", *containers],
+                timeout=30,
+                check=False,
+            )
+    networks: list[str] = []
+    with contextlib.suppress(Exception):
+        networks = _run(
+            [docker, "network", "ls", "--quiet", "--filter", f"label={label}"],
             timeout=30,
             check=False,
-        )
-    networks = _run(
-        [docker, "network", "ls", "--quiet", "--filter", f"label={label}"],
-        timeout=30,
-        check=False,
-    ).stdout.split()
+        ).stdout.split()
     if networks:
-        _run(
-            [docker, "network", "rm", *networks],
-            timeout=30,
-            check=False,
-        )
+        with contextlib.suppress(Exception):
+            _run(
+                [docker, "network", "rm", *networks],
+                timeout=30,
+                check=False,
+            )
 
 
 @dataclass
@@ -245,8 +253,9 @@ class LatestPiImage:
     pids_limit: int = 256
     build_assets: Path | None = None
     build_files: tuple[tuple[Path, str], ...] = ()
-    ephemeral_buildx: bool = False
-    always_cleanup_image: bool = False
+    ephemeral_buildx: bool = True
+    always_cleanup_image: bool = True
+    resource_scope: str = "pi"
     answer_key_guard: bool = False
     version: str = ""
     _ready: bool = field(default=False, init=False, repr=False)
@@ -315,7 +324,12 @@ class LatestPiImage:
                             timeout=60,
                             check=False,
                         )
-                        _build_with_ephemeral_buildx(self.docker, self.image, context)
+                        _build_with_ephemeral_buildx(
+                            self.docker,
+                            self.image,
+                            context,
+                            self.resource_scope,
+                        )
                     else:
                         command = [self.docker, "build", "--pull"]
                         if self.no_cache:
@@ -323,7 +337,10 @@ class LatestPiImage:
                         command.extend(["--tag", self.image, str(context)])
                         _run(command, timeout=1800)
                     if self.ephemeral_buildx:
-                        smoke = f"benchkit-patcheval-smoke-{uuid.uuid4().hex[:16]}"
+                        smoke = (
+                            f"benchkit-{self.resource_scope}-smoke-"
+                            f"{uuid.uuid4().hex[:16]}"
+                        )
                         try:
                             result = _run(
                                 [
@@ -339,11 +356,12 @@ class LatestPiImage:
                                 timeout=30,
                             )
                         finally:
-                            _run(
-                                [self.docker, "rm", "--force", smoke],
-                                timeout=30,
-                                check=False,
-                            )
+                            with contextlib.suppress(Exception):
+                                _run(
+                                    [self.docker, "rm", "--force", smoke],
+                                    timeout=30,
+                                    check=False,
+                                )
                     else:
                         result = _run(
                             [
@@ -362,13 +380,20 @@ class LatestPiImage:
                             f"Pi image reported {self.version!r}; "
                             f"expected {PI_VERSION!r}"
                         )
-                except Exception:
+                except BaseException:
                     if self.transient:
-                        _run(
-                            [self.docker, "image", "rm", "--force", self.image],
-                            timeout=60,
-                            check=False,
-                        )
+                        with contextlib.suppress(Exception):
+                            _run(
+                                [
+                                    self.docker,
+                                    "image",
+                                    "rm",
+                                    "--force",
+                                    self.image,
+                                ],
+                                timeout=60,
+                                check=False,
+                            )
                     self.version = ""
                     raise
             self._ready = True
@@ -393,9 +418,16 @@ class LatestPiImage:
         self.version = ""
 
 
-def _build_with_ephemeral_buildx(docker: str, image: str, context: Path) -> None:
+def _build_with_ephemeral_buildx(
+    docker: str,
+    image: str,
+    context: Path,
+    resource_scope: str,
+) -> None:
     """Build without shared cache, then remove the private buildkit session."""
-    builder = f"benchkit-patcheval-build-{uuid.uuid4().hex[:16]}"
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", resource_scope):
+        raise SandboxError("invalid Pi Docker resource scope")
+    builder = f"benchkit-{resource_scope}-build-{uuid.uuid4().hex[:16]}"
     buildkit_container = f"buildx_buildkit_{builder}0"
     cache_volume = f"buildx_buildkit_{builder}0_state"
     driver_was_present = bool(
@@ -444,27 +476,21 @@ def _build_with_ephemeral_buildx(docker: str, image: str, context: Path) -> None
             timeout=1800,
         )
     finally:
-        _run(
-            [docker, "buildx", "rm", "--force", builder],
-            timeout=60,
-            check=False,
+        cleanup_commands = (
+            ([docker, "buildx", "rm", "--force", builder], 60),
+            ([docker, "rm", "--force", buildkit_container], 30),
+            ([docker, "volume", "rm", "--force", cache_volume], 30),
         )
-        _run(
-            [docker, "rm", "--force", buildkit_container],
-            timeout=30,
-            check=False,
-        )
-        _run(
-            [docker, "volume", "rm", "--force", cache_volume],
-            timeout=30,
-            check=False,
-        )
+        for command, timeout in cleanup_commands:
+            with contextlib.suppress(Exception):
+                _run(command, timeout=timeout, check=False)
         if not driver_was_present:
-            _run(
-                [docker, "image", "rm", "--force", _BUILDKIT_DRIVER_IMAGE],
-                timeout=60,
-                check=False,
-            )
+            with contextlib.suppress(Exception):
+                _run(
+                    [docker, "image", "rm", "--force", _BUILDKIT_DRIVER_IMAGE],
+                    timeout=60,
+                    check=False,
+                )
 
 
 def aider_pi_image() -> LatestPiImage:
@@ -479,6 +505,7 @@ def aider_pi_image() -> LatestPiImage:
         # sandbox limit of 256 makes the official test suite impossible.
         pids_limit=2048,
         answer_key_guard=True,
+        resource_scope="aider-polyglot",
     )
 
 
@@ -490,6 +517,7 @@ def git_surgery_pi_image() -> LatestPiImage:
         no_cache=False,
         transient=True,
         build_assets=Path(__file__).with_name("git_surgery"),
+        resource_scope="git-surgery",
     )
 
 
@@ -617,6 +645,7 @@ def patcheval_pi_image(
         build_files=((source_archive, "parent-source.tar"),),
         ephemeral_buildx=True,
         always_cleanup_image=True,
+        resource_scope="patcheval",
     )
 
 
@@ -695,6 +724,8 @@ class DockerTaskEnvironment:
                 f"BENCHKIT_UPSTREAM={_docker_upstream(self.client.host)}",
                 "--env",
                 f"BENCHKIT_MODEL={self.model}",
+                "--env",
+                f"BENCHKIT_UPSTREAM_TIMEOUT={self.client.timeout}",
             ]
             if self.client.api_key:
                 proxy_args.extend(
@@ -851,15 +882,14 @@ class DockerTaskEnvironment:
         _run([self.docker, "cp", f"{self.container_name}:{source}", str(destination)])
 
     def stop(self) -> None:
-        for name in (self.container_name, self.proxy_name):
-            _run(
-                [self.docker, "rm", "--force", name],
-                timeout=30,
-                check=False,
-            )
-        _run(
-            [self.docker, "network", "rm", self.network_name],
-            timeout=30,
-            check=False,
-        )
-        self._started = False
+        try:
+            commands = [
+                [self.docker, "rm", "--force", self.container_name],
+                [self.docker, "rm", "--force", self.proxy_name],
+                [self.docker, "network", "rm", self.network_name],
+            ]
+            for command in commands:
+                with contextlib.suppress(Exception):
+                    _run(command, timeout=30, check=False)
+        finally:
+            self._started = False

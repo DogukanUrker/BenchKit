@@ -720,6 +720,7 @@ def run(
 
     def on_interrupt(signum: int, frame: FrameType | None) -> None:
         if controls.stopped:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
             raise KeyboardInterrupt
         reporter.state.stopping = True
         controls.stop()

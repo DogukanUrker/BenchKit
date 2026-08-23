@@ -11,7 +11,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from benchkit._pi_proxy import _capture_scaffold, _models_payload, _upstream_target
+from benchkit._pi_proxy import (
+    _capture_scaffold,
+    _models_payload,
+    _upstream_target,
+    _upstream_timeout,
+)
 from benchkit.cli import _headless_jobs, _parse_args
 from benchkit.client import _openai_metrics
 from benchkit.engine import Engine, JobSpec, annotate_harness_effect
@@ -23,6 +28,7 @@ from benchkit.sandbox import (
     PI_VERSION,
     DockerTaskEnvironment,
     LatestPiImage,
+    SandboxError,
     _docker_upstream,
     cleanup_owned_resources,
 )
@@ -41,29 +47,45 @@ class LatestPiImageTests(unittest.TestCase):
     def test_prepare_pulls_and_bypasses_build_cache_once_per_run(self) -> None:
         image = LatestPiImage(docker="docker")
 
-        with patch("benchkit.sandbox._run") as run:
-            run.return_value = SimpleNamespace(stdout=f"{PI_VERSION}\n")
+        def docker_run(args, **_kwargs):
+            if args[1:3] == ["image", "inspect"]:
+                return SimpleNamespace(stdout="")
+            if args[1] == "run":
+                return SimpleNamespace(stdout=f"{PI_VERSION}\n")
+            return SimpleNamespace(stdout="")
+
+        with patch("benchkit.sandbox._run", side_effect=docker_run) as run:
             self.assertEqual(image.prepare(), PI_VERSION)
             self.assertEqual(image.prepare(), PI_VERSION)
+            image.cleanup()
 
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(commands[0][:2], ["docker", "version"])
-        build = commands[1]
-        self.assertEqual(build[:2], ["docker", "build"])
+        build = next(
+            command for command in commands if command[1:3] == ["buildx", "build"]
+        )
         self.assertIn("--pull", build)
         self.assertIn("--no-cache", build)
-        self.assertEqual(
-            commands[2],
+        self.assertIn("--load", build)
+        create = next(
+            command for command in commands if command[1:3] == ["buildx", "create"]
+        )
+        builder = create[create.index("--name") + 1]
+        self.assertIn(["docker", "buildx", "rm", "--force", builder], commands)
+        self.assertIn(
             [
                 "docker",
-                "run",
-                "--rm",
-                "benchkit-pi:latest",
-                "pi",
-                "--version",
+                "volume",
+                "rm",
+                "--force",
+                f"buildx_buildkit_{builder}0_state",
             ],
+            commands,
         )
-        self.assertEqual(len(commands), 3)
+        self.assertIn(
+            ["docker", "image", "rm", "--force", image.image],
+            commands,
+        )
 
     def test_cleanup_removes_the_transient_image(self) -> None:
         image = LatestPiImage(
@@ -79,6 +101,7 @@ class LatestPiImageTests(unittest.TestCase):
         run.assert_called_once_with(
             ["docker", "image", "rm", "--force", "benchkit-pi:latest"],
             timeout=60,
+            check=False,
         )
         self.assertFalse(image._ready)
         self.assertEqual(image.version, "")
@@ -117,6 +140,69 @@ class LatestPiImageTests(unittest.TestCase):
                 ["docker", "network", "rm", "network-one"],
             ],
         )
+
+    def test_private_builder_cleanup_continues_after_one_docker_error(self) -> None:
+        image = LatestPiImage(docker="docker")
+
+        def docker_run(args, **_kwargs):
+            if args[1:3] == ["image", "inspect"]:
+                return SimpleNamespace(stdout="")
+            if args[1:3] == ["buildx", "rm"]:
+                raise SandboxError("builder removal failed")
+            if args[1] == "run":
+                return SimpleNamespace(stdout=f"{PI_VERSION}\n")
+            return SimpleNamespace(stdout="")
+
+        with patch("benchkit.sandbox._run", side_effect=docker_run) as run:
+            self.assertEqual(image.prepare(), PI_VERSION)
+            image.cleanup()
+
+        commands = [call.args[0] for call in run.call_args_list]
+        create = next(
+            command for command in commands if command[1:3] == ["buildx", "create"]
+        )
+        builder = create[create.index("--name") + 1]
+        self.assertIn(
+            ["docker", "rm", "--force", f"buildx_buildkit_{builder}0"],
+            commands,
+        )
+        self.assertIn(
+            [
+                "docker",
+                "volume",
+                "rm",
+                "--force",
+                f"buildx_buildkit_{builder}0_state",
+            ],
+            commands,
+        )
+
+    def test_environment_stop_attempts_every_owned_resource(self) -> None:
+        environment = DockerTaskEnvironment(
+            SimpleNamespace(),
+            "model",
+            LatestPiImage(docker="docker", version="test"),
+            docker="docker",
+        )
+        environment._started = True
+        responses = [
+            SandboxError("agent removal failed"),
+            SimpleNamespace(stdout=""),
+            SimpleNamespace(stdout=""),
+        ]
+
+        with patch("benchkit.sandbox._run", side_effect=responses) as run:
+            environment.stop()
+
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [
+                ["docker", "rm", "--force", environment.container_name],
+                ["docker", "rm", "--force", environment.proxy_name],
+                ["docker", "network", "rm", environment.network_name],
+            ],
+        )
+        self.assertFalse(environment._started)
 
     def test_local_inference_host_is_rewritten_for_docker(self) -> None:
         self.assertEqual(
@@ -210,6 +296,7 @@ class LatestPiImageTests(unittest.TestCase):
             host="http://localhost:11434",
             api_key="real-secret",
             provider="openai",
+            timeout=60000.0,
             context_length=lambda _model: 32768,
         )
         image = LatestPiImage(docker="docker", version="test")
@@ -231,6 +318,7 @@ class LatestPiImageTests(unittest.TestCase):
             self.assertIn("benchkit.managed=true", command)
             self.assertIn(f"benchkit.owner={environment.owner_id}", command)
         self.assertIn("BENCHKIT_MODEL=selected/model", proxy)
+        self.assertIn("BENCHKIT_UPSTREAM_TIMEOUT=60000.0", proxy)
         self.assertIn("BENCHKIT_UPSTREAM_API_KEY=real-secret", proxy)
         self.assertNotIn("BENCHKIT_UPSTREAM_API_KEY=real-secret", agent)
         self.assertIn(environment.network_name, agent)
@@ -249,6 +337,21 @@ class LatestPiImageTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_proxy_uses_the_forwarded_inference_timeout(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"BENCHKIT_UPSTREAM_TIMEOUT": "60000"},
+            clear=False,
+        ):
+            self.assertEqual(_upstream_timeout(), 60000.0)
+
+        with patch.dict(
+            os.environ,
+            {"BENCHKIT_UPSTREAM_TIMEOUT": "invalid"},
+            clear=False,
+        ):
+            self.assertEqual(_upstream_timeout(), 600.0)
 
 
 class InferenceProxyTests(unittest.TestCase):
