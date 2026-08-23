@@ -361,6 +361,7 @@ class LatestPiImage:
                             self.image,
                             context,
                             self.resource_scope,
+                            no_cache=self.no_cache,
                         )
                     else:
                         command = [self.docker, "build", "--pull"]
@@ -460,6 +461,8 @@ def _build_with_ephemeral_buildx(
     image: str,
     context: Path,
     resource_scope: str,
+    *,
+    no_cache: bool = True,
 ) -> None:
     """Build without shared cache, then remove the private buildkit session."""
     if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", resource_scope):
@@ -496,22 +499,11 @@ def _build_with_ephemeral_buildx(
             ],
             timeout=60,
         )
-        _run(
-            [
-                docker,
-                "buildx",
-                "build",
-                "--builder",
-                builder,
-                "--pull",
-                "--no-cache",
-                "--load",
-                "--tag",
-                image,
-                str(context),
-            ],
-            timeout=1800,
-        )
+        build = [docker, "buildx", "build", "--builder", builder, "--pull"]
+        if no_cache:
+            build.append("--no-cache")
+        build.extend(["--load", "--tag", image, str(context)])
+        _run(build, timeout=1800)
     finally:
         cleanup_commands = (
             ([docker, "buildx", "rm", "--force", builder], 60),
@@ -627,7 +619,7 @@ def _patcheval_dockerfile(recipe: PatchEvalRuntimeRecipe) -> str:
         f"ENV {key}={json.dumps(value)}\n"
         for key, value in (item.split("=", 1) for item in recipe.environment)
     )
-    return f"""\\
+    return f"""\
 FROM node:24-bookworm-slim AS benchkit-node
 FROM {recipe.base_image}
 

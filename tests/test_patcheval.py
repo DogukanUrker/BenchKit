@@ -197,6 +197,35 @@ class PatchEvalTests(unittest.TestCase):
         )
         self.assertEqual(excluded, ["tests/test_agent.py", "tests/test_existing.py"])
 
+    def test_protected_tests_with_unusual_names_are_still_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            task = PatchEval(root).load_tasks()[0]
+            spec = task.metadata["spec"]
+            candidate = root / "candidate"
+            candidate.mkdir()
+            (candidate / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+            tests = candidate / "tests"
+            tests.mkdir()
+            # Git quotes non-ASCII paths unless the diff is read with -z, and a
+            # quoted path matches no glob and no pathspec, so it is neither
+            # excluded nor actually diffed.
+            (tests / "test_caf\u00e9.py").write_text(
+                "def test_agent(): pass  # AGENT_AUTHORED_MARKER\n", encoding="utf-8"
+            )
+
+            submission, changed, excluded = _trusted_patch(
+                spec, DownloadEnvironment(candidate)
+            )
+
+        self.assertIn("module.py", submission)
+        self.assertNotIn("AGENT_AUTHORED_MARKER", submission)
+        unusual = [path for path in excluded if path.startswith("tests/test_caf")]
+        self.assertEqual(len(unusual), 1)
+        self.assertNotIn('"', unusual[0])
+        self.assertTrue(all('"' not in path for path in changed))
+
     def test_standard_root_python_tests_are_always_excluded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

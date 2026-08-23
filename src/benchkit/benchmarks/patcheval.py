@@ -364,9 +364,18 @@ def _trusted_patch(
                 _remove_entry(child)
         _copy_candidate(candidate, worktree)
         _git(worktree, ["add", "--intent-to-add", "--", "."])
-        changed = _git(
-            worktree, ["diff", "--name-only", "--no-renames", "HEAD", "--"]
-        ).stdout.splitlines()
+        # -z keeps paths verbatim. Git otherwise quotes non-ASCII, quote,
+        # backslash, and control characters, and a quoted path matches neither
+        # its protected glob nor the pathspec of the second diff, so the
+        # agent's real edits are silently dropped from the submission.
+        changed = [
+            path
+            for path in _git(
+                worktree,
+                ["diff", "-z", "--name-only", "--no-renames", "HEAD", "--"],
+            ).stdout.split("\0")
+            if path
+        ]
         excluded = [
             path
             for path in changed
