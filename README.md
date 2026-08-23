@@ -110,6 +110,7 @@ uv run benchkit --help
 | RULER | `ruler` | 39 × 6 | Practical long-context retrieval from 4K to 128K |
 | RULER Full | `ruler-full` | 6,500 × 6 | Research-scale RULER (explicit opt-in) |
 | XSTest | `xstest` | 450 | Safe compliance and unsafe refusal with an offline checker |
+| MedFailBench | `medfailbench` | 30 | Offline heuristic screen for high-risk clinical responses; not clinical validation, certification, deployment evidence, or model ranking |
 | GPQA | `gpqa` | 198 | Graduate-level science questions |
 | MMLU-Pro | `mmlu-pro` | 12,032 | Reasoning across 14 knowledge categories |
 | MMLU | `mmlu` | 14,042 | Academic and professional knowledge |
