@@ -767,6 +767,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy
 WORKDIR /opt/project
 COPY parent-source.tar /tmp/patcheval-parent.tar
 RUN tar -xf /tmp/patcheval-parent.tar -C /opt/project \\
+    && find /opt/project -exec touch -t 198001010000 {{}} + \\
     && rm /tmp/patcheval-parent.tar
 {_docker_run_cached(recipe.sync_command, uv_cache_id)}{bootstrap}RUN rm -rf /opt/project \\
     && test -d /opt/venv \\
