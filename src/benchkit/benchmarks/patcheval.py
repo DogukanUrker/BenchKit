@@ -279,6 +279,7 @@ def _git(
     completed = subprocess.run(
         ["git", "-C", str(worktree), *args],
         text=True,
+        errors="replace",
         capture_output=True,
         env=environment,
         timeout=60,
