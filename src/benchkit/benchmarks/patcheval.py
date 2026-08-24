@@ -477,6 +477,20 @@ def _grade_once(
                 container,
                 ["tar", "-xf", "/tmp/source", "-C", "/workspace/repo"],
             )
+            _docker_exec(
+                docker,
+                container,
+                [
+                    "find",
+                    "/workspace/repo",
+                    "-exec",
+                    "touch",
+                    "-t",
+                    "198001010000",
+                    "{}",
+                    "+",
+                ],
+            )
             if patch:
                 _docker_exec(
                     docker,
