@@ -622,6 +622,18 @@ class PatchEval:
         environment.exec(
             ["tar", "-xf", "/tmp/patch-eval-source", "-C", environment.workdir]
         )
+        environment.exec(
+            [
+                "find",
+                environment.workdir,
+                "-exec",
+                "touch",
+                "-t",
+                "198001010000",
+                "{}",
+                "+",
+            ]
+        )
         environment.exec(["rm", "-rf", f"{environment.workdir}/.git"])
         if spec.setup_command:
             environment.exec(
