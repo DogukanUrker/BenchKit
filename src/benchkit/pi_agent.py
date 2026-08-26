@@ -165,6 +165,7 @@ class PiAgentRunner:
             [DockerTaskEnvironment, list[dict[str, Any]]], EvaluationResult
         ]
         | None = None,
+        repair_prompt_builder: Callable[[str, int, int], str] | None = None,
     ) -> dict:
         self.prepare()
         started = time.perf_counter()
@@ -426,11 +427,8 @@ class PiAgentRunner:
                     if attempt >= repair_attempts:
                         break
                     feedback_sent.append(evaluation.feedback)
-                    message = repair_message(
-                        evaluation.feedback,
-                        attempt + 1,
-                        repair_attempts,
-                    )
+                    builder = repair_prompt_builder or repair_message
+                    message = builder(evaluation.feedback, attempt + 1, repair_attempts)
                 scaffold_value = environment.pi_scaffold()
                 scaffold = (
                     dict(scaffold_value) if isinstance(scaffold_value, dict) else {}

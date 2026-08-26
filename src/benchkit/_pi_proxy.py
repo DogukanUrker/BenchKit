@@ -101,6 +101,13 @@ def _models_payload() -> bytes:
     ).encode()
 
 
+def _upstream_timeout() -> float:
+    try:
+        return max(0.1, float(os.environ.get("BENCHKIT_UPSTREAM_TIMEOUT", "600")))
+    except ValueError:
+        return 600.0
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     """Stream a deliberately tiny subset of an OpenAI-compatible API."""
 
@@ -151,7 +158,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if scheme == "https"
             else http.client.HTTPConnection
         )
-        connection = connection_type(host, port, timeout=600)
+        connection = connection_type(host, port, timeout=_upstream_timeout())
         headers = {
             key: value
             for key, value in self.headers.items()

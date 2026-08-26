@@ -33,6 +33,7 @@ from benchkit.looping import LoopAnalyzer
 from benchkit.metrics import throughput_metrics
 from benchkit.perturbations import annotate_robustness, perturb_task
 from benchkit.pi_agent import PiAgentRunner
+from benchkit.sandbox import cleanup_run_resources
 
 MAX_REPAIR_ATTEMPTS = 10
 
@@ -834,7 +835,18 @@ class Engine:
             with self._emit_lock:
                 self.sink(event)
 
-    def _pi(self, bench: object | None = None) -> PiAgentRunner:
+    def _pi(
+        self, bench: object | None = None, task: Task | None = None
+    ) -> PiAgentRunner:
+        task_image_factory = getattr(bench, "pi_image_for_task", None)
+        if callable(task_image_factory) and task is not None:
+            image = task_image_factory(task)
+            key = f"{getattr(bench, 'name', type(bench).__name__)}:{image.image}"
+            if key not in self._workspace_pi_runners:
+                self._workspace_pi_runners[key] = PiAgentRunner(
+                    self.client, image=image
+                )
+            return self._workspace_pi_runners[key]
         image_factory = getattr(bench, "pi_image", None)
         if callable(image_factory):
             key = str(getattr(bench, "name", type(bench).__name__))
@@ -881,12 +893,19 @@ class Engine:
                     results.append(result)
                 self._maybe_unload(index, job)
         finally:
+            used_pi = self._pi_runner is not None or bool(self._workspace_pi_runners)
             if self._pi_runner is not None:
                 with contextlib.suppress(Exception):
                     self._pi_runner.cleanup()
             for runner in self._workspace_pi_runners.values():
                 with contextlib.suppress(Exception):
                     runner.cleanup()
+            if used_pi:
+                # Removes the run's shared builder, its build cache, and any
+                # image, container, network, or volume still carrying the run
+                # label. Scoped by label, never a global prune.
+                with contextlib.suppress(Exception):
+                    cleanup_run_resources()
 
         annotate_robustness(results)
         annotate_harness_effect(results)
@@ -979,10 +998,11 @@ class Engine:
                     task_id=first.id,
                     entry_point=str(first.metadata.get("entry_point", "")),
                     phase="generating",
-                    activity="preparing latest Pi sandbox image",
+                    activity="preparing pinned Pi sandbox image",
                 )
             )
-            self._pi(bench).prepare()
+            for task in tasks:
+                self._pi(bench, task).prepare()
 
         if not tasks:
             return None, False
@@ -1702,10 +1722,11 @@ class Engine:
 
         request_started = time.perf_counter()
         try:
-            generator = self._pi(bench) if job.harness == "pi" else self.client
+            generator = self._pi(bench, task) if job.harness == "pi" else self.client
             workspace = bool(getattr(bench, "workspace_task", False))
             workspace_setup = None
             workspace_verifier = None
+            repair_prompt_builder = None
             if workspace:
 
                 def workspace_setup(environment):
@@ -1713,6 +1734,10 @@ class Engine:
 
                 def workspace_verifier(environment, tool_trace):
                     return bench.verify_workspace(task, environment, tool_trace)
+
+                candidate_builder = getattr(bench, "build_repair_prompt", None)
+                if callable(candidate_builder):
+                    repair_prompt_builder = candidate_builder
 
             if job.repair_attempts:
 
@@ -1729,6 +1754,7 @@ class Engine:
                         repair_attempts=job.repair_attempts,
                         workspace_setup=workspace_setup,
                         workspace_verifier=workspace_verifier,
+                        repair_prompt_builder=repair_prompt_builder,
                     )
                 else:
                     gen = self._generate_direct_with_repairs(
