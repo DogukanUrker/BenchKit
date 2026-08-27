@@ -182,3 +182,10 @@ cython_debug/
 *.lock
 /results
 .DS_Store
+
+# local run map tool. it reads results/ and writes bench-map.html,
+# bench-map.csv and bench-map-runs.csv there, which /results already ignores.
+/tools/bench_map.py
+
+# personal scratch notes
+*.local.md
