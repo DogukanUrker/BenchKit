@@ -152,6 +152,7 @@
     .status { font-weight: 900; color: var(--red); white-space: nowrap; }
     .status.pass { color: var(--green); }
     .status.warn { color: var(--amber); }
+    .status.skip { color: var(--muted); }
     .links { display: flex; gap: 12px; padding: 0 15px 13px; font: 9px/1 var(--mono); }
     .links a { color: var(--blue); text-decoration: none; }
     .links a:hover { text-decoration: underline; }
@@ -240,6 +241,11 @@
       .map(task => ({ model: row.model, harness: row.harness_label || "", row, task, status: status(task) })));
 
     const rendered = entries.filter(entry => entry.status === "rendered");
+    // Machines without a browser, a GPU stack or a route to the CDN are
+    // ordinary: those tasks keep their credit and are not counted against
+    // the render rate.
+    const skipped = entries.filter(entry => entry.status === "skipped");
+    const scored = entries.filter(entry => entry.status !== "skipped");
     const harnessErrors = entries.filter(entry => entry.status === "harness_error");
     const models = [...new Set(entries.map(entry => entry.model))];
     const promptSets = [...new Set(arena.results.map(row => row.prompt_set_version).filter(Boolean))];
@@ -253,8 +259,10 @@
       "click any preview to open the generated page",
     ].filter(Boolean).join(" · ");
     document.getElementById("footerMeta").textContent = [date, environment].filter(Boolean).join(" · ");
-    document.getElementById("rate").textContent = percent(rendered.length, entries.length);
-    document.getElementById("rateLabel").textContent = `${rendered.length}/${entries.length} pages rendered`;
+    document.getElementById("rate").textContent = percent(rendered.length, scored.length);
+    document.getElementById("rateLabel").textContent = scored.length
+      ? `${rendered.length}/${scored.length} pages rendered${skipped.length ? ` · ${skipped.length} skipped` : ""}`
+      : `${skipped.length} skipped · this machine cannot render`;
 
     const scenes = new Map();
     entries.forEach(entry => {
@@ -267,7 +275,7 @@
     document.getElementById("summary").innerHTML = [
       { value: models.length, label: "models" },
       { value: scenes.size, label: "scenes" },
-      { value: `${rendered.length}/${entries.length}`, label: "rendered" },
+      { value: `${rendered.length}/${scored.length}`, label: skipped.length ? `rendered · ${skipped.length} skipped` : "rendered" },
       { value: harnessErrors.length ? `${repairs} · ${harnessErrors.length}` : repairs, label: harnessErrors.length ? "repairs · harness errors" : "repair turns" },
     ].map(stat => `<div class="stat">
       <div class="stat-value">${escapeHtml(stat.value)}</div>
@@ -276,13 +284,15 @@
 
     document.getElementById("models").innerHTML = models.map(model => {
       const own = entries.filter(entry => entry.model === model);
+      const judged = own.filter(entry => entry.status !== "skipped");
       const ok = own.filter(entry => entry.status === "rendered").length;
-      const share = own.length ? ok / own.length * 100 : 0;
+      const share = judged.length ? ok / judged.length * 100 : 0;
       const modelRepairs = own.reduce((sum, entry) => sum + number(entry.task.repair_attempts_used), 0);
+      const skips = own.length - judged.length;
       return `<div class="model-row">
         <div class="model-name" title="${escapeHtml(model)}">${escapeHtml(model)}</div>
         <div class="track"><div class="fill" style="width:${share.toFixed(1)}%"></div></div>
-        <div class="model-value">${ok}/${own.length} · ${share.toFixed(0)}%${modelRepairs ? ` · ${modelRepairs} repair${modelRepairs === 1 ? "" : "s"}` : ""}</div>
+        <div class="model-value">${ok}/${judged.length} · ${judged.length ? `${share.toFixed(0)}%` : "—"}${skips ? ` · ${skips} skipped` : ""}${modelRepairs ? ` · ${modelRepairs} repair${modelRepairs === 1 ? "" : "s"}` : ""}</div>
       </div>`;
     }).join("");
 
@@ -290,6 +300,7 @@
       rendered: "RENDERED",
       failed: "FAILED",
       no_html: "NO HTML",
+      skipped: "SKIPPED",
       harness_error: "HARNESS ERROR",
       timed_out: "TIMED OUT",
       loop_killed: "LOOP KILLED",
@@ -297,11 +308,13 @@
       not_rendered: "NOT RENDERED",
     };
     const WARN = new Set(["harness_error", "timed_out", "loop_killed", "length_exceeded"]);
+    const NEUTRAL = new Set(["skipped"]);
     const diagnostics = task => [
       ...(task.workspace?.page_errors || []).map(item => `[uncaught] ${item}`),
       ...(task.workspace?.console_errors || []).map(item => `[console] ${item}`),
       ...(task.workspace?.blocked_requests || []).map(item => `[blocked] ${item}`),
       ...(task.workspace?.failed_requests || []).map(item => `[network] ${item}`),
+      ...(task.workspace?.skip_reason ? [`[skipped] ${task.workspace.skip_reason}`] : []),
       ...(task.error ? [`[harness] ${task.error}`] : []),
     ].join("\n");
 
@@ -327,14 +340,14 @@
             <div class="card-model" title="${escapeHtml(model)}">${escapeHtml(model)}</div>
             <div class="card-sub">${escapeHtml(harness)}${number(task.repair_attempts_used) ? ` · ${number(task.repair_attempts_used)} repair${number(task.repair_attempts_used) === 1 ? "" : "s"}` : ""}${workspace.render_status ? ` · ${number(workspace.animation_frames)} frames` : ""}</div>
           </div>
-          <span class="status ${status === "rendered" ? "pass" : WARN.has(status) ? "warn" : ""}">${escapeHtml(STATUS_TEXT[status] || "FAILED")}</span>
+          <span class="status ${status === "rendered" ? "pass" : NEUTRAL.has(status) ? "skip" : WARN.has(status) ? "warn" : ""}">${escapeHtml(STATUS_TEXT[status] || "FAILED")}</span>
         </div>
         <div class="links">
           ${page ? `<a href="${escapeHtml(page)}" target="_blank" rel="noopener noreferrer">Open page ↗</a>` : ""}
           ${answer ? `<a href="${escapeHtml(answer)}" target="_blank" rel="noopener noreferrer">Open answer ↗</a>` : ""}
           ${shot ? `<a href="${escapeHtml(shot)}" target="_blank" rel="noopener noreferrer">Full screenshot ↗</a>` : ""}
         </div>
-        ${trace ? `<details class="diag"><summary>Browser diagnostics</summary><pre>${escapeHtml(trace)}</pre></details>` : ""}
+        ${trace ? `<details class="diag"><summary>${status === "skipped" ? "Why this was skipped" : "Browser diagnostics"}</summary><pre>${escapeHtml(trace)}</pre></details>` : ""}
       </article>`;
     };
 

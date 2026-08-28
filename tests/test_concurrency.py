@@ -443,7 +443,7 @@ class ConcurrentEngineTests(unittest.TestCase):
         with patch.object(
             engine,
             "_verify_response",
-            return_value=Mock(score=1.0, passed=True, error=""),
+            return_value=Mock(score=1.0, passed=True, error="", details={}),
         ):
             result = engine.run()[0]
 
@@ -465,7 +465,7 @@ class ConcurrentEngineTests(unittest.TestCase):
         with patch.object(
             engine,
             "_verify_response",
-            return_value=Mock(score=1.0, passed=True, error=""),
+            return_value=Mock(score=1.0, passed=True, error="", details={}),
         ):
             result = engine.run()[0]
 
@@ -486,7 +486,7 @@ class ConcurrentEngineTests(unittest.TestCase):
         with patch.object(
             engine,
             "_verify_response",
-            return_value=Mock(score=1.0, passed=True, error=""),
+            return_value=Mock(score=1.0, passed=True, error="", details={}),
         ):
             result = engine.run()[0]
 

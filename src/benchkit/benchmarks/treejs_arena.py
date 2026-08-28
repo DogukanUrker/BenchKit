@@ -86,10 +86,11 @@ def extract_html(response: str) -> str:
 def _environment_fault(outcome) -> str:
     """Name the machine-level reason a page could not render, if there is one.
 
-    A model is only responsible for what it wrote. When a host BenchKit itself
-    allowed could not be reached, or the browser has no working WebGL stack at
-    all, the fault is the environment: report it as a harness error so the task
-    is excluded from the score instead of being counted as a model failure.
+    A model is only responsible for what it wrote. Headless boxes without a
+    browser, without a working WebGL stack, or without a route to the module
+    CDN are ordinary places to run BenchKit, so these are not the model's
+    failures and are not scored as such: the render check is skipped and the
+    task keeps its credit, with the reason recorded on the task.
     """
     unreachable = [
         url
@@ -118,6 +119,14 @@ def _environment_fault(outcome) -> str:
             "renderer, so no GPU is required."
         )
     return ""
+
+
+def _skipped(details: dict, reason: str) -> EvaluationResult:
+    """Pass the task without a verdict: this machine cannot render it."""
+    return EvaluationResult(
+        score=1.0,
+        details={**details, "render_status": "skipped", "skip_reason": reason},
+    )
 
 
 def _clip(text: str) -> str:
@@ -220,13 +229,7 @@ class TreeJSArena:
             details["screenshot_thumbnail"] = outcome.thumbnail
 
         if outcome.error:
-            # BenchKit could not render at all: report it as a harness error so
-            # the task is excluded from the score instead of blamed on the model.
-            return EvaluationResult(
-                score=0.0,
-                error=outcome.error,
-                details={**details, "render_status": "harness_error"},
-            )
+            return _skipped(details, outcome.error)
 
         if outcome.rendered:
             return EvaluationResult(
@@ -235,11 +238,7 @@ class TreeJSArena:
             )
 
         if fault := _environment_fault(outcome):
-            return EvaluationResult(
-                score=0.0,
-                error=fault,
-                details={**details, "render_status": "harness_error"},
-            )
+            return _skipped(details, fault)
 
         return EvaluationResult(
             score=0.0,

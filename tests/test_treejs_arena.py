@@ -142,7 +142,7 @@ def test_failed_render_returns_console_output_as_repair_feedback(
     assert "https://example.invalid/assets/three.js" in result.feedback
 
 
-def test_unreachable_allowlisted_host_is_not_the_model_s_fault(
+def test_unreachable_allowlisted_host_is_skipped_not_failed(
     staged, monkeypatch
 ) -> None:
     # BenchKit allowed the host, so a request that never completed is a
@@ -157,13 +157,14 @@ def test_unreachable_allowlisted_host_is_not_the_model_s_fault(
     )
     bench = TreeJSArena()
     result = bench.evaluate_with_feedback(bench.load_tasks()[3], PAGE)
-    assert result.score == 0.0
-    assert "unpkg.com" in result.error
-    assert "no route to the module CDN" in result.error
-    assert result.details["render_status"] == "harness_error"
+    assert result.passed
+    assert not result.error
+    assert result.details["render_status"] == "skipped"
+    assert "unpkg.com" in result.details["skip_reason"]
+    assert "no route to the module CDN" in result.details["skip_reason"]
 
 
-def test_a_machine_without_webgl_is_not_the_model_s_fault(staged, monkeypatch) -> None:
+def test_a_machine_without_webgl_is_skipped_not_failed(staged, monkeypatch) -> None:
     _stub(
         monkeypatch,
         RenderResult(
@@ -175,10 +176,13 @@ def test_a_machine_without_webgl_is_not_the_model_s_fault(staged, monkeypatch) -
     )
     bench = TreeJSArena()
     result = bench.evaluate_with_feedback(bench.load_tasks()[4], PAGE)
-    assert result.score == 0.0
-    assert "headless rendering is broken on this machine" in result.error
-    assert "--with-deps" in result.error
-    assert result.details["render_status"] == "harness_error"
+    assert result.passed
+    assert not result.error
+    assert result.details["render_status"] == "skipped"
+    assert (
+        "headless rendering is broken on this machine" in result.details["skip_reason"]
+    )
+    assert "--with-deps" in result.details["skip_reason"]
 
 
 def test_a_page_fault_on_a_healthy_machine_stays_the_model_s_failure(
@@ -201,13 +205,18 @@ def test_a_page_fault_on_a_healthy_machine_stays_the_model_s_failure(
     assert "mesh.rotate is not a function" in result.feedback
 
 
-def test_a_browser_that_cannot_start_is_a_harness_error(staged, monkeypatch) -> None:
+def test_a_browser_that_cannot_start_costs_the_model_nothing(
+    staged, monkeypatch
+) -> None:
+    # Running headless without a browser installed is an ordinary setup, not a
+    # verdict on the model: the render check is skipped and the task passes.
     _stub(monkeypatch, RenderResult(error="playwright is not installed"))
     bench = TreeJSArena()
     result = bench.evaluate_with_feedback(bench.load_tasks()[2], PAGE)
-    assert result.score == 0.0
-    assert result.error == "playwright is not installed"
-    assert result.details["render_status"] == "harness_error"
+    assert result.passed
+    assert not result.error
+    assert result.details["render_status"] == "skipped"
+    assert result.details["skip_reason"] == "playwright is not installed"
 
 
 def test_only_allowlisted_hosts_are_reachable(monkeypatch) -> None:

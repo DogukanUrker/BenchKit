@@ -131,17 +131,6 @@ uv sync --extra browser
 uv run playwright install chromium
 ```
 
-Those runs also write `arena.html` next to the usual report: pass rate, per-model
-render rates, and big previews that open each generated page in a new tab.
-
-On a headless server, check the two things the suite depends on - a browser that
-can produce a WebGL canvas, and a route to the module CDN the generated pages
-import from - before blaming the model:
-
-```bash
-uv run benchkit render-check
-```
-
 The CLI registry is the canonical source for current counts, descriptions,
 and supported perturbations:
 

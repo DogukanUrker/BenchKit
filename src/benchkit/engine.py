@@ -1998,6 +1998,10 @@ class Engine:
                 evaluation = self._verify_response(bench, task, gen["response"])
                 evaluation_score = evaluation.score
                 ok = evaluation.passed
+                # Verifiers that record artifacts (rendered pages, screenshots,
+                # workspace state) return them here; the repair path carries
+                # them on the generation instead.
+                evaluation_details = dict(evaluation.details)
                 if evaluation.error and not error:
                     error = evaluation.error
                     errors += 1
