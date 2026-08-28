@@ -314,6 +314,14 @@
     .code { min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--raise); overflow: hidden; }
     .code-label { padding: 8px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font: 8px/1 var(--mono); text-transform: uppercase; }
     pre { max-height: 300px; margin: 0; padding: 11px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 9px/1.55 var(--mono); }
+    .arena-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+    .arena-card { margin: 0; border: 1px solid var(--line); border-radius: 9px; background: var(--raise); overflow: hidden; }
+    .shot { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: #000; border: 0; }
+    .shot-missing { display: grid; place-items: center; color: var(--muted); font: 8px/1 var(--mono); text-transform: uppercase; }
+    .arena-caption { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 10px; border-top: 1px solid var(--line); font: 8px/1.4 var(--mono); }
+    .arena-model { overflow-wrap: anywhere; }
+    .task-shot { grid-column: 1 / -1; }
+    .task-shot .shot { aspect-ratio: 16 / 10; }
     footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 70px; padding-top: 24px; border-top: 1px solid var(--line); color: var(--muted); font: 8px/1.4 var(--mono); }
 
     @media (max-width: 720px) {
@@ -371,6 +379,11 @@
       </div>
     </section>
 
+    <section class="section" id="arenaSection" hidden>
+      <div class="section-head"><h2>Arena screenshots</h2><p class="section-note" id="arenaNote"></p></div>
+      <div class="charts" id="arena"></div>
+    </section>
+
     <section class="section">
       <div class="section-head"><h2>Task details</h2></div>
       <div class="details" id="details"></div>
@@ -405,6 +418,13 @@
     const robustnessRows = rows.filter(row => row.perturbation && row.paired_total);
     const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
     const number = value => Number(value) || 0;
+    const renderShot = task => task.workspace?.screenshot_data_uri || task.workspace?.screenshot || "";
+    const renderDiagnostics = task => [
+      ...(task.workspace?.page_errors || []).map(item => `[uncaught] ${item}`),
+      ...(task.workspace?.console_errors || []).map(item => `[console] ${item}`),
+      ...(task.workspace?.blocked_requests || []).map(item => `[blocked] ${item}`),
+      ...(task.workspace?.failed_requests || []).map(item => `[network] ${item}`),
+    ].join("\n");
     const benchmarkLabel = row => row.benchmark_label || row.benchmark;
     const robustnessMeta = row => row.perturbation
       ? ` · ${number(row.score_delta_pp) >= 0 ? "+" : ""}${number(row.score_delta_pp).toFixed(1)}pp · ${number(row.regressions)}/${number(row.paired_total)} regressions`
@@ -717,6 +737,39 @@
       </table></div>
     </article>`;
 
+    const arenaRows = rows.filter(row => (row.tasks || []).some(task => task.workspace?.render_status));
+    if (arenaRows.length) {
+      const scenes = new Map();
+      arenaRows.forEach(row => (row.tasks || []).forEach(task => {
+        if (!task.workspace?.render_status) return;
+        if (!scenes.has(task.task_id)) scenes.set(task.task_id, { id: task.task_id, scene: task.workspace.scene || "", entries: [] });
+        scenes.get(task.task_id).entries.push({ row, task });
+      }));
+      const arenaTasks = arenaRows.flatMap(row => (row.tasks || []).filter(task => task.workspace?.render_status));
+      const renderedTasks = arenaTasks.filter(task => task.workspace.render_status === "rendered");
+      const promptSet = [...new Set(arenaRows.map(row => row.prompt_set_version).filter(Boolean))].join(", ");
+      document.getElementById("arenaNote").textContent = [
+        `${renderedTasks.length}/${arenaTasks.length} pages rendered`,
+        promptSet ? `prompt set ${promptSet}` : "",
+        "scored on render only — compare the images by eye",
+      ].filter(Boolean).join(" · ");
+      document.getElementById("arena").innerHTML = [...scenes.values()].map(scene => `<article class="chart-shell">
+        <div class="chart-header"><h3 class="chart-title">${escapeHtml(scene.id)}</h3><span class="chart-subtitle">· ${escapeHtml(scene.scene)}</span></div>
+        <div class="arena-grid">${scene.entries.map(({ row, task }) => {
+          const source = renderShot(task);
+          const status = task.workspace.render_status;
+          return `<figure class="arena-card">
+            ${source ? `<img class="shot" loading="lazy" src="${escapeHtml(source)}" alt="${escapeHtml(`${row.model} · ${scene.id}`)}">` : `<div class="shot shot-missing">no screenshot</div>`}
+            <figcaption class="arena-caption">
+              <span class="arena-model" title="${escapeHtml(row.model)}">${escapeHtml(row.model)}${number(task.repair_attempts_used) ? ` · ${number(task.repair_attempts_used)} repair${number(task.repair_attempts_used) === 1 ? "" : "s"}` : ""}</span>
+              <span class="status ${status === "rendered" ? "pass" : status === "harness_error" ? "partial" : ""}">${escapeHtml(status === "rendered" ? "RENDERED" : status === "harness_error" ? "HARNESS ERROR" : status === "no_html" ? "NO HTML" : "FAILED")}</span>
+            </figcaption>
+          </figure>`;
+        }).join("")}</div>
+      </article>`).join("");
+      document.getElementById("arenaSection").hidden = false;
+    }
+
     document.getElementById("details").innerHTML = rows
       .sort((a, b) => number(b.score) - number(a.score))
       .map(row => `<details>
@@ -731,6 +784,7 @@
             ${(task.workspace?.checkpoints || []).length ? `<div class="code"><div class="code-label">Checkpoints · ${number(task.workspace.positive_points)}/${number(task.workspace.max_points)} positive · −${number(task.workspace.penalty_points)} penalty</div><pre>${escapeHtml(task.workspace.checkpoints.map(checkpoint => `${checkpoint.awarded >= 0 ? "+" : ""}${number(checkpoint.awarded)} / ${checkpoint.weight >= 0 ? "+" : ""}${number(checkpoint.weight)}  ${checkpoint.id}\n${checkpoint.evidence || ""}`).join("\n\n"))}</pre></div>` : ""}
             ${task.workspace?.test_output ? `<div class="code"><div class="code-label">Workspace verifier · exit ${number(task.workspace.test_exit_code)} · ${escapeHtml((task.workspace.test_command || []).join(" "))}</div><pre>${escapeHtml(task.workspace.test_output)}</pre></div>` : ""}
             ${task.workspace?.patch ? `<div class="code"><div class="code-label">Workspace patch${task.workspace.patch_truncated ? " · truncated" : ""}</div><pre>${escapeHtml(task.workspace.patch)}</pre></div>` : ""}
+            ${task.workspace?.render_status ? `<div class="code task-shot"><div class="code-label">Headless render · ${escapeHtml(task.workspace.render_status)} · ${number(task.workspace.animation_frames)} frames · ${number(task.repair_attempts_used)} repair(s)${task.workspace.screenshot ? ` · ${escapeHtml(task.workspace.screenshot)}` : ""}</div>${renderShot(task) ? `<img class="shot" loading="lazy" src="${escapeHtml(renderShot(task))}" alt="${escapeHtml(task.task_id)}">` : ""}${renderDiagnostics(task) ? `<pre>${escapeHtml(renderDiagnostics(task))}</pre>` : ""}</div>` : ""}
             ${task.perturbation ? `<div class="code"><div class="code-label">Choice order · seed ${number(task.perturbation.seed)}</div><pre>${escapeHtml(task.perturbation.choice_order.join(", "))}\nanswer ${escapeHtml(task.perturbation.original_answer)} → ${escapeHtml(task.perturbation.perturbed_answer)}</pre></div>` : ""}
             ${(task.attempts || []).length ? `<div class="code thinking-code"><div class="code-label">Verifier-feedback attempts</div><pre>${escapeHtml(task.attempts.map(attempt => `Attempt ${number(attempt.attempt)} · ${attempt.passed ? "pass" : "fail"} · ${number(attempt.score).toFixed(1)}%${attempt.feedback ? `\nfeedback: ${attempt.feedback}` : ""}\n\n${attempt.response || ""}`).join("\n\n────────────────────────────────\n\n"))}</pre></div>` : ""}
             ${(task.tool_trace || []).length ? `<div class="code thinking-code"><div class="code-label">Pi native tool trace</div><pre>${escapeHtml(task.tool_trace.map(call => `${call.name || "tool"} · attempt ${number(call.attempt || 1)} · ${call.is_error ? "error" : "ok"} · ${number(call.duration_s).toFixed(3)}s\n${JSON.stringify(call.arguments || {}, null, 2)}${call.output ? `\noutput${call.output_truncated ? " (last 8,000 chars)" : ""}:\n${call.output}` : ""}`).join("\n\n"))}</pre></div>` : ""}

@@ -1,13 +1,22 @@
 """Save benchmark results to disk."""
 
+import base64
+import copy
 import csv
 import json
+import mimetypes
 import os
 from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 
+from benchkit import artifacts
 from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
+
+# Screenshots are inlined into the standalone HTML report so it can be shared
+# on its own. The cap keeps a large arena run from producing an unopenable file;
+# past it the report falls back to the copies saved next to it on disk.
+MAX_EMBEDDED_ASSET_BYTES = 24 * 1024 * 1024
 
 
 def _fmt_time(s: float) -> str:
@@ -27,14 +36,46 @@ def _safe_json(data: object) -> str:
     )
 
 
+def _embed_assets(results: list[dict], assets_root: Path) -> list[dict]:
+    """Inline collected screenshots so the HTML report stands on its own."""
+    embedded = copy.deepcopy(results)
+    budget = MAX_EMBEDDED_ASSET_BYTES
+    for result in embedded:
+        for task in result.get("tasks") or []:
+            workspace = task.get("workspace")
+            if not isinstance(workspace, dict):
+                continue
+            relative = workspace.get("screenshot_thumbnail") or workspace.get(
+                "screenshot"
+            )
+            if not isinstance(relative, str) or not relative:
+                continue
+            path = assets_root / relative
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue
+            if len(data) > budget:
+                continue
+            budget -= len(data)
+            media = mimetypes.guess_type(path.name)[0] or "image/png"
+            workspace["screenshot_data_uri"] = (
+                f"data:{media};base64,{base64.b64encode(data).decode('ascii')}"
+            )
+    return embedded
+
+
 def render_html(
     results: list[dict],
     generated_at: str,
     provider: str = "",
     host: str = "",
     hardware: str = "",
+    assets_root: Path | None = None,
 ) -> str:
     """Render the packaged HTML template with embedded report data."""
+    if assets_root is not None:
+        results = _embed_assets(results, assets_root)
     payload = _safe_json(
         {
             "generated_at": generated_at,
@@ -62,6 +103,10 @@ def save(
     hardware = (
         hardware if hardware is not None else os.environ.get("BENCHKIT_HARDWARE", "")
     )
+
+    # Screenshots and generated pages staged during the run move in here first,
+    # so every path written below is relative to the report directory.
+    artifacts.collect(out, results)
 
     # Full JSON (includes per-task details)
     with open(out / "results.json", "w") as f:
@@ -431,6 +476,40 @@ def save(
                             + str(workspace["patch"]).rstrip()
                             + "\n~~~\n\n"
                         )
+                    if workspace.get("render_status"):
+                        f.write(
+                            f"**Render:** {workspace['render_status']} · "
+                            f"{len(workspace.get('console_errors') or [])} console "
+                            f"error(s) · {len(workspace.get('page_errors') or [])} "
+                            "uncaught · "
+                            f"{workspace.get('animation_frames', 0)} frame(s)\n\n"
+                        )
+                        if shot := workspace.get("screenshot"):
+                            f.write(
+                                f"![{task.get('task_id', 'screenshot')}]({shot})\n\n"
+                            )
+                        if page := workspace.get("page_html"):
+                            f.write(f"Generated page: [{page}]({page})\n\n")
+                        diagnostics = [
+                            *(
+                                f"[uncaught] {item}"
+                                for item in workspace.get("page_errors") or []
+                            ),
+                            *(
+                                f"[console] {item}"
+                                for item in workspace.get("console_errors") or []
+                            ),
+                            *(
+                                f"[blocked] {item}"
+                                for item in workspace.get("blocked_requests") or []
+                            ),
+                        ]
+                        if diagnostics:
+                            f.write(
+                                "~~~text\n"
+                                + "\n".join(map(str, diagnostics))
+                                + "\n~~~\n\n"
+                            )
                 if attempts := task.get("attempts"):
                     f.write("**Verifier-feedback attempts:**\n\n")
                     for attempt in attempts:
@@ -489,6 +568,7 @@ def save(
                 f.write("---\n\n")
 
     with open(out / "results.html", "w") as f:
-        f.write(render_html(results, ts, provider, host, hardware))
+        f.write(render_html(results, ts, provider, host, hardware, assets_root=out))
 
+    artifacts.cleanup()
     return out

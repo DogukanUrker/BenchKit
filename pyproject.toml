@@ -13,6 +13,11 @@ dependencies = [
     "textual>=8.2.8",
 ]
 
+[project.optional-dependencies]
+# treejs-arena renders generated pages in headless Chromium. Install with
+# `uv sync --extra browser`, then `uv run playwright install chromium`.
+browser = ["playwright>=1.49"]
+
 [project.scripts]
 benchkit = "benchkit.cli:main"
 
