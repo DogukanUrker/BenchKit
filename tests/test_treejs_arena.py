@@ -203,7 +203,51 @@ def test_report_collects_screenshots_and_embeds_them(staged) -> None:
     assert (out / workspace["screenshot"]).is_file()
     assert (out / workspace["page_html"]).read_text() == PAGE
 
-    html = (out / "results.html").read_text()
-    assert "data:image/jpeg;base64," in html
-    assert "Arena screenshots" in html
     assert (out / "results.md").read_text().count("**Render:** rendered") == 1
+
+    # The gallery is built from its own payload and links to the collected
+    # files, so a preview opens the model's page instead of a picture of it.
+    gallery = (out / "arena.html").read_text()
+    payload = json.loads(
+        gallery.split('id="arenaData" type="application/json">')[1].split("</script>")[
+            0
+        ]
+    )
+    workspace = payload["results"][0]["tasks"][0]["workspace"]
+    assert workspace["page_html"] == "pages/demo-8b__TreeJSArena-0.html"
+    assert workspace["screenshot"] == "screenshots/demo-8b__TreeJSArena-0.png"
+    assert workspace["scene"] == "A black hole"
+    assert 'target="_blank" rel="noopener noreferrer"' in gallery
+
+
+def test_no_gallery_without_rendered_tasks(staged) -> None:
+    out = save(
+        [
+            {
+                "model": "demo:8b",
+                "benchmark": "gsm8k",
+                "benchmark_label": "gsm8k",
+                "score": 0.0,
+                "passed": 0,
+                "total": 1,
+                "failures": 1,
+                "loop_kills": 0,
+                "timeouts": 0,
+                "length_exceeded": 0,
+                "harness_errors": 0,
+                "concurrency": 1,
+                "avg_response_time": 1.0,
+                "total_time": 1.0,
+                "tasks": [
+                    {
+                        "task_id": "GSM8K/0",
+                        "passed": False,
+                        "score": 0.0,
+                        "prompt": "q",
+                        "response": "a",
+                    }
+                ],
+            }
+        ]
+    )
+    assert not (out / "arena.html").exists()

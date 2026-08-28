@@ -131,6 +131,9 @@ uv sync --extra browser
 uv run playwright install chromium
 ```
 
+Those runs also write `arena.html` next to the usual report: pass rate, per-model
+render rates, and big previews that open each generated page in a new tab.
+
 The CLI registry is the canonical source for current counts, descriptions,
 and supported perturbations:
 

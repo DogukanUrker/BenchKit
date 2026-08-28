@@ -104,7 +104,13 @@ tables in the README.
 - Screenshots and generated pages are staged under `results/.artifacts/` during
   the run and collected into `screenshots/` and `pages/` inside the run
   directory at save time, with the paths in `results.json` rewritten relative to
-  the report. `results.html` also inlines the thumbnails so it stays standalone.
+  the report.
+- The gallery is its own page, `arena.html` (template `templates/arena.html`),
+  written next to the assets it links to and only when a run captured a render.
+  It carries the pass rate, per-model render rates, and large previews; clicking
+  a preview opens that model's generated page in a new tab, so it is deliberately
+  not standalone. `results.html` keeps the numbers and links to the gallery
+  rather than embedding images.
 
 ### Concurrency and Metrics
 - Request concurrency is detected from server slot endpoints or explicit

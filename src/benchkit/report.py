@@ -1,10 +1,7 @@
 """Save benchmark results to disk."""
 
-import base64
-import copy
 import csv
 import json
-import mimetypes
 import os
 from datetime import datetime
 from importlib.resources import files
@@ -12,11 +9,6 @@ from pathlib import Path
 
 from benchkit import artifacts
 from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
-
-# Screenshots are inlined into the standalone HTML report so it can be shared
-# on its own. The cap keeps a large arena run from producing an unopenable file;
-# past it the report falls back to the copies saved next to it on disk.
-MAX_EMBEDDED_ASSET_BYTES = 24 * 1024 * 1024
 
 
 def _fmt_time(s: float) -> str:
@@ -36,46 +28,14 @@ def _safe_json(data: object) -> str:
     )
 
 
-def _embed_assets(results: list[dict], assets_root: Path) -> list[dict]:
-    """Inline collected screenshots so the HTML report stands on its own."""
-    embedded = copy.deepcopy(results)
-    budget = MAX_EMBEDDED_ASSET_BYTES
-    for result in embedded:
-        for task in result.get("tasks") or []:
-            workspace = task.get("workspace")
-            if not isinstance(workspace, dict):
-                continue
-            relative = workspace.get("screenshot_thumbnail") or workspace.get(
-                "screenshot"
-            )
-            if not isinstance(relative, str) or not relative:
-                continue
-            path = assets_root / relative
-            try:
-                data = path.read_bytes()
-            except OSError:
-                continue
-            if len(data) > budget:
-                continue
-            budget -= len(data)
-            media = mimetypes.guess_type(path.name)[0] or "image/png"
-            workspace["screenshot_data_uri"] = (
-                f"data:{media};base64,{base64.b64encode(data).decode('ascii')}"
-            )
-    return embedded
-
-
 def render_html(
     results: list[dict],
     generated_at: str,
     provider: str = "",
     host: str = "",
     hardware: str = "",
-    assets_root: Path | None = None,
 ) -> str:
     """Render the packaged HTML template with embedded report data."""
-    if assets_root is not None:
-        results = _embed_assets(results, assets_root)
     payload = _safe_json(
         {
             "generated_at": generated_at,
@@ -89,6 +49,47 @@ def render_html(
         files("benchkit").joinpath("templates/report.html").read_text(encoding="utf-8")
     )
     return template.replace("__BENCHKIT_REPORT_DATA__", payload)
+
+
+def arena_results(results: list[dict]) -> list[dict]:
+    """Result rows that captured at least one rendered page."""
+    return [
+        result
+        for result in results
+        if any(
+            isinstance(task.get("workspace"), dict)
+            and task["workspace"].get("render_status")
+            for task in result.get("tasks") or []
+        )
+    ]
+
+
+def render_arena_html(
+    results: list[dict],
+    generated_at: str,
+    provider: str = "",
+    host: str = "",
+    hardware: str = "",
+) -> str:
+    """Render the screenshot gallery for the render-scored suites.
+
+    The gallery lives beside the screenshots and generated pages it links to,
+    so a preview opens the model's own page in a new tab instead of a picture
+    of it.
+    """
+    payload = _safe_json(
+        {
+            "generated_at": generated_at,
+            "provider": provider,
+            "host": host,
+            "hardware": hardware,
+            "results": results,
+        }
+    )
+    template = (
+        files("benchkit").joinpath("templates/arena.html").read_text(encoding="utf-8")
+    )
+    return template.replace("__BENCHKIT_ARENA_DATA__", payload)
 
 
 def save(
@@ -568,7 +569,13 @@ def save(
                 f.write("---\n\n")
 
     with open(out / "results.html", "w") as f:
-        f.write(render_html(results, ts, provider, host, hardware, assets_root=out))
+        f.write(render_html(results, ts, provider, host, hardware))
+
+    # Rendered suites get their own gallery: big previews that open the
+    # generated page itself, next to the pass rate.
+    if gallery := arena_results(results):
+        with open(out / "arena.html", "w") as f:
+            f.write(render_arena_html(gallery, ts, provider, host, hardware))
 
     artifacts.cleanup()
     return out

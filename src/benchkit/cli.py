@@ -539,6 +539,11 @@ def _headless(args: argparse.Namespace) -> None:
 
     out = save(results, provider=getattr(client, "label", ""), host=client.host)
     console.print(f"[dim]Saved:[/dim] [white]{out}[/white]")
+    if (out / "arena.html").exists():
+        console.print(
+            f"[dim]Gallery:[/dim] [white]{out / 'arena.html'}[/white] "
+            "[dim]· click a preview to open the generated page[/dim]"
+        )
     if failure:
         sys.exit(1)
 
