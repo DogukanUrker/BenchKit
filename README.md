@@ -101,6 +101,7 @@ uv run benchkit --help
 | Aider Polyglot | `aider-polyglot` | 225 | Repository editing across six languages with Pi |
 | Git Surgery | `git-surgery` | 5 | Stateful Git operations with Pi |
 | Sanity | `sanity` | 25 | Fast checks across five core capabilities |
+| Three.js Arena | `treejs-arena` | 10 | Creative single-file scenes, scored only on whether they render |
 | HumanEval | `humaneval` | 164 | Python function completion |
 | HumanEval+ | `humaneval-plus` | 164 | HumanEval with expanded EvalPlus tests |
 | MBPP | `mbpp` | 500 | Short Python programming tasks |
@@ -121,6 +122,14 @@ uv run benchkit --help
 | BoolQ | `boolq` | 3,270 | Passage-based yes/no questions |
 | TruthfulQA | `truthfulqa` | 817 | Resistance to common misconceptions |
 | HellaSwag | `hellaswag` | 1,000 | Plausible real-world continuations |
+
+`treejs-arena` renders each generated page in headless Chromium, so it needs
+the browser extra first:
+
+```bash
+uv sync --extra browser
+uv run playwright install chromium
+```
 
 The CLI registry is the canonical source for current counts, descriptions,
 and supported perturbations:
