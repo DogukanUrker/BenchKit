@@ -10,6 +10,7 @@ allowlist fails the render instead of stalling the run.
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -327,6 +328,66 @@ def render_page(
         )
     )
     return result
+
+
+# A scene that needs nothing but a working headless WebGL stack. When this
+# cannot render, no model output can either, and the fault is the machine's.
+PROBE_PAGE = """<!doctype html><html><head><style>
+html,body{margin:0;height:100%;overflow:hidden}canvas{display:block}
+</style></head><body><canvas id="probe"></canvas><script>
+const canvas = document.getElementById("probe");
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+if (!gl) throw new Error("no WebGL context: this browser has no working GPU or software rasterizer");
+gl.clearColor(0.1, 0.5, 0.4, 1);
+gl.clear(gl.COLOR_BUFFER_BIT);
+requestAnimationFrame(() => {});
+</script></body></html>
+"""
+
+_PROBE_LOCK = threading.Lock()
+_PROBE: tuple[bool, str] | None = None
+
+
+def probe_environment(force: bool = False) -> tuple[bool, str]:
+    """Check once whether this machine can render WebGL at all.
+
+    Returns ``(ok, detail)``. The result is cached for the process: it answers
+    a question about the machine, not about any one page.
+    """
+    global _PROBE
+    with _PROBE_LOCK:
+        if _PROBE is not None and not force:
+            return _PROBE
+
+        with tempfile.TemporaryDirectory(prefix="benchkit-render-probe-") as directory:
+            root = Path(directory)
+            page = root / "probe.html"
+            page.write_text(PROBE_PAGE, encoding="utf-8")
+            outcome = render_page(
+                page,
+                root / "probe.png",
+                root / "probe.jpg",
+                settle_s=0.5,
+                timeout_s=render_timeout_s(),
+            )
+
+        if outcome.error:
+            answer = (False, outcome.error)
+        elif outcome.rendered:
+            answer = (
+                True,
+                f"headless WebGL is available ({', '.join(outcome.contexts)})",
+            )
+        else:
+            answer = (
+                False,
+                "headless Chromium could not render a plain WebGL canvas: "
+                + (outcome.diagnostics.replace("\n", " · ") or "no diagnostics"),
+            )
+        _PROBE = answer
+        return answer
 
 
 def render_settle_s() -> float:

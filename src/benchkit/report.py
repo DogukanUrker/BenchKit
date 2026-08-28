@@ -52,11 +52,16 @@ def render_html(
 
 
 def arena_results(results: list[dict]) -> list[dict]:
-    """Result rows that captured at least one rendered page."""
+    """Result rows scored by rendering, whether or not a page ever loaded.
+
+    Selection is by suite, not by outcome: a run whose tasks all timed out
+    still gets a gallery, and it still shows those tasks.
+    """
     return [
         result
         for result in results
-        if any(
+        if result.get("scoring") == "render-only"
+        or any(
             isinstance(task.get("workspace"), dict)
             and task["workspace"].get("render_status")
             for task in result.get("tasks") or []

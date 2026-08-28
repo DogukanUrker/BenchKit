@@ -75,9 +75,13 @@ def test_reports_a_missing_document_without_rendering(staged, monkeypatch) -> No
     assert not result.error
     assert result.details["render_status"] == "no_html"
     assert "single-file HTML document" in result.feedback
+    # The answer is still kept, so the gallery has something to open.
+    assert Path(result.details["response_text"]).read_text() == "I cannot do that."
 
 
-def _stub(monkeypatch, outcome: RenderResult) -> None:
+def _stub(monkeypatch, outcome: RenderResult, *, environment: bool = True) -> None:
+    """Render one canned outcome, and never launch a real browser."""
+
     def render(page, screenshot, thumbnail, **kwargs):
         screenshot.write_bytes(b"png")
         thumbnail.write_bytes(b"jpg")
@@ -86,6 +90,14 @@ def _stub(monkeypatch, outcome: RenderResult) -> None:
         return outcome
 
     monkeypatch.setattr("benchkit.benchmarks.treejs_arena.render_page", render)
+    monkeypatch.setattr(
+        "benchkit.benchmarks.treejs_arena.probe_environment",
+        lambda *args, **kwargs: (
+            (True, "headless WebGL is available (webgl2)")
+            if environment
+            else (False, "no WebGL context")
+        ),
+    )
 
 
 def test_scores_a_clean_render_and_keeps_the_screenshot(staged, monkeypatch) -> None:
@@ -116,6 +128,8 @@ def test_failed_render_returns_console_output_as_repair_feedback(
             console_errors=["THREE.WebGLRenderer: context lost"],
             page_errors=["ReferenceError: THREE is not defined"],
             blocked_requests=["https://example.invalid/assets/three.js"],
+            contexts=["webgl"],
+            canvases=[{"width": 1280, "height": 800}],
         ),
     )
     bench = TreeJSArena()
@@ -126,6 +140,65 @@ def test_failed_render_returns_console_output_as_repair_feedback(
     assert "ReferenceError: THREE is not defined" in result.feedback
     assert "THREE.WebGLRenderer: context lost" in result.feedback
     assert "https://example.invalid/assets/three.js" in result.feedback
+
+
+def test_unreachable_allowlisted_host_is_not_the_model_s_fault(
+    staged, monkeypatch
+) -> None:
+    # BenchKit allowed the host, so a request that never completed is a
+    # network fault on this machine, not a scene the model got wrong.
+    _stub(
+        monkeypatch,
+        RenderResult(
+            rendered=False,
+            failed_requests=["https://unpkg.com/three@0.160.0/build/three.module.js"],
+            console_errors=["Failed to load resource: net::ERR_NAME_NOT_RESOLVED"],
+        ),
+    )
+    bench = TreeJSArena()
+    result = bench.evaluate_with_feedback(bench.load_tasks()[3], PAGE)
+    assert result.score == 0.0
+    assert "unpkg.com" in result.error
+    assert "no route to the module CDN" in result.error
+    assert result.details["render_status"] == "harness_error"
+
+
+def test_a_machine_without_webgl_is_not_the_model_s_fault(staged, monkeypatch) -> None:
+    _stub(
+        monkeypatch,
+        RenderResult(
+            rendered=False,
+            page_errors=["TypeError: Cannot read properties of null"],
+            canvases=[{"width": 1280, "height": 800}],
+        ),
+        environment=False,
+    )
+    bench = TreeJSArena()
+    result = bench.evaluate_with_feedback(bench.load_tasks()[4], PAGE)
+    assert result.score == 0.0
+    assert "headless rendering is broken on this machine" in result.error
+    assert "--with-deps" in result.error
+    assert result.details["render_status"] == "harness_error"
+
+
+def test_a_page_fault_on_a_healthy_machine_stays_the_model_s_failure(
+    staged, monkeypatch
+) -> None:
+    _stub(
+        monkeypatch,
+        RenderResult(
+            rendered=False,
+            page_errors=["TypeError: mesh.rotate is not a function"],
+            contexts=["webgl2"],
+            canvases=[{"width": 1280, "height": 800}],
+        ),
+    )
+    bench = TreeJSArena()
+    result = bench.evaluate_with_feedback(bench.load_tasks()[5], PAGE)
+    assert result.score == 0.0
+    assert not result.error
+    assert result.details["render_status"] == "failed"
+    assert "mesh.rotate is not a function" in result.feedback
 
 
 def test_a_browser_that_cannot_start_is_a_harness_error(staged, monkeypatch) -> None:

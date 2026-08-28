@@ -24,6 +24,7 @@ COLLECTED = (
     ("screenshot", "screenshots", ".png"),
     ("screenshot_thumbnail", "screenshots", ".jpg"),
     ("page_html", "pages", ".html"),
+    ("response_text", "pages", ".txt"),
 )
 
 

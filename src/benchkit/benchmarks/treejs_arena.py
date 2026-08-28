@@ -9,10 +9,17 @@ carried into the HTML report so runs can be compared side by side.
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from benchkit.artifacts import task_dir
 from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.utils import strip_think_tags
-from benchkit.browser import render_page, render_settle_s, render_timeout_s
+from benchkit.browser import (
+    probe_environment,
+    render_page,
+    render_settle_s,
+    render_timeout_s,
+)
 from benchkit.evaluation import EvaluationResult
 
 # Frozen prompt set. Bump the version (and never edit a shipped prompt in
@@ -76,6 +83,43 @@ def extract_html(response: str) -> str:
     return ""
 
 
+def _environment_fault(outcome) -> str:
+    """Name the machine-level reason a page could not render, if there is one.
+
+    A model is only responsible for what it wrote. When a host BenchKit itself
+    allowed could not be reached, or the browser has no working WebGL stack at
+    all, the fault is the environment: report it as a harness error so the task
+    is excluded from the score instead of being counted as a model failure.
+    """
+    unreachable = [
+        url
+        for url in outcome.failed_requests
+        if url.startswith(("http://", "https://"))
+    ]
+    if unreachable:
+        hosts = sorted({urlsplit(url).hostname or url for url in unreachable})
+        return (
+            "the page could not reach "
+            + ", ".join(hosts)
+            + " — BenchKit allows these hosts, so this machine has no route to "
+            "the module CDN (proxy, firewall, or DNS). Fix outbound HTTPS, or "
+            "set BENCHKIT_RENDER_ALLOWED_HOSTS to a mirror you can reach."
+        )
+
+    if outcome.contexts:
+        return ""
+    ok, detail = probe_environment()
+    if not ok:
+        return (
+            f"headless rendering is broken on this machine: {detail}. "
+            "Install the browser's system dependencies "
+            "('playwright install --with-deps chromium' on Debian/Ubuntu); "
+            "BenchKit already asks Chromium for the SwiftShader software "
+            "renderer, so no GPU is required."
+        )
+    return ""
+
+
 def _clip(text: str) -> str:
     if len(text) <= MAX_FEEDBACK_CHARS:
         return text
@@ -127,18 +171,26 @@ class TreeJSArena:
             "scene": str(task.metadata.get("scene") or ""),
         }
 
+        directory = task_dir(f"treejs-{slug}")
         html = extract_html(response)
         if not html:
+            # Nothing to render, but the answer is still the artifact of record:
+            # keep it on disk so the gallery has something to open.
+            answer = directory / "response.txt"
+            answer.write_text(response, encoding="utf-8")
             return EvaluationResult(
                 score=0.0,
                 feedback=(
                     "No HTML document was found in the answer. Reply with the "
                     "complete single-file HTML document and nothing else."
                 ),
-                details={**base, "render_status": "no_html"},
+                details={
+                    **base,
+                    "render_status": "no_html",
+                    "response_text": str(answer),
+                },
             )
 
-        directory = task_dir(f"treejs-{slug}")
         page = directory / "page.html"
         page.write_text(html, encoding="utf-8")
 
@@ -180,6 +232,13 @@ class TreeJSArena:
             return EvaluationResult(
                 score=1.0,
                 details={**details, "render_status": "rendered"},
+            )
+
+        if fault := _environment_fault(outcome):
+            return EvaluationResult(
+                score=0.0,
+                error=fault,
+                details={**details, "render_status": "harness_error"},
             )
 
         return EvaluationResult(

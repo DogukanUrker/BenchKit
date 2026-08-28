@@ -129,7 +129,8 @@
     .card { border: 1px solid var(--line); border-radius: 14px; background: var(--card); overflow: hidden; }
     .card-link { display: block; position: relative; background: #000; text-decoration: none; }
     .card-link img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
-    .card-empty { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 10; background: var(--raise); color: var(--muted); font: 9px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+    /* No image to show: keep the slot readable instead of a huge empty box. */
+    .card-empty { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 10; max-height: 220px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); font: 9px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase; }
     .open-hint {
       position: absolute;
       inset: auto 0 0 0;
@@ -219,12 +220,27 @@
     const number = value => Number(value) || 0;
     const percent = (part, total) => total > 0 ? `${(part / total * 100).toFixed(0)}%` : "—";
 
-    const entries = arena.results.flatMap(row => (row.tasks || [])
-      .filter(task => task.workspace?.render_status)
-      .map(task => ({ model: row.model, harness: row.harness_label || "", row, task })));
+    // A task that never reached the browser - a timeout, a killed loop, an
+    // output-limit stop - still belongs here: leaving it out would quietly
+    // shrink the denominator and overstate the render rate.
+    const status = task => {
+      const rendered = task.workspace?.render_status;
+      if (rendered) return rendered;
+      if (task.loop_killed) return "loop_killed";
+      if (task.timed_out) return "timed_out";
+      if (task.length_exceeded) return "length_exceeded";
+      if (task.harness_error) return "harness_error";
+      return "not_rendered";
+    };
+    const sceneOf = task => task.workspace?.scene
+      || String(task.prompt || "").trim().split("\n").filter(line => line.trim()).pop()
+      || task.task_id;
 
-    const rendered = entries.filter(entry => entry.task.workspace.render_status === "rendered");
-    const harnessErrors = entries.filter(entry => entry.task.workspace.render_status === "harness_error");
+    const entries = arena.results.flatMap(row => (row.tasks || [])
+      .map(task => ({ model: row.model, harness: row.harness_label || "", row, task, status: status(task) })));
+
+    const rendered = entries.filter(entry => entry.status === "rendered");
+    const harnessErrors = entries.filter(entry => entry.status === "harness_error");
     const models = [...new Set(entries.map(entry => entry.model))];
     const promptSets = [...new Set(arena.results.map(row => row.prompt_set_version).filter(Boolean))];
     const date = String(arena.generated_at || "").replace("_", " · ").replaceAll("-", ".");
@@ -243,7 +259,7 @@
     const scenes = new Map();
     entries.forEach(entry => {
       const id = entry.task.task_id;
-      if (!scenes.has(id)) scenes.set(id, { id, scene: entry.task.workspace.scene || "", entries: [] });
+      if (!scenes.has(id)) scenes.set(id, { id, scene: sceneOf(entry.task), entries: [] });
       scenes.get(id).entries.push(entry);
     });
 
@@ -260,7 +276,7 @@
 
     document.getElementById("models").innerHTML = models.map(model => {
       const own = entries.filter(entry => entry.model === model);
-      const ok = own.filter(entry => entry.task.workspace.render_status === "rendered").length;
+      const ok = own.filter(entry => entry.status === "rendered").length;
       const share = own.length ? ok / own.length * 100 : 0;
       const modelRepairs = own.reduce((sum, entry) => sum + number(entry.task.repair_attempts_used), 0);
       return `<div class="model-row">
@@ -270,42 +286,52 @@
       </div>`;
     }).join("");
 
-    const statusText = status => status === "rendered" ? "RENDERED"
-      : status === "harness_error" ? "HARNESS ERROR"
-      : status === "no_html" ? "NO HTML"
-      : "FAILED";
+    const STATUS_TEXT = {
+      rendered: "RENDERED",
+      failed: "FAILED",
+      no_html: "NO HTML",
+      harness_error: "HARNESS ERROR",
+      timed_out: "TIMED OUT",
+      loop_killed: "LOOP KILLED",
+      length_exceeded: "LENGTH LIMIT",
+      not_rendered: "NOT RENDERED",
+    };
+    const WARN = new Set(["harness_error", "timed_out", "loop_killed", "length_exceeded"]);
     const diagnostics = task => [
-      ...(task.workspace.page_errors || []).map(item => `[uncaught] ${item}`),
-      ...(task.workspace.console_errors || []).map(item => `[console] ${item}`),
-      ...(task.workspace.blocked_requests || []).map(item => `[blocked] ${item}`),
-      ...(task.workspace.failed_requests || []).map(item => `[network] ${item}`),
+      ...(task.workspace?.page_errors || []).map(item => `[uncaught] ${item}`),
+      ...(task.workspace?.console_errors || []).map(item => `[console] ${item}`),
+      ...(task.workspace?.blocked_requests || []).map(item => `[blocked] ${item}`),
+      ...(task.workspace?.failed_requests || []).map(item => `[network] ${item}`),
       ...(task.error ? [`[harness] ${task.error}`] : []),
     ].join("\n");
 
     const cards = entry => {
-      const { model, harness, task } = entry;
-      const workspace = task.workspace;
-      const status = workspace.render_status;
+      const { model, harness, task, status } = entry;
+      const workspace = task.workspace || {};
       const page = workspace.page_html;
+      const answer = workspace.response_text;
       const shot = workspace.screenshot;
       const label = `${model} · ${task.task_id}`;
       const preview = shot
         ? `<img loading="lazy" src="${escapeHtml(shot)}" alt="${escapeHtml(label)}">`
-        : `<div class="card-empty">no screenshot</div>`;
+        : `<div class="card-empty">${escapeHtml(STATUS_TEXT[status] || "no screenshot")}</div>`;
+      // Whatever the model actually produced, in the form it survives as.
+      const target = page || answer;
       const trace = diagnostics(task);
       return `<article class="card">
-        ${page
-          ? `<a class="card-link" href="${escapeHtml(page)}" target="_blank" rel="noopener noreferrer" title="Open the generated page in a new tab">${preview}<span class="open-hint">Open page ↗</span></a>`
+        ${target
+          ? `<a class="card-link" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer" title="${page ? "Open the generated page in a new tab" : "Open the model's answer in a new tab"}">${preview}<span class="open-hint">${page ? "Open page ↗" : "Open answer ↗"}</span></a>`
           : `<div class="card-link">${preview}</div>`}
         <div class="card-foot">
           <div>
             <div class="card-model" title="${escapeHtml(model)}">${escapeHtml(model)}</div>
-            <div class="card-sub">${escapeHtml(harness)}${number(task.repair_attempts_used) ? ` · ${number(task.repair_attempts_used)} repair${number(task.repair_attempts_used) === 1 ? "" : "s"}` : ""} · ${number(workspace.animation_frames)} frames</div>
+            <div class="card-sub">${escapeHtml(harness)}${number(task.repair_attempts_used) ? ` · ${number(task.repair_attempts_used)} repair${number(task.repair_attempts_used) === 1 ? "" : "s"}` : ""}${workspace.render_status ? ` · ${number(workspace.animation_frames)} frames` : ""}</div>
           </div>
-          <span class="status ${status === "rendered" ? "pass" : status === "harness_error" ? "warn" : ""}">${statusText(status)}</span>
+          <span class="status ${status === "rendered" ? "pass" : WARN.has(status) ? "warn" : ""}">${escapeHtml(STATUS_TEXT[status] || "FAILED")}</span>
         </div>
         <div class="links">
           ${page ? `<a href="${escapeHtml(page)}" target="_blank" rel="noopener noreferrer">Open page ↗</a>` : ""}
+          ${answer ? `<a href="${escapeHtml(answer)}" target="_blank" rel="noopener noreferrer">Open answer ↗</a>` : ""}
           ${shot ? `<a href="${escapeHtml(shot)}" target="_blank" rel="noopener noreferrer">Full screenshot ↗</a>` : ""}
         </div>
         ${trace ? `<details class="diag"><summary>Browser diagnostics</summary><pre>${escapeHtml(trace)}</pre></details>` : ""}
@@ -316,7 +342,7 @@
       ? [...scenes.values()].map(scene => `<section class="scene">
           <div class="scene-head">
             <h2 class="scene-title">${escapeHtml(scene.scene || scene.id)}</h2>
-            <span class="scene-id">${escapeHtml(scene.id)} · ${scene.entries.filter(entry => entry.task.workspace.render_status === "rendered").length}/${scene.entries.length} rendered</span>
+            <span class="scene-id">${escapeHtml(scene.id)} · ${scene.entries.filter(entry => entry.status === "rendered").length}/${scene.entries.length} rendered</span>
           </div>
           <div class="grid">${scene.entries.map(cards).join("")}</div>
         </section>`).join("")

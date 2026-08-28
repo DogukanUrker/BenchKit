@@ -99,8 +99,19 @@ tables in the README.
   access to the browser context.
 - `--repair-attempts` feeds the captured console and network diagnostics back as
   ordinary verifier feedback and re-renders the replacement file.
-- A missing browser is a harness error (excluded from the score), not a model
-  failure. Render rates stay out of the overall average, like RULER.
+- Machine faults are harness errors (excluded from the score), never model
+  failures: a missing or unstartable browser, a browser with no working WebGL
+  stack (checked once per process by `browser.probe_environment`), and a
+  request to an allowlisted host that never completed - BenchKit permitted that
+  host, so an unreachable CDN is this machine's problem. Only faults inside the
+  page the model wrote are scored failures. `benchkit render-check` reports both
+  preconditions directly. Render rates stay out of the overall average, like
+  RULER.
+- Every scored task keeps an artifact: the extracted page, or the raw answer
+  when no HTML could be found. Tasks that never reached the browser (timeout,
+  loop kill, output limit) still appear in the gallery with that status, so the
+  denominator is the tasks attempted rather than the ones that got far enough
+  to render.
 - Screenshots and generated pages are staged under `results/.artifacts/` during
   the run and collected into `screenshots/` and `pages/` inside the run
   directory at save time, with the paths in `results.json` rewritten relative to
