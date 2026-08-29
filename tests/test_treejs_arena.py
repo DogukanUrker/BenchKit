@@ -300,6 +300,12 @@ def test_report_collects_screenshots_and_embeds_them(staged) -> None:
     assert workspace["screenshot"] == "screenshots/demo-8b__TreeJSArena-0.png"
     assert workspace["scene"] == "A black hole"
     assert 'target="_blank" rel="noopener noreferrer"' in gallery
+    # Previews run the page itself, sandboxed, in whatever browser opens the
+    # gallery - the machine that ran the benchmark may have had none.
+    assert (
+        'frame.setAttribute("sandbox", "allow-scripts allow-pointer-lock")' in gallery
+    )
+    assert "frame.src = stage.dataset.page" in gallery
 
 
 def test_no_gallery_without_rendered_tasks(staged) -> None:

@@ -118,11 +118,17 @@ tables in the README.
   directory at save time, with the paths in `results.json` rewritten relative to
   the report.
 - The gallery is its own page, `arena.html` (template `templates/arena.html`),
-  written next to the assets it links to and only when a run captured a render.
-  It carries the pass rate, per-model render rates, and large previews; clicking
-  a preview opens that model's generated page in a new tab, so it is deliberately
-  not standalone. `results.html` keeps the numbers and links to the gallery
-  rather than embedding images.
+  written next to the assets it links to whenever a run has render-scored rows.
+  It carries the pass rate, per-model render rates, and large previews, so it is
+  deliberately not standalone. `results.html` keeps the numbers and links to the
+  gallery rather than embedding images.
+- A preview runs the generated page itself, in an iframe sandboxed to
+  `allow-scripts allow-pointer-lock`, so a scene the benchmark machine could not
+  render still plays in whatever browser opens the gallery. Frames load and
+  unload with an IntersectionObserver and are capped, because browsers keep only
+  a handful of WebGL contexts alive; the captured screenshot sits underneath as
+  the poster and the record of what the run actually saw. `Open ↗` opens the page
+  in a full tab, and the header toggle turns live previews off.
 
 ### Concurrency and Metrics
 - Request concurrency is detected from server slot endpoints or explicit
