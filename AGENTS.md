@@ -10,6 +10,8 @@ BenchKit is a Python 3.11 package using a `src/` layout. `src/benchkit/cli.py` p
 - `OLLAMA_HOST=http://localhost:11434 uv run benchkit`: run against an explicit local or remote Ollama endpoint.
 - `uv run benchkit --headless --models MODEL --benchmarks sanity:5 --verbose`: scripted run that prints per-task prompts and responses.
 - `uv run benchkit --list`: print the benchmark registry with task counts.
+- `uv sync --extra browser && uv run playwright install chromium`: install the
+  headless browser used by the `treejs-arena` suite.
 - `uv run pre-commit install`: install the hooks (ruff on commit, pytest on push).
 - `uv run ruff check .` / `uv run ruff format .`: lint and format.
 - `uv run pre-commit run -a`: run every hook against the whole tree.
@@ -80,6 +82,55 @@ tables in the README.
 - `--perturbation choice-order` runs supported MCQ tasks clean and with a
   deterministic permutation whose correct option moves. Perturbed jobs are
   paired with the baseline and excluded from the overall model score.
+
+### Creative Rendering (treejs-arena)
+- `treejs-arena` has no ground truth. Twenty frozen prompts ask for one
+  self-contained HTML file each; the file is opened in headless Chromium and the
+  automatic score is binary: no uncaught exception, and a sized canvas that
+  acquired a drawing context. Console output and blocked hosts are recorded and
+  fed back for repair but do not decide the verdict - a scene that draws has
+  rendered even if a library logged a warning. The screenshots are the real
+  output and are meant for human comparison.
+- The prompt set is versioned (`PROMPT_SET_VERSION`). Never edit a shipped
+  prompt in place; add a version so old screenshots stay comparable.
+- Generated pages are untrusted. Requests are aborted unless the host is on the
+  module-CDN allowlist (`BENCHKIT_RENDER_ALLOWED_HOSTS`, or nothing at all with
+  `BENCHKIT_RENDER_OFFLINE`), downloads and service workers are blocked, and
+  navigation, settle and capture each run under an explicit deadline. Do not
+  widen the allowlist to make a scene pass, and do not add host mounts or file
+  access to the browser context.
+- `--repair-attempts` feeds the captured console and network diagnostics back as
+  ordinary verifier feedback and re-renders the replacement file.
+- Headless machines without a browser, without a working WebGL stack (checked
+  once per process by `browser.probe_environment`), or without a route to an
+  allowlisted module CDN are ordinary places to run BenchKit. The render check
+  is skipped there and the task keeps its credit: `render_status` is `skipped`
+  with a `skip_reason`, never a failure and never a harness error. Only faults
+  inside the page the model wrote are scored failures. Skips are excluded from
+  the gallery's render rate so they cannot inflate it, and
+  `benchkit render-check` reports both preconditions directly. Render rates stay
+  out of the overall average, like RULER.
+- Every scored task keeps an artifact: the extracted page, or the raw answer
+  when no HTML could be found. Tasks that never reached the browser (timeout,
+  loop kill, output limit) still appear in the gallery with that status, so the
+  denominator is the tasks attempted rather than the ones that got far enough
+  to render.
+- Screenshots and generated pages are staged under `results/.artifacts/` during
+  the run and collected into `screenshots/` and `pages/` inside the run
+  directory at save time, with the paths in `results.json` rewritten relative to
+  the report.
+- The gallery is its own page, `arena.html` (template `templates/arena.html`),
+  written next to the assets it links to whenever a run has render-scored rows.
+  It carries the pass rate, per-model render rates, and large previews, so it is
+  deliberately not standalone. `results.html` keeps the numbers and links to the
+  gallery rather than embedding images.
+- A preview runs the generated page itself, in an iframe sandboxed to
+  `allow-scripts allow-pointer-lock`, so a scene the benchmark machine could not
+  render still plays in whatever browser opens the gallery. Frames load and
+  unload with an IntersectionObserver and are capped, because browsers keep only
+  a handful of WebGL contexts alive; the captured screenshot sits underneath as
+  the poster and the record of what the run actually saw. `Open ↗` opens the page
+  in a full tab, and the header toggle turns live previews off.
 
 ### Concurrency and Metrics
 - Request concurrency is detected from server slot endpoints or explicit

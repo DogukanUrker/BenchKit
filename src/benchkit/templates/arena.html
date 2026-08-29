@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>BenchKit Arena</title>
+  <script>
+    // Applied before paint so the gallery never flashes the wrong theme, and
+    // shares the report's stored choice.
+    (() => {
+      let stored = null;
+      try { stored = localStorage.getItem("benchkit-theme"); } catch (error) { stored = null; }
+      document.documentElement.dataset.theme = stored === "dark" ? "dark" : "light";
+    })();
+  </script>
+  <style>
+    /* Dogi (https://github.com/DogukanUrker/DogiZed): flat black or white,
+       colour only where it carries meaning. Kept in step with report.html. */
+    :root,
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --page: #ffffff;
+      --card: #ffffff;
+      --ink: #0b0b0b;
+      --muted: #6b7280;
+      --line: rgba(11, 11, 11, .12);
+      --raise: rgba(11, 11, 11, .04);
+      --track: rgba(11, 11, 11, .09);
+      --green: #059669;
+      --red: #dc2626;
+      --blue: #2563eb;
+      --amber: #d97706;
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --page: #000000;
+      --card: #000000;
+      --ink: #ffffff;
+      --muted: #6b7280;
+      --line: rgba(255, 255, 255, .14);
+      --raise: rgba(255, 255, 255, .06);
+      --track: rgba(255, 255, 255, .12);
+      --green: #34d399;
+      --red: #ef4444;
+      --blue: #60a5fa;
+      --amber: #facc15;
+    }
+
+    :root {
+      --sans: "Avenir Next", Avenir, "Century Gothic", sans-serif;
+      --mono: "SFMono-Regular", "Cascadia Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--page); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background: var(--page);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    button { font: inherit; }
+    a { color: inherit; }
+    .page { width: min(1360px, calc(100% - 40px)); margin: 0 auto; padding: 54px 0 70px; }
+
+    .head {
+      display: flex;
+      justify-content: space-between;
+      gap: 32px;
+      align-items: end;
+      padding-bottom: 30px;
+      border-bottom: 1px solid var(--line);
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 7px; font-size: 42px; line-height: 1; letter-spacing: -.045em; }
+    .meta { margin: 0; color: var(--muted); font: 11px/1.55 var(--mono); }
+    .head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 18px; }
+    .rate { color: var(--green); font-size: 42px; font-weight: 800; line-height: 1; letter-spacing: -.045em; }
+    .rate-label { margin-top: 6px; font-size: 12px; font-weight: 800; text-align: right; }
+
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--raise);
+      color: var(--ink);
+      cursor: pointer;
+      font: 700 9px/1 var(--mono);
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .theme-toggle:hover { border-color: var(--blue); color: var(--blue); }
+    .theme-toggle[aria-pressed="false"] { color: var(--muted); }
+    .theme-toggle[aria-pressed="false"] .theme-dot { background: var(--track); }
+    .toggles { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .theme-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--blue); }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin: 28px 0 42px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .stat { padding: 20px 22px; }
+    .stat + .stat { border-left: 1px solid var(--line); }
+    .stat-value { font-size: 27px; font-weight: 800; letter-spacing: -.03em; }
+    .stat-label { margin-top: 6px; color: var(--muted); font: 8px/1.3 var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+
+    .models { margin-bottom: 54px; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    .model-row { display: grid; grid-template-columns: minmax(140px, 240px) 1fr 132px; gap: 16px; align-items: center; padding: 15px 22px; }
+    .model-row + .model-row { border-top: 1px solid var(--line); }
+    .model-name { overflow-wrap: anywhere; font: 800 11px/1.3 var(--mono); }
+    .track { height: 9px; border-radius: 999px; background: var(--track); overflow: hidden; }
+    .fill { height: 100%; border-radius: 999px; background: var(--green); }
+    .model-value { color: var(--muted); text-align: right; font: 9px/1.4 var(--mono); }
+
+    .scene { margin-bottom: 46px; }
+    .scene-head { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; margin-bottom: 16px; }
+    .scene-title { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+    .scene-id { color: var(--muted); font: 9px/1 var(--mono); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 540px)); justify-content: start; gap: 22px; }
+
+    .card { border: 1px solid var(--line); border-radius: 14px; background: var(--card); overflow: hidden; }
+    /* The stage holds the screenshot the run captured and, when live previews
+       are on, the page itself running in this browser on top of it. */
+    .stage { position: relative; width: 100%; aspect-ratio: 16 / 10; background: #000; overflow: hidden; }
+    .stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; z-index: 1; background: #000; }
+    .stage-empty { position: absolute; inset: 0; display: grid; place-items: center; background: var(--card); box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); font: 9px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+    .stage-link { position: absolute; inset: 0; z-index: 2; text-decoration: none; }
+    .is-live .stage-link { display: none; }
+    .open-hint {
+      position: absolute;
+      inset: auto 0 0 0;
+      padding: 10px 14px;
+      background: linear-gradient(transparent, rgba(0, 0, 0, .78));
+      color: #fff;
+      opacity: 0;
+      transition: opacity .16s ease;
+      font: 700 9px/1 var(--mono);
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .stage-link:hover .open-hint, .stage-link:focus-visible .open-hint { opacity: 1; }
+    .stage-link:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+    /* Sits above a live frame, which swallows clicks meant for the card. */
+    .open-badge {
+      position: absolute;
+      top: 9px;
+      right: 9px;
+      z-index: 3;
+      padding: 6px 9px;
+      border-radius: 7px;
+      background: rgba(0, 0, 0, .62);
+      color: #fff;
+      opacity: 0;
+      transition: opacity .16s ease;
+      text-decoration: none;
+      font: 700 8px/1 var(--mono);
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .card:hover .open-badge, .open-badge:focus-visible { opacity: 1; }
+    .live-badge { position: absolute; top: 9px; left: 9px; z-index: 3; padding: 6px 9px; border-radius: 7px; background: rgba(0, 0, 0, .62); color: #fff; font: 700 8px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+
+    .card-foot { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 12px 15px; border-top: 1px solid var(--line); font: 9px/1.4 var(--mono); }
+    .card-model { font-weight: 800; overflow-wrap: anywhere; }
+    .card-sub { margin-top: 4px; color: var(--muted); }
+    .status { font-weight: 900; color: var(--red); white-space: nowrap; }
+    .status.pass { color: var(--green); }
+    .status.warn { color: var(--amber); }
+    .status.skip { color: var(--muted); }
+    .links { display: flex; gap: 12px; padding: 0 15px 13px; font: 9px/1 var(--mono); }
+    .links a { color: var(--blue); text-decoration: none; }
+    .links a:hover { text-decoration: underline; }
+    details.diag { border-top: 1px solid var(--line); }
+    details.diag summary { padding: 10px 15px; color: var(--muted); cursor: pointer; font: 8px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+    details.diag pre { max-height: 220px; margin: 0; padding: 0 15px 14px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 9px/1.55 var(--mono); }
+
+    .empty { padding: 60px 0; color: var(--muted); font: 11px/1.6 var(--mono); }
+    footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 70px; padding-top: 24px; border-top: 1px solid var(--line); color: var(--muted); font: 8px/1.4 var(--mono); }
+
+    @media (max-width: 720px) {
+      .page { width: min(100% - 24px, 600px); padding-top: 34px; }
+      .head { display: block; }
+      .head-right { align-items: flex-start; margin-top: 24px; }
+      .rate-label { text-align: left; }
+      .summary { grid-template-columns: repeat(2, 1fr); }
+      .stat:nth-child(3) { border-top: 1px solid var(--line); border-left: 0; }
+      .stat:nth-child(4) { border-top: 1px solid var(--line); }
+      .grid { grid-template-columns: 1fr; }
+      .model-row { grid-template-columns: 1fr; gap: 8px; }
+      .model-value { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="head">
+      <div>
+        <h1>Arena</h1>
+        <p class="meta" id="headMeta"></p>
+      </div>
+      <div class="head-right">
+        <div class="toggles">
+          <button class="theme-toggle" id="liveToggle" type="button" aria-pressed="true">
+            <span class="theme-dot"></span><span id="liveLabel">Live previews on</span>
+          </button>
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch colour theme">
+            <span class="theme-dot"></span><span id="themeLabel">Dark</span>
+          </button>
+        </div>
+        <div>
+          <div class="rate" id="rate"></div>
+          <div class="rate-label" id="rateLabel"></div>
+        </div>
+      </div>
+    </header>
+
+    <section class="summary" id="summary"></section>
+    <section class="models" id="models"></section>
+    <section id="scenes"></section>
+
+    <footer><span id="footerMeta"></span><span>Generated by BenchKit</span></footer>
+  </main>
+
+  <script id="arenaData" type="application/json">__BENCHKIT_ARENA_DATA__</script>
+  <script>
+    const root = document.documentElement;
+    const themeLabel = document.getElementById("themeLabel");
+    const setTheme = mode => {
+      root.dataset.theme = mode;
+      themeLabel.textContent = mode === "dark" ? "Light" : "Dark";
+      try { localStorage.setItem("benchkit-theme", mode); } catch (error) { /* private mode */ }
+    };
+    setTheme(root.dataset.theme === "dark" ? "dark" : "light");
+    document.getElementById("themeToggle").addEventListener("click", () => {
+      setTheme(root.dataset.theme === "dark" ? "light" : "dark");
+    });
+
+    const arena = JSON.parse(document.getElementById("arenaData").textContent);
+    const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+    const number = value => Number(value) || 0;
+    const percent = (part, total) => total > 0 ? `${(part / total * 100).toFixed(0)}%` : "—";
+
+    // A task that never reached the browser - a timeout, a killed loop, an
+    // output-limit stop - still belongs here: leaving it out would quietly
+    // shrink the denominator and overstate the render rate.
+    const status = task => {
+      const rendered = task.workspace?.render_status;
+      if (rendered) return rendered;
+      if (task.loop_killed) return "loop_killed";
+      if (task.timed_out) return "timed_out";
+      if (task.length_exceeded) return "length_exceeded";
+      if (task.harness_error) return "harness_error";
+      return "not_rendered";
+    };
+    const sceneOf = task => task.workspace?.scene
+      || String(task.prompt || "").trim().split("\n").filter(line => line.trim()).pop()
+      || task.task_id;
+
+    const entries = arena.results.flatMap(row => (row.tasks || [])
+      .map(task => ({ model: row.model, harness: row.harness_label || "", row, task, status: status(task) })));
+
+    const rendered = entries.filter(entry => entry.status === "rendered");
+    // Machines without a browser, a GPU stack or a route to the CDN are
+    // ordinary: those tasks keep their credit and are not counted against
+    // the render rate.
+    const skipped = entries.filter(entry => entry.status === "skipped");
+    const scored = entries.filter(entry => entry.status !== "skipped");
+    const harnessErrors = entries.filter(entry => entry.status === "harness_error");
+    const models = [...new Set(entries.map(entry => entry.model))];
+    const promptSets = [...new Set(arena.results.map(row => row.prompt_set_version).filter(Boolean))];
+    const date = String(arena.generated_at || "").replace("_", " · ").replaceAll("-", ".");
+    const environment = [arena.provider, arena.hardware].filter(Boolean).join(" · ") || "Local inference";
+
+    document.getElementById("headMeta").textContent = [
+      date,
+      environment,
+      promptSets.length ? `prompt set ${promptSets.join(", ")}` : "",
+      "previews run live in this browser · Open ↗ for a full tab",
+    ].filter(Boolean).join(" · ");
+    document.getElementById("footerMeta").textContent = [date, environment].filter(Boolean).join(" · ");
+    document.getElementById("rate").textContent = percent(rendered.length, scored.length);
+    document.getElementById("rateLabel").textContent = scored.length
+      ? `${rendered.length}/${scored.length} pages rendered${skipped.length ? ` · ${skipped.length} skipped` : ""}`
+      : `${skipped.length} skipped · this machine cannot render`;
+
+    const scenes = new Map();
+    entries.forEach(entry => {
+      const id = entry.task.task_id;
+      if (!scenes.has(id)) scenes.set(id, { id, scene: sceneOf(entry.task), entries: [] });
+      scenes.get(id).entries.push(entry);
+    });
+
+    const repairs = entries.reduce((sum, entry) => sum + number(entry.task.repair_attempts_used), 0);
+    document.getElementById("summary").innerHTML = [
+      { value: models.length, label: "models" },
+      { value: scenes.size, label: "scenes" },
+      { value: `${rendered.length}/${scored.length}`, label: skipped.length ? `rendered · ${skipped.length} skipped` : "rendered" },
+      { value: harnessErrors.length ? `${repairs} · ${harnessErrors.length}` : repairs, label: harnessErrors.length ? "repairs · harness errors" : "repair turns" },
+    ].map(stat => `<div class="stat">
+      <div class="stat-value">${escapeHtml(stat.value)}</div>
+      <div class="stat-label">${escapeHtml(stat.label)}</div>
+    </div>`).join("");
+
+    document.getElementById("models").innerHTML = models.map(model => {
+      const own = entries.filter(entry => entry.model === model);
+      const judged = own.filter(entry => entry.status !== "skipped");
+      const ok = own.filter(entry => entry.status === "rendered").length;
+      const share = judged.length ? ok / judged.length * 100 : 0;
+      const modelRepairs = own.reduce((sum, entry) => sum + number(entry.task.repair_attempts_used), 0);
+      const skips = own.length - judged.length;
+      return `<div class="model-row">
+        <div class="model-name" title="${escapeHtml(model)}">${escapeHtml(model)}</div>
+        <div class="track"><div class="fill" style="width:${share.toFixed(1)}%"></div></div>
+        <div class="model-value">${ok}/${judged.length} · ${judged.length ? `${share.toFixed(0)}%` : "—"}${skips ? ` · ${skips} skipped` : ""}${modelRepairs ? ` · ${modelRepairs} repair${modelRepairs === 1 ? "" : "s"}` : ""}</div>
+      </div>`;
+    }).join("");
+
+    const STATUS_TEXT = {
+      rendered: "RENDERED",
+      failed: "FAILED",
+      no_html: "NO HTML",
+      skipped: "SKIPPED",
+      harness_error: "HARNESS ERROR",
+      timed_out: "TIMED OUT",
+      loop_killed: "LOOP KILLED",
+      length_exceeded: "LENGTH LIMIT",
+      not_rendered: "NOT RENDERED",
+    };
+    const WARN = new Set(["harness_error", "timed_out", "loop_killed", "length_exceeded"]);
+    const NEUTRAL = new Set(["skipped"]);
+    const diagnostics = task => [
+      ...(task.workspace?.page_errors || []).map(item => `[uncaught] ${item}`),
+      ...(task.workspace?.console_errors || []).map(item => `[console] ${item}`),
+      ...(task.workspace?.blocked_requests || []).map(item => `[blocked] ${item}`),
+      ...(task.workspace?.failed_requests || []).map(item => `[network] ${item}`),
+      ...(task.workspace?.skip_reason ? [`[skipped] ${task.workspace.skip_reason}`] : []),
+      ...(task.error ? [`[harness] ${task.error}`] : []),
+    ].join("\n");
+
+    const cards = entry => {
+      const { model, harness, task, status } = entry;
+      const workspace = task.workspace || {};
+      const page = workspace.page_html;
+      const answer = workspace.response_text;
+      const shot = workspace.screenshot;
+      const label = `${model} · ${task.task_id}`;
+      // Whatever the model actually produced, in the form it survives as.
+      const target = page || answer;
+      const poster = shot
+        ? `<img loading="lazy" src="${escapeHtml(shot)}" alt="${escapeHtml(label)}">`
+        : `<div class="stage-empty">${escapeHtml(STATUS_TEXT[status] || "no screenshot")}</div>`;
+      const trace = diagnostics(task);
+      return `<article class="card">
+        <div class="stage"${page ? ` data-page="${escapeHtml(page)}" data-label="${escapeHtml(label)}"` : ""}>
+          ${poster}
+          ${target ? `<a class="stage-link" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer" title="${page ? "Open the generated page in a new tab" : "Open the model's answer in a new tab"}"><span class="open-hint">${page ? "Open page ↗" : "Open answer ↗"}</span></a>` : ""}
+          ${page ? `<a class="open-badge" href="${escapeHtml(page)}" target="_blank" rel="noopener noreferrer">Open ↗</a>` : ""}
+        </div>
+        <div class="card-foot">
+          <div>
+            <div class="card-model" title="${escapeHtml(model)}">${escapeHtml(model)}</div>
+            <div class="card-sub">${escapeHtml(harness)}${number(task.repair_attempts_used) ? ` · ${number(task.repair_attempts_used)} repair${number(task.repair_attempts_used) === 1 ? "" : "s"}` : ""}${workspace.render_status && status !== "skipped" ? ` · ${number(workspace.animation_frames)} frames` : ""}</div>
+          </div>
+          <span class="status ${status === "rendered" ? "pass" : NEUTRAL.has(status) ? "skip" : WARN.has(status) ? "warn" : ""}">${escapeHtml(STATUS_TEXT[status] || "FAILED")}</span>
+        </div>
+        <div class="links">
+          ${page ? `<a href="${escapeHtml(page)}" target="_blank" rel="noopener noreferrer">Open page ↗</a>` : ""}
+          ${answer ? `<a href="${escapeHtml(answer)}" target="_blank" rel="noopener noreferrer">Open answer ↗</a>` : ""}
+          ${shot ? `<a href="${escapeHtml(shot)}" target="_blank" rel="noopener noreferrer">Full screenshot ↗</a>` : ""}
+        </div>
+        ${trace ? `<details class="diag"><summary>${status === "skipped" ? "Why this was skipped" : "Browser diagnostics"}</summary><pre>${escapeHtml(trace)}</pre></details>` : ""}
+      </article>`;
+    };
+
+    document.getElementById("scenes").innerHTML = scenes.size
+      ? [...scenes.values()].map(scene => `<section class="scene">
+          <div class="scene-head">
+            <h2 class="scene-title">${escapeHtml(scene.scene || scene.id)}</h2>
+            <span class="scene-id">${escapeHtml(scene.id)} · ${scene.entries.filter(entry => entry.status === "rendered").length}/${scene.entries.length} rendered</span>
+          </div>
+          <div class="grid">${scene.entries.map(cards).join("")}</div>
+        </section>`).join("")
+      : `<p class="empty">This run captured no arena scenes.</p>`;
+
+    // The screenshots come from the machine that ran the benchmark, which may
+    // have had no browser at all. The pages themselves are here, so this
+    // browser can just run them: each stage loads its page while on screen and
+    // drops it again after, since a browser only keeps a handful of WebGL
+    // contexts alive.
+    const MAX_LIVE = 8;
+    const live = [];
+    let liveEnabled = true;
+    try { liveEnabled = localStorage.getItem("benchkit-arena-live") !== "off"; } catch (error) { /* private mode */ }
+
+    const unload = stage => {
+      const frame = stage.querySelector("iframe");
+      if (frame) frame.remove();
+      stage.classList.remove("is-live");
+      const index = live.indexOf(stage);
+      if (index !== -1) live.splice(index, 1);
+    };
+    const load = stage => {
+      if (!liveEnabled || stage.classList.contains("is-live") || !stage.dataset.page) return;
+      while (live.length >= MAX_LIVE) unload(live[0]);
+      const frame = document.createElement("iframe");
+      // Untrusted model output: scripts only, no access to this page.
+      frame.setAttribute("sandbox", "allow-scripts allow-pointer-lock");
+      frame.setAttribute("loading", "lazy");
+      frame.setAttribute("title", `${stage.dataset.label || "scene"} (live)`);
+      frame.src = stage.dataset.page;
+      stage.appendChild(frame);
+      stage.classList.add("is-live");
+      live.push(stage);
+    };
+
+    const stages = [...document.querySelectorAll(".stage[data-page]")];
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => entry.isIntersecting ? load(entry.target) : unload(entry.target));
+    }, { rootMargin: "150px 0px" });
+    const observe = () => stages.forEach(stage => observer.observe(stage));
+
+    const liveToggle = document.getElementById("liveToggle");
+    const liveLabel = document.getElementById("liveLabel");
+    const setLive = enabled => {
+      liveEnabled = enabled;
+      liveToggle.setAttribute("aria-pressed", String(enabled));
+      liveLabel.textContent = enabled ? "Live previews on" : "Live previews off";
+      try { localStorage.setItem("benchkit-arena-live", enabled ? "on" : "off"); } catch (error) { /* private mode */ }
+      if (enabled) {
+        observe();
+      } else {
+        observer.disconnect();
+        [...live].forEach(unload);
+      }
+    };
+    liveToggle.addEventListener("click", () => setLive(!liveEnabled));
+    setLive(liveEnabled);
+  </script>
+</body>
+</html>

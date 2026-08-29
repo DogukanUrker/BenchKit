@@ -7,6 +7,7 @@ from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 
+from benchkit import artifacts
 from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
 
 
@@ -50,6 +51,52 @@ def render_html(
     return template.replace("__BENCHKIT_REPORT_DATA__", payload)
 
 
+def arena_results(results: list[dict]) -> list[dict]:
+    """Result rows scored by rendering, whether or not a page ever loaded.
+
+    Selection is by suite, not by outcome: a run whose tasks all timed out
+    still gets a gallery, and it still shows those tasks.
+    """
+    return [
+        result
+        for result in results
+        if result.get("scoring") == "render-only"
+        or any(
+            isinstance(task.get("workspace"), dict)
+            and task["workspace"].get("render_status")
+            for task in result.get("tasks") or []
+        )
+    ]
+
+
+def render_arena_html(
+    results: list[dict],
+    generated_at: str,
+    provider: str = "",
+    host: str = "",
+    hardware: str = "",
+) -> str:
+    """Render the screenshot gallery for the render-scored suites.
+
+    The gallery lives beside the screenshots and generated pages it links to,
+    so a preview opens the model's own page in a new tab instead of a picture
+    of it.
+    """
+    payload = _safe_json(
+        {
+            "generated_at": generated_at,
+            "provider": provider,
+            "host": host,
+            "hardware": hardware,
+            "results": results,
+        }
+    )
+    template = (
+        files("benchkit").joinpath("templates/arena.html").read_text(encoding="utf-8")
+    )
+    return template.replace("__BENCHKIT_ARENA_DATA__", payload)
+
+
 def save(
     results: list[dict],
     provider: str = "",
@@ -62,6 +109,10 @@ def save(
     hardware = (
         hardware if hardware is not None else os.environ.get("BENCHKIT_HARDWARE", "")
     )
+
+    # Screenshots and generated pages staged during the run move in here first,
+    # so every path written below is relative to the report directory.
+    artifacts.collect(out, results)
 
     # Full JSON (includes per-task details)
     with open(out / "results.json", "w") as f:
@@ -431,6 +482,40 @@ def save(
                             + str(workspace["patch"]).rstrip()
                             + "\n~~~\n\n"
                         )
+                    if workspace.get("render_status"):
+                        f.write(
+                            f"**Render:** {workspace['render_status']} · "
+                            f"{len(workspace.get('console_errors') or [])} console "
+                            f"error(s) · {len(workspace.get('page_errors') or [])} "
+                            "uncaught · "
+                            f"{workspace.get('animation_frames', 0)} frame(s)\n\n"
+                        )
+                        if shot := workspace.get("screenshot"):
+                            f.write(
+                                f"![{task.get('task_id', 'screenshot')}]({shot})\n\n"
+                            )
+                        if page := workspace.get("page_html"):
+                            f.write(f"Generated page: [{page}]({page})\n\n")
+                        diagnostics = [
+                            *(
+                                f"[uncaught] {item}"
+                                for item in workspace.get("page_errors") or []
+                            ),
+                            *(
+                                f"[console] {item}"
+                                for item in workspace.get("console_errors") or []
+                            ),
+                            *(
+                                f"[blocked] {item}"
+                                for item in workspace.get("blocked_requests") or []
+                            ),
+                        ]
+                        if diagnostics:
+                            f.write(
+                                "~~~text\n"
+                                + "\n".join(map(str, diagnostics))
+                                + "\n~~~\n\n"
+                            )
                 if attempts := task.get("attempts"):
                     f.write("**Verifier-feedback attempts:**\n\n")
                     for attempt in attempts:
@@ -491,4 +576,11 @@ def save(
     with open(out / "results.html", "w") as f:
         f.write(render_html(results, ts, provider, host, hardware))
 
+    # Rendered suites get their own gallery: big previews that open the
+    # generated page itself, next to the pass rate.
+    if gallery := arena_results(results):
+        with open(out / "arena.html", "w") as f:
+            f.write(render_arena_html(gallery, ts, provider, host, hardware))
+
+    artifacts.cleanup()
     return out

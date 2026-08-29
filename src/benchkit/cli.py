@@ -46,8 +46,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=("perf", "history"),
-        help="Run a performance profile or browse historical results",
+        choices=("perf", "history", "render-check"),
+        help=(
+            "Run a performance profile, browse historical results, or check "
+            "that headless rendering works on this machine"
+        ),
     )
     parser.add_argument(
         "perf_model",
@@ -234,6 +237,41 @@ def _list_benchmarks() -> None:
             f"[yellow]{note}[/yellow]" if note else "",
         )
     console.print(table)
+
+
+def _render_check() -> None:
+    """Report whether this machine can run the render-scored suites.
+
+    Every treejs-arena task depends on two things BenchKit does not control:
+    a headless browser that can produce a WebGL canvas, and a route to the
+    module CDN the generated page imports from. This checks both, so a broken
+    server is diagnosed in one command instead of ten scored-zero tasks.
+    """
+    from benchkit.browser import allowed_hosts, probe_environment
+
+    ok, detail = probe_environment(force=True)
+    if ok:
+        console.print(f"[green]Headless rendering works.[/green] [dim]{detail}[/dim]")
+    else:
+        console.print(f"[red]Headless rendering is unavailable.[/red] {detail}")
+
+    hosts = allowed_hosts()
+    if hosts:
+        console.print(
+            "[dim]Generated pages may fetch modules from:[/dim] " + ", ".join(hosts)
+        )
+        console.print(
+            "[dim]The machine needs outbound HTTPS to at least one of them; "
+            "otherwise every scene fails on a blocked import.[/dim]"
+        )
+    else:
+        console.print(
+            "[yellow]Network access is disabled "
+            "(BENCHKIT_RENDER_OFFLINE).[/yellow] [dim]Pages that import "
+            "three.js from a CDN cannot render.[/dim]"
+        )
+    if not ok:
+        sys.exit(1)
 
 
 def _client(args: argparse.Namespace):
@@ -539,6 +577,24 @@ def _headless(args: argparse.Namespace) -> None:
 
     out = save(results, provider=getattr(client, "label", ""), host=client.host)
     console.print(f"[dim]Saved:[/dim] [white]{out}[/white]")
+    if (out / "arena.html").exists():
+        console.print(
+            f"[dim]Gallery:[/dim] [white]{out / 'arena.html'}[/white] "
+            "[dim]· click a preview to open the generated page[/dim]"
+        )
+        # A run whose render checks were all skipped still scores 100%, so say
+        # so plainly rather than letting the score imply the pages were judged.
+        skipped = sum(
+            (task.get("workspace") or {}).get("render_status") == "skipped"
+            for result in results
+            for task in result.get("tasks") or []
+        )
+        if skipped:
+            console.print(
+                f"[yellow]Skipped {skipped} render check(s):[/yellow] "
+                "[dim]this machine could not render them, so they were not "
+                "scored against the model · run 'benchkit render-check'[/dim]"
+            )
     if failure:
         sys.exit(1)
 
@@ -734,6 +790,10 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.list:
         _list_benchmarks()
+        return
+
+    if args.command == "render-check":
+        _render_check()
         return
 
     if args.command == "perf":
