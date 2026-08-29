@@ -582,6 +582,19 @@ def _headless(args: argparse.Namespace) -> None:
             f"[dim]Gallery:[/dim] [white]{out / 'arena.html'}[/white] "
             "[dim]· click a preview to open the generated page[/dim]"
         )
+        # A run whose render checks were all skipped still scores 100%, so say
+        # so plainly rather than letting the score imply the pages were judged.
+        skipped = sum(
+            (task.get("workspace") or {}).get("render_status") == "skipped"
+            for result in results
+            for task in result.get("tasks") or []
+        )
+        if skipped:
+            console.print(
+                f"[yellow]Skipped {skipped} render check(s):[/yellow] "
+                "[dim]this machine could not render them, so they were not "
+                "scored against the model · run 'benchkit render-check'[/dim]"
+            )
     if failure:
         sys.exit(1)
 

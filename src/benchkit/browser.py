@@ -21,6 +21,23 @@ DEFAULT_SETTLE_S = 4.0
 DEFAULT_TIMEOUT_S = 30.0
 THUMBNAIL_QUALITY = 70
 
+# Chromium error codes that mean the request never reached a server: no DNS,
+# no route, no proxy, no TLS. Anything else - an abort, a 404, a page-level
+# fetch the model got wrong - says nothing about the machine.
+CONNECTION_ERRORS = (
+    "ERR_NAME_NOT_RESOLVED",
+    "ERR_NAME_RESOLUTION_FAILED",
+    "ERR_INTERNET_DISCONNECTED",
+    "ERR_NETWORK_CHANGED",
+    "ERR_CONNECTION_",
+    "ERR_ADDRESS_UNREACHABLE",
+    "ERR_PROXY_CONNECTION_FAILED",
+    "ERR_TUNNEL_CONNECTION_FAILED",
+    "ERR_TIMED_OUT",
+    "ERR_SSL_",
+    "ERR_CERT_",
+)
+
 # Hosts that ship the ES module builds a self-contained three.js page can
 # realistically import. Everything else - telemetry, analytics, arbitrary
 # fetches from generated code - is aborted before it leaves the browser.
@@ -114,6 +131,8 @@ class RenderResult:
     page_errors: list[str] = field(default_factory=list)
     blocked_requests: list[str] = field(default_factory=list)
     failed_requests: list[str] = field(default_factory=list)
+    # Requests BenchKit allowed that never reached a server at all.
+    unreachable: list[str] = field(default_factory=list)
     canvases: list[dict] = field(default_factory=list)
     contexts: list[str] = field(default_factory=list)
     frames: int = 0
@@ -224,14 +243,18 @@ def _render(
                 page.on(
                     "pageerror", lambda error: result.page_errors.append(str(error))
                 )
-                page.on(
-                    "requestfailed",
-                    lambda request: (
-                        result.failed_requests.append(request.url)
-                        if request.url not in result.blocked_requests
-                        else None
-                    ),
-                )
+
+                def on_failed(request) -> None:
+                    if request.url in result.blocked_requests:
+                        return
+                    reason = request.failure or ""
+                    result.failed_requests.append(
+                        f"{request.url} ({reason})" if reason else request.url
+                    )
+                    if any(code in reason for code in CONNECTION_ERRORS):
+                        result.unreachable.append(request.url)
+
+                page.on("requestfailed", on_failed)
                 page.goto(page_url, wait_until="load", timeout=timeout_ms)
                 page.wait_for_timeout(settle_s * 1000)
                 state = page.evaluate(_PAGE_STATE)
@@ -316,11 +339,14 @@ def render_page(
         )
         return result
 
+    # The verdict is what the page achieved: no uncaught exception, and a sized
+    # canvas that acquired a drawing context. Console output and blocked hosts
+    # are reported and fed back for repair, but a scene that draws is a scene
+    # that rendered - a stray console.error or an analytics ping it never
+    # needed does not undo that.
     result.rendered = bool(
         not result.error
         and not result.page_errors
-        and not result.console_errors
-        and not result.blocked_requests
         and result.contexts
         and any(
             int(canvas.get("width") or 0) > 0 and int(canvas.get("height") or 0) > 0

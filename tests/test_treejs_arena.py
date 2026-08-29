@@ -152,7 +152,11 @@ def test_unreachable_allowlisted_host_is_skipped_not_failed(
         monkeypatch,
         RenderResult(
             rendered=False,
-            failed_requests=["https://unpkg.com/three@0.160.0/build/three.module.js"],
+            failed_requests=[
+                "https://unpkg.com/three@0.160.0/build/three.module.js "
+                "(net::ERR_NAME_NOT_RESOLVED)"
+            ],
+            unreachable=["https://unpkg.com/three@0.160.0/build/three.module.js"],
             console_errors=["Failed to load resource: net::ERR_NAME_NOT_RESOLVED"],
         ),
     )
@@ -204,6 +208,49 @@ def test_a_page_fault_on_a_healthy_machine_stays_the_model_s_failure(
     assert not result.error
     assert result.details["render_status"] == "failed"
     assert "mesh.rotate is not a function" in result.feedback
+
+
+def test_console_noise_does_not_undo_a_scene_that_drew(staged, monkeypatch) -> None:
+    # Libraries log deprecation warnings and browsers log a failed favicon as
+    # console errors. A page that put a live canvas on screen still rendered.
+    _stub(
+        monkeypatch,
+        RenderResult(
+            rendered=True,
+            console_errors=["THREE.WebGLRenderer: deprecated option"],
+            blocked_requests=["https://analytics.invalid/collect"],
+            contexts=["webgl2"],
+            canvases=[{"width": 1280, "height": 800}],
+            frames=120,
+        ),
+    )
+    bench = TreeJSArena()
+    result = bench.evaluate_with_feedback(bench.load_tasks()[6], PAGE)
+    assert result.passed
+    assert result.details["render_status"] == "rendered"
+
+
+def test_an_ordinary_failed_request_is_not_a_broken_machine(
+    staged, monkeypatch
+) -> None:
+    # A fetch the page itself got wrong, or one aborted at teardown, says
+    # nothing about this machine: only a connection-class failure does, and
+    # the renderer reports those separately.
+    _stub(
+        monkeypatch,
+        RenderResult(
+            rendered=False,
+            failed_requests=["https://unpkg.com/typo.js (net::ERR_ABORTED)"],
+            page_errors=["ReferenceError: THREE is not defined"],
+            contexts=["webgl"],
+            canvases=[{"width": 1280, "height": 800}],
+        ),
+    )
+    bench = TreeJSArena()
+    result = bench.evaluate_with_feedback(bench.load_tasks()[7], PAGE)
+    assert result.score == 0.0
+    assert result.details["render_status"] == "failed"
+    assert "skip_reason" not in result.details
 
 
 def test_a_browser_that_cannot_start_costs_the_model_nothing(

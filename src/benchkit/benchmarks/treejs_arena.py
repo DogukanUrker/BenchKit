@@ -102,13 +102,8 @@ def _environment_fault(outcome) -> str:
     failures and are not scored as such: the render check is skipped and the
     task keeps its credit, with the reason recorded on the task.
     """
-    unreachable = [
-        url
-        for url in outcome.failed_requests
-        if url.startswith(("http://", "https://"))
-    ]
-    if unreachable:
-        hosts = sorted({urlsplit(url).hostname or url for url in unreachable})
+    if outcome.unreachable:
+        hosts = sorted({urlsplit(url).hostname or url for url in outcome.unreachable})
         return (
             "the page could not reach "
             + ", ".join(hosts)

@@ -86,9 +86,11 @@ tables in the README.
 ### Creative Rendering (treejs-arena)
 - `treejs-arena` has no ground truth. Twenty frozen prompts ask for one
   self-contained HTML file each; the file is opened in headless Chromium and the
-  automatic score is binary: no uncaught exception, no console error, no blocked
-  request, and a sized canvas that acquired a drawing context. The screenshots
-  are the real output and are meant for human comparison.
+  automatic score is binary: no uncaught exception, and a sized canvas that
+  acquired a drawing context. Console output and blocked hosts are recorded and
+  fed back for repair but do not decide the verdict - a scene that draws has
+  rendered even if a library logged a warning. The screenshots are the real
+  output and are meant for human comparison.
 - The prompt set is versioned (`PROMPT_SET_VERSION`). Never edit a shipped
   prompt in place; add a version so old screenshots stay comparable.
 - Generated pages are untrusted. Requests are aborted unless the host is on the
