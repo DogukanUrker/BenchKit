@@ -58,7 +58,7 @@ DESCRIPTIONS: dict[str, str] = {
     "aider-polyglot": "repository editing across six languages with the Pi agent",
     "git-surgery": "stateful Git operations in isolated repositories with Pi",
     "patcheval": "real Python bug fixes with externally isolated hidden tests",
-    "treejs-arena": "ten frozen creative three.js scenes, scored only on whether they render",
+    "treejs-arena": "twenty frozen creative three.js scenes, scored only on whether they render",
     "sanity": "25 curated checks across code, math, instructions, science, and commonsense",
     "humaneval": "Python function completions with the original unit tests",
     "humaneval-plus": "HumanEval with 122k+ tougher EvalPlus test inputs",

@@ -101,7 +101,7 @@ uv run benchkit --help
 | Aider Polyglot | `aider-polyglot` | 225 | Repository editing across six languages with Pi |
 | Git Surgery | `git-surgery` | 5 | Stateful Git operations with Pi |
 | Sanity | `sanity` | 25 | Fast checks across five core capabilities |
-| Three.js Arena | `treejs-arena` | 10 | Creative single-file scenes, scored only on whether they render |
+| Three.js Arena | `treejs-arena` | 20 | Creative single-file scenes, scored only on whether they render |
 | HumanEval | `humaneval` | 164 | Python function completion |
 | HumanEval+ | `humaneval-plus` | 164 | HumanEval with expanded EvalPlus tests |
 | MBPP | `mbpp` | 500 | Short Python programming tasks |

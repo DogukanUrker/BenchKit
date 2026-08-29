@@ -44,6 +44,16 @@ PROMPTS: tuple[tuple[str, str], ...] = (
     ("bar-chart", 'A 3D bar chart of {"A":42,"B":17,"C":88,"D":63,"E":5}, bars labeled and proportional.'),
     ("particle-field", "50,000 particles orbiting a central attractor with a live FPS counter."),
     ("mobius-strip", "A parametric Mobius strip with a sphere traveling along the surface."),
+    ("rubiks-cube", "A Rubik's cube that repeatedly performs the sequence R U R' U' with correctly pivoted face turns."),
+    ("raymarched-pillars", "A raymarched scene drawn entirely in one fragment shader: an infinite field of rounded pillars with soft shadows and distance fog, using no mesh geometry."),
+    ("cloth-flag", "A cloth flag pinned at two corners, simulated with verlet integration, rippling in a steady wind."),
+    ("double-pendulum", "A double pendulum released from horizontal, with a fading trail following the tip."),
+    ("boids", "300 boids flocking with separation, alignment and cohesion, steering around a sphere that drifts through them."),
+    ("glass-sphere", "A glass sphere with refraction and chromatic dispersion above a checkerboard floor, lit by a moving light."),
+    ("neon-tunnel", "A neon wireframe tunnel flown through at speed, with bloom post-processing."),
+    ("picking-grid", "Twelve labeled cubes in a grid where hovering highlights a cube and clicking locks a readout of its name."),
+    ("analog-clock", "An analog clock showing the viewer's real local time, with correctly proportioned hour, minute and second hands."),
+    ("instanced-city", "A city of 5,000 instanced buildings under a day-night cycle with a moving sun and cast shadows."),
 )
 # fmt: on
 
@@ -136,7 +146,7 @@ def _clip(text: str) -> str:
 
 
 class TreeJSArena:
-    """Ten frozen creative prompts scored only on whether the page renders."""
+    """Twenty frozen creative prompts scored only on whether the page renders."""
 
     name = "treejs-arena"
     task_count = len(PROMPTS)
