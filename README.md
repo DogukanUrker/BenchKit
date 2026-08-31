@@ -10,7 +10,7 @@ Not vibes. Actual scores.
 
 <img src="https://img.shields.io/badge/Python-3.11%2B-2563EB?style=flat-square&logo=python&logoColor=white&labelColor=0b0b0b" alt="Python 3.11+">
 <img src="https://img.shields.io/badge/TUI-Textual-60A5FA?style=flat-square&labelColor=0b0b0b" alt="Built with Textual">
-<img src="https://img.shields.io/badge/Suites-21-34D399?style=flat-square&labelColor=0b0b0b" alt="21 benchmark suites">
+<img src="https://img.shields.io/badge/Suites-25-34D399?style=flat-square&labelColor=0b0b0b" alt="25 benchmark suites">
 <img src="https://img.shields.io/badge/License-Apache%202.0-6B7280?style=flat-square&labelColor=0b0b0b" alt="Apache 2.0">
 
 </div>
@@ -98,10 +98,12 @@ uv run benchkit --help
 
 | Benchmark | Key | Tasks | What it tests |
 | --- | --- | ---: | --- |
-| Aider Polyglot | `aider-polyglot` | 225 | Repository editing across six languages with Pi |
-| Git Surgery | `git-surgery` | 5 | Stateful Git operations with Pi |
+| PatchEval | `patcheval` | 20 | Real Python bug fixes verified by hidden tests with Pi |
 | Sanity | `sanity` | 25 | Fast checks across five core capabilities |
 | Three.js Arena | `treejs-arena` | 20 | Creative single-file scenes, scored only on whether they render |
+| Git Surgery | `git-surgery` | 5 | Stateful Git operations with Pi |
+| MedFailBench | `medfailbench` | 30 | Offline heuristic screen for high-risk clinical responses; not clinical validation, certification, deployment evidence, or model ranking |
+| Aider Polyglot | `aider-polyglot` | 225 | Repository editing across six languages with Pi |
 | HumanEval | `humaneval` | 164 | Python function completion |
 | HumanEval+ | `humaneval-plus` | 164 | HumanEval with expanded EvalPlus tests |
 | MBPP | `mbpp` | 500 | Short Python programming tasks |
@@ -111,7 +113,6 @@ uv run benchkit --help
 | RULER | `ruler` | 39 × 6 | Practical long-context retrieval from 4K to 128K |
 | RULER Full | `ruler-full` | 6,500 × 6 | Research-scale RULER (explicit opt-in) |
 | XSTest | `xstest` | 450 | Safe compliance and unsafe refusal with an offline checker |
-| MedFailBench | `medfailbench` | 30 | Offline heuristic screen for high-risk clinical responses; not clinical validation, certification, deployment evidence, or model ranking |
 | GPQA | `gpqa` | 198 | Graduate-level science questions |
 | MMLU-Pro | `mmlu-pro` | 12,032 | Reasoning across 14 knowledge categories |
 | MMLU | `mmlu` | 14,042 | Academic and professional knowledge |
