@@ -10,7 +10,7 @@ Not vibes. Actual scores.
 
 <img src="https://img.shields.io/badge/Python-3.11%2B-2563EB?style=flat-square&logo=python&logoColor=white&labelColor=0b0b0b" alt="Python 3.11+">
 <img src="https://img.shields.io/badge/TUI-Textual-60A5FA?style=flat-square&labelColor=0b0b0b" alt="Built with Textual">
-<img src="https://img.shields.io/badge/Suites-21-34D399?style=flat-square&labelColor=0b0b0b" alt="21 benchmark suites">
+<img src="https://img.shields.io/badge/Suites-25-34D399?style=flat-square&labelColor=0b0b0b" alt="25 benchmark suites">
 <img src="https://img.shields.io/badge/License-Apache%202.0-6B7280?style=flat-square&labelColor=0b0b0b" alt="Apache 2.0">
 
 </div>
@@ -100,6 +100,7 @@ uv run benchkit --help
 | --- | --- | ---: | --- |
 | Aider Polyglot | `aider-polyglot` | 225 | Repository editing across six languages with Pi |
 | Git Surgery | `git-surgery` | 5 | Stateful Git operations with Pi |
+| PatchEval | `patcheval` | 20 | Real Python bug fixes verified by hidden tests with Pi |
 | Sanity | `sanity` | 25 | Fast checks across five core capabilities |
 | Three.js Arena | `treejs-arena` | 20 | Creative single-file scenes, scored only on whether they render |
 | HumanEval | `humaneval` | 164 | Python function completion |
