@@ -84,7 +84,7 @@ tables in the README.
   paired with the baseline and excluded from the overall model score.
 
 ### Creative Rendering (treejs-arena)
-- `treejs-arena` has no ground truth. Twenty frozen prompts ask for one
+- `treejs-arena` has no ground truth. Frozen prompts ask for one
   self-contained HTML file each; the file is opened in headless Chromium and the
   automatic score is binary: no uncaught exception, and a sized canvas that
   acquired a drawing context. Console output and blocked hosts are recorded and

@@ -24,7 +24,7 @@ from benchkit.evaluation import EvaluationResult
 
 # Frozen prompt set. Bump the version (and never edit a shipped prompt in
 # place) so screenshots from different runs stay comparable.
-PROMPT_SET_VERSION = "v1"
+PROMPT_SET_VERSION = "v2"
 
 PROMPT_PREFIX = (
     "Write a single self-contained HTML file that runs by opening it in a "
@@ -54,6 +54,11 @@ PROMPTS: tuple[tuple[str, str], ...] = (
     ("picking-grid", "Twelve labeled cubes in a grid where hovering highlights a cube and clicking locks a readout of its name."),
     ("analog-clock", "An analog clock showing the viewer's real local time, with correctly proportioned hour, minute and second hands."),
     ("instanced-city", "A city of 5,000 instanced buildings under a day-night cycle with a moving sun and cast shadows."),
+    ("ps5-gamepad", "A PlayStation 5 DualSense controller, modeled in detail and slowly rotating under studio lighting."),
+    ("hexapod-walk", "A six-legged robot walking forward across a plane with a tripod gait, its feet staying planted while they carry the body."),
+    ("domino-chain", "A chain of dominoes falling along an S-curve, toppling one after another."),
+    ("l-system-tree", "A tree grown from an L-system, branching recursively and swaying in the wind."),
+    ("reflective-pool", "A rippling pool reflecting the sky and a few floating objects, seen from a low angle."),
 )
 # fmt: on
 
@@ -141,7 +146,7 @@ def _clip(text: str) -> str:
 
 
 class TreeJSArena:
-    """Twenty frozen creative prompts scored only on whether the page renders."""
+    """Frozen creative prompts scored only on whether the page renders."""
 
     name = "treejs-arena"
     task_count = len(PROMPTS)

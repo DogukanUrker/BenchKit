@@ -100,7 +100,7 @@ uv run benchkit --help
 | --- | --- | ---: | --- |
 | PatchEval | `patcheval` | 20 | Real Python bug fixes verified by hidden tests with Pi |
 | Sanity | `sanity` | 25 | Fast checks across five core capabilities |
-| Three.js Arena | `treejs-arena` | 20 | Creative single-file scenes, scored only on whether they render |
+| Three.js Arena | `treejs-arena` | 25 | Creative single-file scenes, scored only on whether they render |
 | Git Surgery | `git-surgery` | 5 | Stateful Git operations with Pi |
 | MedFailBench | `medfailbench` | 30 | Offline heuristic screen for high-risk clinical responses; not clinical validation, certification, deployment evidence, or model ranking |
 | Aider Polyglot | `aider-polyglot` | 225 | Repository editing across six languages with Pi |
