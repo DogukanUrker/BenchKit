@@ -60,10 +60,13 @@ def arena_results(results: list[dict]) -> list[dict]:
     return [
         result
         for result in results
-        if result.get("scoring") == "render-only"
+        if result.get("scoring") in {"render-only", "build-metrics"}
         or any(
             isinstance(task.get("workspace"), dict)
-            and task["workspace"].get("render_status")
+            and (
+                task["workspace"].get("render_status")
+                or task["workspace"].get("build_status")
+            )
             for task in result.get("tasks") or []
         )
     ]
@@ -482,7 +485,26 @@ def save(
                             + str(workspace["patch"]).rstrip()
                             + "\n~~~\n\n"
                         )
-                    if workspace.get("render_status"):
+                    if workspace.get("build_status"):
+                        f.write(
+                            f"**Build:** {workspace['build_status']} · "
+                            f"{workspace.get('blocks_total', 0)} block(s) · "
+                            f"{workspace.get('palette_size', 0)} block type(s) · "
+                            f"{workspace.get('hallucinated_blocks', 0)} "
+                            "non-existent id(s) · "
+                            f"{workspace.get('blocks_out_of_bounds', 0)} "
+                            "out of bounds · "
+                            f"{workspace.get('floating_fraction', 0)} floating\n\n"
+                        )
+                        for view in ("iso", "side", "top"):
+                            if shot := workspace.get(f"screenshot_{view}"):
+                                f.write(
+                                    f"![{task.get('task_id', 'build')} {view}]"
+                                    f"({shot})\n\n"
+                                )
+                        if script := workspace.get("script_py"):
+                            f.write(f"Build script: [{script}]({script})\n\n")
+                    elif workspace.get("render_status"):
                         f.write(
                             f"**Render:** {workspace['render_status']} · "
                             f"{len(workspace.get('console_errors') or [])} console "

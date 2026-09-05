@@ -23,8 +23,15 @@ _COUNTER = 0
 COLLECTED = (
     ("screenshot", "screenshots", ".png"),
     ("screenshot_thumbnail", "screenshots", ".jpg"),
+    # mc-arena photographs one build from three fixed cameras; the plain
+    # ``screenshot`` above is the three of them side by side.
+    ("screenshot_iso", "screenshots", "-iso.png"),
+    ("screenshot_side", "screenshots", "-side.png"),
+    ("screenshot_top", "screenshots", "-top.png"),
     ("page_html", "pages", ".html"),
     ("response_text", "pages", ".txt"),
+    ("script_py", "builds", ".py"),
+    ("blocks_json", "builds", ".json"),
 )
 
 

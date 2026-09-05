@@ -189,3 +189,9 @@ cython_debug/
 
 # personal scratch notes
 *.local.md
+
+# The mc-arena viewer is a committed browser bundle plus its build recipe, not
+# Python packaging output; the generic build/ and dist/ rules above would hide
+# both.
+!src/benchkit/mc_viewer/build/
+!src/benchkit/mc_viewer/dist/

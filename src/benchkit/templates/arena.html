@@ -256,6 +256,10 @@
     // output-limit stop - still belongs here: leaving it out would quietly
     // shrink the denominator and overstate the render rate.
     const status = task => {
+      // mc-arena is scored on the block list its script printed, so its own
+      // verdict wins over whether a picture came back.
+      const built = task.workspace?.build_status;
+      if (built) return built;
       const rendered = task.workspace?.render_status;
       if (rendered) return rendered;
       if (task.loop_killed) return "loop_killed";
@@ -271,7 +275,8 @@
     const entries = arena.results.flatMap(row => (row.tasks || [])
       .map(task => ({ model: row.model, harness: row.harness_label || "", row, task, status: status(task) })));
 
-    const rendered = entries.filter(entry => entry.status === "rendered");
+    const PASSED = new Set(["rendered", "valid"]);
+    const rendered = entries.filter(entry => PASSED.has(entry.status));
     // Machines without a browser, a GPU stack or a route to the CDN are
     // ordinary: those tasks keep their credit and are not counted against
     // the render rate.
@@ -291,8 +296,12 @@
     ].filter(Boolean).join(" · ");
     document.getElementById("footerMeta").textContent = [date, environment].filter(Boolean).join(" · ");
     document.getElementById("rate").textContent = percent(rendered.length, scored.length);
+    // treejs-arena passes on rendering, mc-arena on producing a usable build.
+    const passLabel = entries.some(entry => entry.task.workspace?.build_status)
+      ? (entries.every(entry => entry.task.workspace?.build_status) ? "builds valid" : "passed")
+      : "pages rendered";
     document.getElementById("rateLabel").textContent = scored.length
-      ? `${rendered.length}/${scored.length} pages rendered${skipped.length ? ` · ${skipped.length} skipped` : ""}`
+      ? `${rendered.length}/${scored.length} ${passLabel}${skipped.length ? ` · ${skipped.length} skipped` : ""}`
       : `${skipped.length} skipped · this machine cannot render`;
 
     const scenes = new Map();
@@ -306,7 +315,7 @@
     document.getElementById("summary").innerHTML = [
       { value: models.length, label: "models" },
       { value: scenes.size, label: "scenes" },
-      { value: `${rendered.length}/${scored.length}`, label: skipped.length ? `rendered · ${skipped.length} skipped` : "rendered" },
+      { value: `${rendered.length}/${scored.length}`, label: skipped.length ? `${passLabel} · ${skipped.length} skipped` : passLabel },
       { value: harnessErrors.length ? `${repairs} · ${harnessErrors.length}` : repairs, label: harnessErrors.length ? "repairs · harness errors" : "repair turns" },
     ].map(stat => `<div class="stat">
       <div class="stat-value">${escapeHtml(stat.value)}</div>
@@ -316,7 +325,7 @@
     document.getElementById("models").innerHTML = models.map(model => {
       const own = entries.filter(entry => entry.model === model);
       const judged = own.filter(entry => entry.status !== "skipped");
-      const ok = own.filter(entry => entry.status === "rendered").length;
+      const ok = own.filter(entry => PASSED.has(entry.status)).length;
       const share = judged.length ? ok / judged.length * 100 : 0;
       const modelRepairs = own.reduce((sum, entry) => sum + number(entry.task.repair_attempts_used), 0);
       const skips = own.length - judged.length;
@@ -329,6 +338,12 @@
 
     const STATUS_TEXT = {
       rendered: "RENDERED",
+      valid: "VALID BUILD",
+      invalid: "INVALID BUILD",
+      no_script: "NO SCRIPT",
+      script_error: "SCRIPT ERROR",
+      script_timeout: "SCRIPT TIMEOUT",
+      bad_output: "BAD OUTPUT",
       failed: "FAILED",
       no_html: "NO HTML",
       skipped: "SKIPPED",
@@ -338,13 +353,14 @@
       length_exceeded: "LENGTH LIMIT",
       not_rendered: "NOT RENDERED",
     };
-    const WARN = new Set(["harness_error", "timed_out", "loop_killed", "length_exceeded"]);
+    const WARN = new Set(["harness_error", "timed_out", "loop_killed", "length_exceeded", "script_timeout"]);
     const NEUTRAL = new Set(["skipped"]);
     const diagnostics = task => [
       ...(task.workspace?.page_errors || []).map(item => `[uncaught] ${item}`),
       ...(task.workspace?.console_errors || []).map(item => `[console] ${item}`),
       ...(task.workspace?.blocked_requests || []).map(item => `[blocked] ${item}`),
       ...(task.workspace?.failed_requests || []).map(item => `[network] ${item}`),
+      ...(task.workspace?.render_diagnostics ? [task.workspace.render_diagnostics] : []),
       ...(task.workspace?.skip_reason ? [`[skipped] ${task.workspace.skip_reason}`] : []),
       ...(task.error ? [`[harness] ${task.error}`] : []),
     ].join("\n");
@@ -354,13 +370,28 @@
       const workspace = task.workspace || {};
       const page = workspace.page_html;
       const answer = workspace.response_text;
-      const shot = workspace.screenshot;
+      // For a build the three views are one wide strip; the isometric view on
+      // its own is what fits a card.
+      const shot = workspace.screenshot_iso || workspace.screenshot;
+      const sheet = workspace.screenshot;
       const label = `${model} · ${task.task_id}`;
       // Whatever the model actually produced, in the form it survives as.
       const target = page || answer;
       const poster = shot
         ? `<img loading="lazy" src="${escapeHtml(shot)}" alt="${escapeHtml(label)}">`
         : `<div class="stage-empty">${escapeHtml(STATUS_TEXT[status] || "no screenshot")}</div>`;
+      // A build-scored task carries numbers a screenshot cannot show.
+      const builtStats = workspace.build_status && workspace.blocks_total !== undefined
+        ? [
+            `${number(workspace.blocks_total)} blocks`,
+            `${number(workspace.palette_size)} block types`,
+            `${(number(workspace.floating_fraction) * 100).toFixed(0)}% floating`,
+            number(workspace.hallucinated_blocks) ? `${number(workspace.hallucinated_blocks)} fake ids` : "",
+          ].filter(Boolean).join(" · ")
+        : "";
+      const views = ["iso", "side", "top"]
+        .map(view => [view, workspace[`screenshot_${view}`]])
+        .filter(([, path]) => path);
       const trace = diagnostics(task);
       return `<article class="card">
         <div class="stage"${page ? ` data-page="${escapeHtml(page)}" data-label="${escapeHtml(label)}"` : ""}>
@@ -371,14 +402,17 @@
         <div class="card-foot">
           <div>
             <div class="card-model" title="${escapeHtml(model)}">${escapeHtml(model)}</div>
-            <div class="card-sub">${escapeHtml(harness)}${number(task.repair_attempts_used) ? ` · ${number(task.repair_attempts_used)} repair${number(task.repair_attempts_used) === 1 ? "" : "s"}` : ""}${workspace.render_status && status !== "skipped" ? ` · ${number(workspace.animation_frames)} frames` : ""}</div>
+            <div class="card-sub">${escapeHtml(harness)}${number(task.repair_attempts_used) ? ` · ${number(task.repair_attempts_used)} repair${number(task.repair_attempts_used) === 1 ? "" : "s"}` : ""}${builtStats ? ` · ${escapeHtml(builtStats)}` : workspace.render_status && status !== "skipped" ? ` · ${number(workspace.animation_frames)} frames` : ""}</div>
           </div>
-          <span class="status ${status === "rendered" ? "pass" : NEUTRAL.has(status) ? "skip" : WARN.has(status) ? "warn" : ""}">${escapeHtml(STATUS_TEXT[status] || "FAILED")}</span>
+          <span class="status ${PASSED.has(status) ? "pass" : NEUTRAL.has(status) ? "skip" : WARN.has(status) ? "warn" : ""}">${escapeHtml(STATUS_TEXT[status] || "FAILED")}</span>
         </div>
         <div class="links">
           ${page ? `<a href="${escapeHtml(page)}" target="_blank" rel="noopener noreferrer">Open page ↗</a>` : ""}
           ${answer ? `<a href="${escapeHtml(answer)}" target="_blank" rel="noopener noreferrer">Open answer ↗</a>` : ""}
-          ${shot ? `<a href="${escapeHtml(shot)}" target="_blank" rel="noopener noreferrer">Full screenshot ↗</a>` : ""}
+          ${sheet ? `<a href="${escapeHtml(sheet)}" target="_blank" rel="noopener noreferrer">Full screenshot ↗</a>` : ""}
+          ${views.map(([view, path]) => `<a href="${escapeHtml(path)}" target="_blank" rel="noopener noreferrer">${escapeHtml(view)} ↗</a>`).join("")}
+          ${workspace.script_py ? `<a href="${escapeHtml(workspace.script_py)}" target="_blank" rel="noopener noreferrer">Script ↗</a>` : ""}
+          ${workspace.blocks_json ? `<a href="${escapeHtml(workspace.blocks_json)}" target="_blank" rel="noopener noreferrer">Blocks ↗</a>` : ""}
         </div>
         ${trace ? `<details class="diag"><summary>${status === "skipped" ? "Why this was skipped" : "Browser diagnostics"}</summary><pre>${escapeHtml(trace)}</pre></details>` : ""}
       </article>`;
@@ -388,7 +422,7 @@
       ? [...scenes.values()].map(scene => `<section class="scene">
           <div class="scene-head">
             <h2 class="scene-title">${escapeHtml(scene.scene || scene.id)}</h2>
-            <span class="scene-id">${escapeHtml(scene.id)} · ${scene.entries.filter(entry => entry.status === "rendered").length}/${scene.entries.length} rendered</span>
+            <span class="scene-id">${escapeHtml(scene.id)} · ${scene.entries.filter(entry => PASSED.has(entry.status)).length}/${scene.entries.length} ${passLabel}</span>
           </div>
           <div class="grid">${scene.entries.map(cards).join("")}</div>
         </section>`).join("")
