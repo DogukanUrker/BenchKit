@@ -28,10 +28,10 @@ def staged(tmp_path, monkeypatch):
 
 def test_prompt_set_is_frozen_and_prefixed() -> None:
     tasks = TreeJSArena().load_tasks()
-    assert len(tasks) == 20 == len(PROMPTS)
-    assert len({slug for slug, _ in PROMPTS}) == 20
-    assert len({scene for _, scene in PROMPTS}) == 20
-    assert [task.id for task in tasks] == [f"TreeJSArena/{i}" for i in range(20)]
+    assert len(tasks) == 25 == len(PROMPTS)
+    assert len({slug for slug, _ in PROMPTS}) == 25
+    assert len({scene for _, scene in PROMPTS}) == 25
+    assert [task.id for task in tasks] == [f"TreeJSArena/{i}" for i in range(25)]
     for task, (slug, scene) in zip(tasks, PROMPTS, strict=True):
         assert task.prompt.startswith(PROMPT_PREFIX)
         assert task.prompt.endswith(scene)
