@@ -31,14 +31,16 @@ silently drop.
 ## Rebuilding
 
 ```bash
-npm install --ignore-scripts   # --ignore-scripts: the viewer's own prepare
-npm run build                  # step rebuilds atlases and needs cairo
+npm install --ignore-scripts   # skips the viewer's own prepare hook, which
+                               # regenerates atlases and needs cairo
+npm run build                  # rebuilds the JavaScript bundles only
 ```
 
-The output lands in `../dist/*.js`. `atlas.png` and `blockStates.json.gz` are
-produced by prismarine-viewer's own `viewer/prerender.js` (which needs the
-`canvas` native module and therefore cairo); regenerate them only when moving
-to a different Minecraft version:
+That rebuilds `../dist/*.js` and nothing else. `atlas.png` and
+`blockStates.json.gz` come from prismarine-viewer's own `viewer/prerender.js`
+(which needs the `canvas` native module and therefore cairo), so regenerating
+them is a separate step, needed only when moving to a different Minecraft
+version:
 
 ```bash
 git clone https://github.com/mc-bench/prismarine-viewer

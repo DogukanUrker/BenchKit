@@ -17,6 +17,7 @@ Docker, in :func:`benchkit.sandbox.run_python_script`.
 from __future__ import annotations
 
 import atexit
+import contextlib
 import functools
 import http.server
 import json
@@ -176,7 +177,9 @@ def _render(
         )
         return
 
-    url = _site().url(_stage_build(blocks))
+    site = _site()
+    staged = _stage_build(blocks)
+    url = site.url(staged)
     timeout_ms = timeout_s * 1000
     try:
         with sync_playwright() as playwright:
@@ -240,6 +243,11 @@ def _render(
             result.error = message
     except Exception as exc:  # pragma: no cover - defensive
         result.error = f"{type(exc).__name__}: {exc}"
+    finally:
+        # The viewer has read it by now, and a long run would otherwise leave
+        # one of these behind per task until the process exits.
+        with contextlib.suppress(OSError):
+            (site.root / staged).unlink()
 
 
 def render_build(

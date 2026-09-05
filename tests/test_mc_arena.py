@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from benchkit import artifacts
+from benchkit import artifacts, sandbox
 from benchkit.benchmarks import REGISTRY
 from benchkit.benchmarks.mc_arena import (
     PROMPT_PREFIX,
@@ -18,7 +18,7 @@ from benchkit.benchmarks.mc_arena import (
 )
 from benchkit.mc_render import BUILD_SIZE, MCRenderResult
 from benchkit.report import arena_results, save
-from benchkit.sandbox import SandboxError, ScriptRun
+from benchkit.sandbox import SandboxError, ScriptRun, _CappedStream
 
 SCRIPT = '# /// script\n# dependencies = []\n# ///\nimport json\nprint("[]")'
 
@@ -318,3 +318,48 @@ def test_builds_reach_the_gallery_and_the_report(staged, offline, monkeypatch):
     script = stored[0]["tasks"][0]["workspace"]["script_py"]
     assert script.startswith("builds/")
     assert (out / script).is_file()
+
+
+class _Pipe:
+    """A readable stand-in for a subprocess pipe."""
+
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+        self.closed = False
+
+    def read(self, _size):
+        return self.chunks.pop(0) if self.chunks else ""
+
+    def close(self):
+        self.closed = True
+
+
+def test_capped_stream_keeps_a_bounded_prefix() -> None:
+    # A script that prints forever must not be buffered whole in this process:
+    # the container's memory limit does not reach the host's copy.
+    stream = _CappedStream(_Pipe(["a" * 100] * 50), limit=150)
+    stream.pump()
+    assert stream.text == "a" * 150
+    assert stream.truncated
+    # Everything past the cap is still drained, so the writer never blocks.
+    assert stream.stream.closed
+
+
+def test_capped_stream_keeps_short_output_whole() -> None:
+    stream = _CappedStream(_Pipe(['[{"x": 0}]']), limit=1024)
+    stream.pump()
+    assert stream.text == '[{"x": 0}]'
+    assert not stream.truncated
+
+
+def test_cleanup_forgets_the_image_it_deleted(monkeypatch) -> None:
+    # cleanup_run_resources removes every image carrying this run's label,
+    # mc-arena's included. Handing the deleted tag to a later job would turn
+    # every task into a harness error.
+    monkeypatch.setattr(sandbox, "_docker_binary", lambda: "docker")
+    monkeypatch.setattr(sandbox, "_remove_labelled", lambda *args: None)
+    monkeypatch.setattr(sandbox, "_MC_ARENA_READY", True)
+
+    sandbox.cleanup_run_resources()
+
+    assert sandbox._MC_ARENA_READY is False

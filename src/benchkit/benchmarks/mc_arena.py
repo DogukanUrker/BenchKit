@@ -407,6 +407,10 @@ class MCArena:
 
         # The picture is never the verdict, so a machine that cannot render
         # still scores the build. It just has nothing to show for it.
+        #
+        # Invalid builds are photographed too, before the check below rejects
+        # them: a build that put one block outside the volume is exactly the
+        # one worth looking at, and the gallery marks it INVALID either way.
         render = render_build(blocks, directory)
         details["render_status"] = "rendered" if render.rendered else "skipped"
         if render.rendered:
