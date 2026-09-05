@@ -132,6 +132,44 @@ tables in the README.
   the poster and the record of what the run actually saw. `Open ↗` opens the page
   in a full tab, and the header toggle turns live previews off.
 
+### Minecraft Builds (mc-arena)
+- `mc-arena` has no ground truth either, but "it rendered" is deliberately not
+  the score: a block list renders whether it is a watchtower or three blocks of
+  dirt. Frozen prompts ask for one self-contained PEP 723 Python script that
+  prints a JSON array of `{x, y, z, block}` into a fixed 32x32x32 volume with
+  its origin at (0, 0, 0). The prompt shows a full block id, because without one
+  smaller models answer `oak plank` and every block fails validation for the
+  wrong reason.
+- The script is untrusted and runs through `sandbox.run_python_script`: a
+  throwaway container with no network, no capabilities, a read-only rootfs and
+  memory, process and time limits. Do not give it network, host mounts, or the
+  answer to anything. A `SandboxError` is a harness error, not a wrong answer.
+- Scoring is deterministic and never uses a judge. Passing means the block list
+  is *usable*: the script ran, the ids all exist, everything stayed in the
+  volume, the entries were well formed and something was built. Quality is
+  reported rather than scored - block count, palette size and evenness, the
+  dominant block's share, floating (unsupported) fraction, duplicate positions,
+  bounding box and fill. Keep it that way: these numbers are the signal, and a
+  pass rate on its own would say almost nothing.
+- Repairs come from the engine's `--repair-attempts`, fed by the verifier
+  feedback (a traceback, a parse failure, or the offending ids). `mc-arena` is
+  excluded from the overall average, like RULER and treejs-arena.
+- Block ids are validated against `datasets/mc_blocks_1_20_1.jsonl`, the same
+  Minecraft version the renderer draws, so a build cannot pass with an id the
+  renderer would silently drop. Update both together.
+- Rendering is prismarine-viewer, pinned and committed under `mc_viewer/`; see
+  `mc_viewer/build/README.md`. Each build is photographed from three fixed
+  cameras (isometric, side, top-down) at a fixed distance, lens and size, and
+  the rig lives in `mc_viewer/build/entry.js`. Changing the rig or the prompt
+  set makes old screenshots incomparable - version it, do not edit in place.
+- The viewer is served over a loopback HTTP server because Chromium refuses to
+  start a web worker from a `file://` page. The page is BenchKit's own code;
+  the model contributes block coordinates, never markup or script.
+- A machine with no browser or no WebGL is an ordinary place to run mc-arena.
+  The render is skipped, `render_status` is `skipped` with a `skip_reason`, and
+  the build still scores from its block list - the picture is an illustration,
+  never the verdict.
+
 ### Concurrency and Metrics
 - Request concurrency is detected from server slot endpoints or explicit
   metadata and is bounded by task count. Model jobs remain sequential; tasks

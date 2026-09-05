@@ -29,6 +29,7 @@ _PROXY_SOURCE = Path(__file__).with_name("_pi_proxy.py")
 _ANSWER_KEY_GUARD_SOURCE = Path(__file__).with_name("answer_key_guard.ts")
 _PI_PACKAGE_ROOT = Path(__file__).with_name("pi_package")
 _PATCHEVAL_IMAGE_SESSION = uuid.uuid4().hex[:12]
+_MC_ARENA_IMAGE_SESSION = uuid.uuid4().hex[:12]
 _BUILDKIT_DRIVER_IMAGE = "moby/buildkit:buildx-stable-1"
 
 # One label scopes every image, container, network, volume, and build-cache
@@ -651,6 +652,177 @@ def cleanup_run_resources(docker: str | None = None) -> None:
             )
     if errors:
         raise SandboxError("Pi Docker cleanup failed: " + "; ".join(errors))
+
+
+# mc-arena runs one untrusted, model-written Python script per task. The script
+# only has to print JSON, so the image is a stock Python plus uv: the suite's
+# answer contract is a PEP 723 script, and uv is what runs those.
+MC_ARENA_IMAGE = f"benchkit-mc-arena:{_MC_ARENA_IMAGE_SESSION}"
+MC_ARENA_UV_VERSION = "0.8.17"
+MC_ARENA_DEFAULT_BASE = "python:3.12-slim"
+
+
+def _mc_arena_base_image() -> str:
+    """The Python base image, overridable for hosts behind a registry mirror."""
+    return (
+        os.environ.get("BENCHKIT_MC_ARENA_BASE_IMAGE") or MC_ARENA_DEFAULT_BASE
+    ).strip()
+
+
+def _mc_arena_dockerfile() -> str:
+    return f"""\
+FROM {_mc_arena_base_image()}
+
+RUN pip install --no-cache-dir uv=={MC_ARENA_UV_VERSION} \\
+    && useradd --create-home --uid 1000 runner \\
+    && mkdir -p /work && chown runner:runner /work
+
+USER runner
+WORKDIR /work
+ENV HOME=/home/runner UV_NO_PROGRESS=1 UV_OFFLINE=1
+CMD ["sleep", "infinity"]
+"""
+
+
+_MC_ARENA_READY = False
+_MC_ARENA_LOCK = threading.Lock()
+
+
+def mc_arena_image() -> str:
+    """Build the mc-arena script runner once per process and return its tag.
+
+    ``BENCHKIT_MC_ARENA_IMAGE`` names an already-built image instead, for hosts
+    that cannot build one (no registry route, no build network). It has to
+    provide ``uv`` on PATH and a writable ``/work``.
+    """
+    prebuilt = os.environ.get("BENCHKIT_MC_ARENA_IMAGE", "").strip()
+    if prebuilt:
+        return prebuilt
+
+    global _MC_ARENA_READY
+    if _MC_ARENA_READY:
+        return MC_ARENA_IMAGE
+    docker = _docker_binary()
+    with _MC_ARENA_LOCK:
+        if _MC_ARENA_READY:
+            return MC_ARENA_IMAGE
+        _run([docker, "version", "--format", "{{.Server.Version}}"], timeout=10)
+        dockerfile = _mc_arena_dockerfile()
+        with tempfile.TemporaryDirectory(prefix="benchkit-mc-arena-build-") as name:
+            context = Path(name)
+            (context / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+            _build_with_run_builder(docker, MC_ARENA_IMAGE, dockerfile, context)
+        _MC_ARENA_READY = True
+    return MC_ARENA_IMAGE
+
+
+@dataclass(frozen=True)
+class ScriptRun:
+    """One execution of a model-written script inside the sandbox."""
+
+    exit_code: int
+    stdout: str
+    stderr: str
+    timed_out: bool = False
+
+    @property
+    def ok(self) -> bool:
+        return self.exit_code == 0 and not self.timed_out
+
+
+def run_python_script(
+    code: str,
+    *,
+    timeout_s: float = 30.0,
+    stdout_limit: int = 8 * 1024 * 1024,
+) -> ScriptRun:
+    """Run one untrusted Python script in a throwaway, network-less container.
+
+    The container has no network, no capabilities and a read-only root
+    filesystem with small writable tmpfs mounts, plus hard memory, process and
+    time limits: a script that forks, allocates or spins is bounded by the
+    sandbox rather than by anything the script itself agrees to.
+    """
+    docker = _docker_binary()
+    image = mc_arena_image()
+    container = f"benchkit-mc-arena-{uuid.uuid4().hex[:12]}"
+    memory = os.environ.get("BENCHKIT_MC_ARENA_MEMORY", "512m")
+    cpus = os.environ.get("BENCHKIT_MC_ARENA_CPUS", "1")
+    pids = os.environ.get("BENCHKIT_MC_ARENA_PIDS", "64")
+
+    try:
+        _run(
+            [
+                docker,
+                "run",
+                "--detach",
+                "--name",
+                container,
+                *resource_labels(),
+                "--network",
+                "none",
+                "--cap-drop",
+                "ALL",
+                "--security-opt",
+                "no-new-privileges",
+                "--read-only",
+                "--tmpfs",
+                "/tmp:size=64m",
+                "--tmpfs",
+                "/home/runner:size=64m,uid=1000,gid=1000",
+                "--tmpfs",
+                "/work:size=16m,uid=1000,gid=1000",
+                "--pids-limit",
+                pids,
+                "--memory",
+                memory,
+                "--cpus",
+                cpus,
+                image,
+                "sleep",
+                "infinity",
+            ],
+            timeout=120,
+        )
+        # `docker cp` refuses a read-only rootfs even when the destination is a
+        # tmpfs, so the script is written from inside the container instead.
+        _run(
+            [docker, "exec", "--interactive", container, "tee", "/work/build.py"],
+            input_text=code,
+            timeout=60,
+        )
+        completed = _run(
+            [
+                docker,
+                "exec",
+                "--workdir",
+                "/work",
+                container,
+                "timeout",
+                "--signal=KILL",
+                f"{timeout_s:g}s",
+                "uv",
+                "run",
+                "--no-project",
+                "--offline",
+                "build.py",
+            ],
+            timeout=timeout_s + 60,
+            check=False,
+        )
+    finally:
+        with contextlib.suppress(Exception):
+            _run([docker, "rm", "--force", container], timeout=60, check=False)
+
+    stdout = completed.stdout or ""
+    return ScriptRun(
+        exit_code=completed.returncode,
+        # A runaway print loop should not be carried around in memory forever.
+        stdout=stdout[:stdout_limit],
+        stderr=_tail(completed.stderr or "", 8000),
+        # `timeout` reports 137 for the KILL it sends once the deadline passes.
+        timed_out=completed.returncode == 137,
+    )
 
 
 def aider_pi_image() -> LatestPiImage:
