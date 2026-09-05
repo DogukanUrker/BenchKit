@@ -49,6 +49,12 @@ cp public/textures/<version>.png     ../dist/atlas.png
 gzip -9 -c public/blocksStates/<version>.json > ../dist/blockStates.json.gz
 ```
 
+Direct dependencies are pinned to exact versions above, but prismarine-viewer's
+own transitive dependencies are ranged, so two installs can resolve differently
+and produce a different committed bundle. `package-lock.json` is deliberately
+not ignored: commit the one this install writes, so the bundle in `../dist` can
+be reproduced from source.
+
 `minecraft-data` ships every Minecraft version ever released. `webpack.config.js`
 drops everything the pinned version does not map to - without that filter the
 worker bundle is 116 MB rather than 3 MB.
