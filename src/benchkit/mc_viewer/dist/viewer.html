@@ -10,6 +10,10 @@
     figure { margin: 0; }
     img { display: block; }
     figcaption { padding: 6px 8px; color: #6b7280; text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
+    /* Interactive mode: one canvas, filling the window, no captions. */
+    body.interactive { overflow: hidden; background: #dfe6ee; }
+    body.interactive #views { display: block; }
+    body.interactive canvas { display: block; width: 100vw; height: 100vh; }
   </style>
 </head>
 <body>

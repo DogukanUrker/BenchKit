@@ -18,7 +18,10 @@ nor a network: only Python, Chromium and Docker.
 | `version.json` | the pinned Minecraft version and viewer commit |
 
 `entry.js` also owns the camera rig: the build volume, the three camera
-positions, the lens and the image size. Changing any of them makes new
+positions, the lens and the image size. It has a second mode,
+`viewer.html?interactive=1&build=<url>`, which replaces the rig with one
+full-window canvas the reader can orbit, pan and zoom; the gallery uses it for
+live previews, and `benchkit history` is what serves it. Changing any of them makes new
 screenshots incomparable with old ones, so treat it the way the prompt set is
 treated and say so in the run notes.
 

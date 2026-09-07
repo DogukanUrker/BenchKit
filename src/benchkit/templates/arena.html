@@ -292,7 +292,7 @@
       date,
       environment,
       promptSets.length ? `prompt set ${promptSets.join(", ")}` : "",
-      "previews run live in this browser · Open ↗ for a full tab",
+      "previews run live in this browser · drag to orbit · Open ↗ for a full tab",
     ].filter(Boolean).join(" · ");
     document.getElementById("footerMeta").textContent = [date, environment].filter(Boolean).join(" · ");
     document.getElementById("rate").textContent = percent(rendered.length, scored.length);
@@ -392,12 +392,19 @@
       const views = ["iso", "side", "top"]
         .map(view => [view, workspace[`screenshot_${view}`]])
         .filter(([, path]) => path);
+      // treejs runs the model's own page; mc-arena has no page, so its live
+      // preview is BenchKit's viewer pointed at the block list. The viewer is
+      // served by `benchkit history`, so this resolves there and nowhere else
+      // - opened straight off disk the card keeps the screenshot instead.
+      const explore = !page && workspace.blocks_json
+        ? `/viewer/viewer.html?interactive=1&build=${encodeURIComponent(new URL(workspace.blocks_json, location.href).href)}`
+        : "";
       const trace = diagnostics(task);
       return `<article class="card">
-        <div class="stage"${page ? ` data-page="${escapeHtml(page)}" data-label="${escapeHtml(label)}"` : ""}>
+        <div class="stage"${page || explore ? ` data-page="${escapeHtml(page || explore)}" data-label="${escapeHtml(label)}"${explore ? ' data-trusted="1"' : ""}` : ""}>
           ${poster}
           ${target ? `<a class="stage-link" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer" title="${page ? "Open the generated page in a new tab" : "Open the model's answer in a new tab"}"><span class="open-hint">${page ? "Open page ↗" : "Open answer ↗"}</span></a>` : ""}
-          ${page ? `<a class="open-badge" href="${escapeHtml(page)}" target="_blank" rel="noopener noreferrer">Open ↗</a>` : ""}
+          ${page || explore ? `<a class="open-badge" href="${escapeHtml(page || explore)}" target="_blank" rel="noopener noreferrer">Open ↗</a>` : ""}
         </div>
         <div class="card-foot">
           <div>
@@ -450,7 +457,17 @@
       while (live.length >= MAX_LIVE) unload(live[0]);
       const frame = document.createElement("iframe");
       // Untrusted model output: scripts only, no access to this page.
-      frame.setAttribute("sandbox", "allow-scripts allow-pointer-lock");
+      // A treejs scene is a page the model wrote, so it is sandboxed into an
+      // opaque origin and can touch nothing here. The mc-arena viewer is
+      // BenchKit's own page - the model contributed block coordinates, not
+      // code - and it needs a real origin: prismarine-viewer meshes chunks in
+      // a web worker, and an opaque origin cannot start one.
+      frame.setAttribute(
+        "sandbox",
+        stage.dataset.trusted
+          ? "allow-scripts allow-same-origin"
+          : "allow-scripts allow-pointer-lock"
+      );
       frame.setAttribute("loading", "lazy");
       frame.setAttribute("title", `${stage.dataset.label || "scene"} (live)`);
       frame.src = stage.dataset.page;

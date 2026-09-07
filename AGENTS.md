@@ -46,7 +46,11 @@ tables in the README.
 - `--headless` uses the same engine and report pipeline as the TUI. `--verbose`
   prints prompts, available reasoning traces, and responses.
 - `benchkit history` serves completed benchmark and performance reports from
-  one or more results directories on localhost.
+  one or more results directories on localhost. It also serves the files inside
+  those run directories, so a run's gallery and HTML report open from the
+  dashboard. Artifact URLs name their results root by index and are resolved
+  and checked to stay inside it; pages the model wrote (`pages/`) are served
+  with a sandbox CSP so they cannot read anything else the server exposes.
 - `benchkit perf MODEL` profiles prompt processing, generation speed, time to
   first token, wall time, and client overhead across configurable contexts.
 
@@ -125,8 +129,9 @@ tables in the README.
   deliberately not standalone. `results.html` keeps the numbers and links to the
   gallery rather than embedding images.
 - A preview runs the generated page itself, in an iframe sandboxed to
-  `allow-scripts allow-pointer-lock`, so a scene the benchmark machine could not
-  render still plays in whatever browser opens the gallery. Frames load and
+  `allow-scripts allow-pointer-lock` - an opaque origin, because the page is
+  the model's own code - so a scene the benchmark machine could not render
+  still plays in whatever browser opens the gallery. Frames load and
   unload with an IntersectionObserver and are capped, because browsers keep only
   a handful of WebGL contexts alive; the captured screenshot sits underneath as
   the poster and the record of what the run actually saw. `Open ↗` opens the page
@@ -169,6 +174,19 @@ tables in the README.
   The render is skipped, `render_status` is `skipped` with a `skip_reason`, and
   the build still scores from its block list - the picture is an illustration,
   never the verdict.
+- The gallery can also explore a build in 3D: `viewer.html?interactive=1&build=`
+  drops the three-camera rig for one full-window canvas with orbit, pan and
+  zoom. The card loads it in place of a page preview, with the screenshot as
+  the poster underneath. Unlike a treejs scene this frame is BenchKit's own
+  code - the model contributed block coordinates, not markup - so it gets
+  `allow-scripts allow-same-origin`; prismarine-viewer meshes in a web worker
+  and an opaque origin cannot start one.
+- Interactive viewing only works over HTTP, for the same reason the renderer
+  runs its own loopback server: browsers refuse to start a worker from a
+  `file://` page. `benchkit history` serves the viewer straight from the
+  installed package at `/viewer/`, so it is never copied into a run directory.
+  A gallery opened straight off disk keeps the screenshots and loses only the
+  3D - never the scores, which never depended on it.
 
 ### Concurrency and Metrics
 - Request concurrency is detected from server slot endpoints or explicit

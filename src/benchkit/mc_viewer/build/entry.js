@@ -8,7 +8,7 @@
 // where prismarine-viewer's meshing workers and WebGL renderer live.
 global.THREE = require('three')
 
-const { Viewer } = require('prismarine-viewer/viewer')
+const { Viewer, MapControls } = require('prismarine-viewer/viewer')
 const { Vec3 } = require('vec3')
 
 const VERSION = require('./version.json').minecraft_version
@@ -116,14 +116,50 @@ function place (camera, view) {
   camera.updateProjectionMatrix()
 }
 
+/** Orbit, pan and zoom around the build until the page goes away. */
+function explore (viewer, renderer, canvas) {
+  const resize = () => {
+    const width = window.innerWidth
+    const height = window.innerHeight
+    renderer.setSize(width, height)
+    viewer.camera.aspect = width / height
+    viewer.camera.updateProjectionMatrix()
+  }
+  window.addEventListener('resize', resize)
+  resize()
+
+  const controls = new MapControls(viewer.camera, canvas)
+  controls.target.set(CENTER.x, CENTER.y, CENTER.z)
+  // Keep the viewer inside the neighbourhood of the build: the scene holds
+  // nothing else, so letting the camera fly off just loses it.
+  controls.minDistance = 8
+  controls.maxDistance = DISTANCE * 2
+  controls.update()
+
+  const frame = () => {
+    window.requestAnimationFrame(frame)
+    controls.update()
+    viewer.update()
+    renderer.render(viewer.scene, viewer.camera)
+  }
+  frame()
+}
+
 async function main () {
   const parameters = new URLSearchParams(window.location.search)
+  // Interactive mode is for a person looking at one build; the default is the
+  // fixed three-camera rig the benchmark photographs every build with.
+  const interactive = parameters.get('interactive') === '1'
   const blocks = await fetch(parameters.get('build') || 'build.json').then(r => r.json())
 
   const canvas = document.createElement('canvas')
   const renderer = new global.THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true })
   renderer.setPixelRatio(1)
   renderer.setSize(IMAGE, IMAGE)
+  if (interactive) {
+    document.body.classList.add('interactive')
+    document.getElementById('views').append(canvas)
+  }
 
   const viewer = new Viewer(renderer)
   viewer.scene.background = new global.THREE.Color('#dfe6ee')
@@ -139,6 +175,13 @@ async function main () {
     viewer.addColumn(cx, cz, chunk.toJson())
   }
   await viewer.world.waitForChunksToRender()
+
+  if (interactive) {
+    place(viewer.camera, VIEWS[0])
+    explore(viewer, renderer, canvas)
+    window.__mcarena = { ok: true, version: VERSION, placed, unresolved: unknown, interactive: true }
+    return
+  }
 
   const shots = document.getElementById('views')
   for (const view of VIEWS) {
