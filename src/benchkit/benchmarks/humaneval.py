@@ -1,6 +1,7 @@
 """HumanEval benchmark - 164 code generation tasks, scored by pass@1."""
 
 import json
+import textwrap
 from pathlib import Path
 
 from benchkit.benchmarks.base import Task
@@ -18,7 +19,7 @@ SYSTEM = (
 
 
 def _extract_code(response: str) -> str:
-    """Strip markdown fences if the model wrapped its output."""
+    """Strip reasoning and a single Markdown code fence."""
     text = strip_think_tags(response).rstrip()
 
     if "```python" in text:
@@ -26,18 +27,44 @@ def _extract_code(response: str) -> str:
     elif "```" in text:
         text = text.split("```", 1)[1].split("```", 1)[0]
 
-    text = text.strip("\n")
-    lines = text.split("\n")
+    return text.strip("\n")
 
-    if any(ln.startswith(("def ", "class ", "import ", "from ", "@")) for ln in lines):
-        return text
 
-    # Otherwise it's a bare body -> indent only if not already indented.
-    first = next((ln for ln in lines if ln.strip()), "")
-    if first and not first.startswith((" ", "\t")):
-        return "\n".join(("    " + ln) if ln.strip() else ln for ln in lines)
+def _assemble_solution(prompt: str, entry: str, code: str) -> str:
+    """Join a completion onto the HumanEval prompt.
 
-    return text
+    Bare bodies are indented as a function body. If the first line is flush
+    and the rest is already indented, indenting every line over-indents the
+    body, so recover by indenting only that first line.
+    """
+    if f"def {entry}" in code:
+        imports = [
+            line for line in prompt.split("\n") if line.startswith(("import ", "from "))
+        ]
+        return "\n".join(imports) + "\n\n" + code if imports else code
+
+    normalized = textwrap.dedent(code)
+    solution = prompt + textwrap.indent(normalized, "    ")
+    try:
+        compile(solution, "<benchkit-humaneval>", "exec")
+        return solution
+    except (IndentationError, TabError):
+        pass
+
+    lines = code.splitlines()
+    first_index = next(
+        (index for index, line in enumerate(lines) if line.strip()), None
+    )
+    if first_index is not None and not lines[first_index].startswith((" ", "\t")):
+        lines[first_index] = "    " + lines[first_index]
+        normalized = textwrap.dedent("\n".join(lines))
+        repaired = prompt + textwrap.indent(normalized, "    ")
+        try:
+            compile(repaired, "<benchkit-humaneval>", "exec")
+        except (IndentationError, TabError):
+            return solution
+        return repaired
+    return solution
 
 
 class HumanEval:
@@ -70,18 +97,7 @@ class HumanEval:
     def evaluate_with_feedback(self, task: Task, response: str) -> EvaluationResult:
         code = _extract_code(response)
         entry = task.metadata["entry_point"]
-
-        if f"def {entry}" in code:
-            # Model gave full function - prepend any imports from the prompt
-            imports = [
-                line
-                for line in task.prompt.split("\n")
-                if line.startswith(("import ", "from "))
-            ]
-            fn_code = "\n".join(imports) + "\n\n" + code if imports else code
-        else:
-            fn_code = task.prompt + code
-
+        fn_code = _assemble_solution(task.prompt, entry, code)
         full = fn_code + "\n\n" + task.metadata["test"] + f"\ncheck({entry})\n"
         result = execute_with_feedback(full)
         return EvaluationResult(float(result.passed), result.feedback)
