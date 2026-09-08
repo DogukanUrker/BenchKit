@@ -385,6 +385,20 @@ class MCArena:
                 details={**base, "build_status": "script_error"},
             )
 
+        if run.stdout_truncated:
+            # Only a prefix survived the sandbox's output cap, so the array is
+            # cut off somewhere - parsing it would score whatever happened to
+            # fit rather than what the script produced.
+            return EvaluationResult(
+                score=0.0,
+                feedback=(
+                    "The script printed more than the output limit allows and "
+                    "its output was cut off. Print the JSON array once, with no "
+                    "other output, and reply with the complete corrected script."
+                ),
+                details={**base, "build_status": "output_limit"},
+            )
+
         payload, problem = parse_blocks(run.stdout)
         if problem:
             return EvaluationResult(

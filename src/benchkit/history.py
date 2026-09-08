@@ -352,10 +352,17 @@ def resolve_viewer_asset(path: str) -> Path | None:
         return None
     name = relative[len(VIEWER_PREFIX) + 1 :]
     # One flat directory of known assets: no sub-paths, so nothing to escape.
-    if not name or "/" in name or name in {".", ".."}:
+    # A backslash is a separator on Windows, where "C:\\..." would also throw
+    # the root away entirely, so reject it here and check containment anyway.
+    if not name or "/" in name or "\\" in name or name in {".", ".."}:
         return None
-    root = Path(str(files("benchkit").joinpath("mc_viewer/dist")))
-    candidate = root / name
+    root = Path(str(files("benchkit").joinpath("mc_viewer/dist"))).resolve()
+    try:
+        candidate = (root / name).resolve()
+    except (OSError, ValueError):
+        return None
+    if root not in candidate.parents:
+        return None
     return candidate if candidate.is_file() else None
 
 

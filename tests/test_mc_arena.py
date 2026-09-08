@@ -234,6 +234,25 @@ def test_failed_scripts_report_why_without_passing(
     assert result.feedback
 
 
+def test_truncated_output_is_rejected_rather_than_parsed(staged, offline, monkeypatch):
+    # A valid-looking prefix followed by padding the cap dropped: what survived
+    # parses, but it is not what the script printed.
+    run = ScriptRun(
+        exit_code=0,
+        stdout='[{"x": 0, "y": 0, "z": 0, "block": "minecraft:stone"}]',
+        stderr="",
+        stdout_truncated=True,
+    )
+    monkeypatch.setattr(
+        "benchkit.benchmarks.mc_arena.run_python_script", lambda *a, **k: run
+    )
+    task = MCArena().load_tasks()[0]
+    result = MCArena().evaluate_with_feedback(task, f"```python\n{SCRIPT}\n```")
+    assert not result.passed
+    assert result.details["build_status"] == "output_limit"
+    assert result.feedback
+
+
 def test_an_answer_without_a_script_keeps_the_response(staged, offline):
     task = MCArena().load_tasks()[0]
     result = MCArena().evaluate_with_feedback(task, "I would build a lovely tower.")

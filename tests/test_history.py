@@ -240,6 +240,8 @@ def test_viewer_assets_are_one_flat_directory(tmp_path) -> None:
         "/viewer/../history.py",
         "/viewer/%2e%2e/history.py",
         "/viewer/nested/viewer.html",
+        "/viewer/nested\\viewer.html",
+        "/viewer/%5C%5Cserver%5Cshare",
         "/viewer/",
         "/viewer/missing.js",
     ):
