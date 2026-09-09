@@ -112,3 +112,15 @@ samples per family (39,000 generations), or slice it explicitly (for example,
 [afl-3.0]: https://opensource.org/license/afl-3-0-php
 [cc-by-2.0]: https://creativecommons.org/licenses/by/2.0/
 [cc-by-sa-3.0]: https://creativecommons.org/licenses/by-sa/3.0/
+
+## Minecraft block ids (mc-arena)
+
+`mc_blocks_1_20_1.jsonl` is the block table for Minecraft Java Edition 1.20.1,
+extracted from `pc/1.20/blocks.json` and reduced to the block id, whether it is
+an air variant, and whether it is transparent. `mc-arena` validates generated
+block ids against it, and the same version is what the bundled
+prismarine-viewer renders (see `../mc_viewer/build/README.md`).
+
+- Source: <https://github.com/mc-bench/mc-data-files>, a packaging of
+  <https://github.com/PrismarineJS/minecraft-data>
+- Dataset license: MIT

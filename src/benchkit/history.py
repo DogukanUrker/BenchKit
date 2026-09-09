@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import mimetypes
+import posixpath
 import threading
 import webbrowser
 from collections.abc import Iterable
@@ -11,6 +13,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
+
+# Run directories are served under this prefix, one numbered slot per results
+# root, so two roots holding the same timestamped run stay distinct.
+ARTIFACT_PREFIX = "/files"
+
+# Pages a run wrote itself, and that the dashboard links to directly.
+RUN_PAGES = {"gallery": "arena.html", "report": "results.html"}
+
+# The mc-arena viewer is served from the installed package rather than copied
+# into every run directory: it is 3.5 MB of pinned bundle that never varies,
+# and it only works over HTTP anyway (its mesher runs in a web worker, which
+# browsers refuse to start from a file:// page).
+VIEWER_PREFIX = "/viewer"
 
 
 def _safe_json(data: object) -> str:
@@ -71,6 +87,17 @@ def _task_diagnostic(task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _run_pages(directory: Path | None, base: str) -> dict[str, str]:
+    """URLs for the pages a run actually wrote, skipping the ones it did not."""
+    if directory is None or not base:
+        return {}
+    return {
+        name: f"{base}/{filename}"
+        for name, filename in RUN_PAGES.items()
+        if (directory / filename).is_file()
+    }
+
+
 def _benchmark_row(
     result: dict[str, Any],
     *,
@@ -78,6 +105,7 @@ def _benchmark_row(
     sources: list[str],
     digest: str,
     index: int,
+    pages: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     model = result.get("model")
     benchmark = result.get("benchmark")
@@ -89,6 +117,7 @@ def _benchmark_row(
         "id": f"{digest[:12]}-{index}",
         "run_id": run_id,
         "sources": sources,
+        "pages": dict(pages or {}),
         "model": str(model),
         "benchmark": str(benchmark),
         "benchmark_label": str(result.get("benchmark_label") or benchmark),
@@ -175,7 +204,7 @@ def build_archive(results_dirs: Iterable[str | Path]) -> dict[str, Any]:
     discovered = 0
     reports: dict[tuple[str, str], dict[str, Any]] = {}
 
-    for root in roots:
+    for root_index, root in enumerate(roots):
         if not root.is_dir():
             warnings.append(
                 {
@@ -213,6 +242,8 @@ def build_archive(results_dirs: Iterable[str | Path]) -> dict[str, Any]:
                 "run_id": report_path.parent.name,
                 "sources": [location],
                 "payload": payload,
+                "directory": report_path.parent,
+                "base": f"{ARTIFACT_PREFIX}/{root_index}/{report_path.parent.name}",
             }
 
     benchmark_rows: list[dict[str, Any]] = []
@@ -238,6 +269,7 @@ def build_archive(results_dirs: Iterable[str | Path]) -> dict[str, Any]:
                     sources=report["sources"],
                     digest=report["digest"],
                     index=index,
+                    pages=_run_pages(report["directory"], report["base"]),
                 )
                 if row is not None:
                     benchmark_rows.append(row)
@@ -284,24 +316,139 @@ def render_history_html(archive: dict[str, Any]) -> str:
     return template.replace("__BENCHKIT_HISTORY_DATA__", _safe_json(archive))
 
 
+def resolve_artifact(roots: tuple[Path, ...], path: str) -> Path | None:
+    """Map an artifact URL onto a file inside one results root, or nothing.
+
+    Everything about this is deliberately narrow: the URL names a root by
+    index rather than by path, the result is resolved and then checked to be
+    inside that root, and only regular files are served. A request that walks
+    out of the root, names an unknown root, or lands on a directory gets
+    nothing back.
+    """
+    relative = unquote(urlsplit(path).path)
+    if not relative.startswith(f"{ARTIFACT_PREFIX}/"):
+        return None
+    parts = [part for part in relative[len(ARTIFACT_PREFIX) + 1 :].split("/") if part]
+    if len(parts) < 2 or not parts[0].isdigit():
+        return None
+    index = int(parts[0])
+    if index >= len(roots):
+        return None
+
+    root = roots[index].resolve()
+    try:
+        candidate = (root / posixpath.join(*parts[1:])).resolve()
+    except (OSError, ValueError):
+        return None
+    if candidate != root and root not in candidate.parents:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def resolve_viewer_asset(path: str) -> Path | None:
+    """Map a viewer URL onto one file of the vendored prismarine-viewer build."""
+    relative = unquote(urlsplit(path).path)
+    if not relative.startswith(f"{VIEWER_PREFIX}/"):
+        return None
+    name = relative[len(VIEWER_PREFIX) + 1 :]
+    # One flat directory of known assets: no sub-paths, so nothing to escape.
+    # A backslash is a separator on Windows, where "C:\\..." would also throw
+    # the root away entirely, so reject it here and check containment anyway.
+    if not name or "/" in name or "\\" in name or name in {".", ".."}:
+        return None
+    root = Path(str(files("benchkit").joinpath("mc_viewer/dist"))).resolve()
+    try:
+        candidate = (root / name).resolve()
+    except (OSError, ValueError):
+        return None
+    if root not in candidate.parents:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def _artifact_headers(relative_parts: tuple[str, ...]) -> list[tuple[str, str]]:
+    """Response headers for one served artifact.
+
+    Pages under ``pages/`` were written by the model being benchmarked, not by
+    BenchKit. Serving them from the dashboard's own origin would let them read
+    everything else this server exposes, so they are handed an opaque origin
+    with a sandbox policy: the scene still runs, it just cannot reach back.
+    """
+    # parts are (root index, run directory, ...path inside the run).
+    headers = [("X-Content-Type-Options", "nosniff")]
+    if len(relative_parts) > 2 and relative_parts[2] == "pages":
+        headers.append(("Content-Security-Policy", "sandbox allow-scripts"))
+    return headers
+
+
 def create_history_server(
     results_dirs: Iterable[str | Path], port: int = 0
 ) -> ThreadingHTTPServer:
     """Create a localhost-only server that rescans results on every page load."""
-    roots = tuple(results_dirs)
+    roots = tuple(Path(value).expanduser().resolve() for value in results_dirs)
 
     class HistoryHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path not in {"/", "/index.html"}:
+            if urlsplit(self.path).path in {"/", "/index.html"}:
+                self._send(
+                    render_history_html(build_archive(roots)).encode(),
+                    "text/html; charset=utf-8",
+                )
+                return
+
+            asset = resolve_viewer_asset(self.path)
+            if asset is not None:
+                # The viewer gunzips blockStates itself, so the .gz goes out
+                # as opaque bytes: declaring Content-Encoding would have the
+                # browser unwrap it first, and the page would then try to
+                # decompress plain JSON.
+                kind, _ = mimetypes.guess_type(asset.name)
+                self._send(
+                    asset.read_bytes(),
+                    "application/octet-stream"
+                    if asset.suffix == ".gz"
+                    else kind or "application/octet-stream",
+                    extra=[("X-Content-Type-Options", "nosniff")],
+                )
+                return
+
+            artifact = resolve_artifact(roots, self.path)
+            if artifact is None:
                 self.send_error(404)
                 return
-            content = render_history_html(build_archive(roots)).encode()
+            try:
+                body = artifact.read_bytes()
+            except OSError:
+                self.send_error(404)
+                return
+            kind, _ = mimetypes.guess_type(artifact.name)
+            parts = tuple(
+                part
+                for part in unquote(urlsplit(self.path).path)[
+                    len(ARTIFACT_PREFIX) + 1 :
+                ].split("/")
+                if part
+            )
+            self._send(
+                body,
+                kind or "application/octet-stream",
+                extra=_artifact_headers(parts),
+            )
+
+        def _send(
+            self,
+            body: bytes,
+            content_type: str,
+            extra: list[tuple[str, str]] | None = None,
+        ) -> None:
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for name, value in extra or []:
+                self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(content)
+            self.wfile.write(body)
 
         def log_message(self, format: str, *args: object) -> None:
             return

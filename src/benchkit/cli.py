@@ -240,12 +240,14 @@ def _list_benchmarks() -> None:
 
 
 def _render_check() -> None:
-    """Report whether this machine can run the render-scored suites.
+    """Report whether this machine can run the suites that draw pictures.
 
     Every treejs-arena task depends on two things BenchKit does not control:
     a headless browser that can produce a WebGL canvas, and a route to the
     module CDN the generated page imports from. This checks both, so a broken
     server is diagnosed in one command instead of ten scored-zero tasks.
+    mc-arena needs the same browser, but only for its screenshots: its scores
+    come from the block list, and it needs Docker rather than the CDN.
     """
     from benchkit.browser import allowed_hosts, probe_environment
 
@@ -270,6 +272,10 @@ def _render_check() -> None:
             "(BENCHKIT_RENDER_OFFLINE).[/yellow] [dim]Pages that import "
             "three.js from a CDN cannot render.[/dim]"
         )
+    console.print(
+        "[dim]mc-arena additionally needs Docker, and uses the browser only "
+        "for screenshots; its builds are scored either way.[/dim]"
+    )
     if not ok:
         sys.exit(1)
 
@@ -584,16 +590,34 @@ def _headless(args: argparse.Namespace) -> None:
         )
         # A run whose render checks were all skipped still scores 100%, so say
         # so plainly rather than letting the score imply the pages were judged.
-        skipped = sum(
-            (task.get("workspace") or {}).get("render_status") == "skipped"
+        workspaces = [
+            task.get("workspace") or {}
             for result in results
             for task in result.get("tasks") or []
+        ]
+        skipped = sum(
+            workspace.get("render_status") == "skipped"
+            and not workspace.get("build_status")
+            for workspace in workspaces
         )
         if skipped:
             console.print(
                 f"[yellow]Skipped {skipped} render check(s):[/yellow] "
                 "[dim]this machine could not render them, so they were not "
                 "scored against the model · run 'benchkit render-check'[/dim]"
+            )
+        # mc-arena scores the block list, so a build without pictures is a
+        # missing illustration rather than an unjudged task.
+        unillustrated = sum(
+            workspace.get("render_status") == "skipped"
+            and bool(workspace.get("build_status"))
+            for workspace in workspaces
+        )
+        if unillustrated:
+            console.print(
+                f"[yellow]Rendered no image for {unillustrated} build(s):[/yellow] "
+                "[dim]the builds were still scored from their block lists · "
+                "run 'benchkit render-check'[/dim]"
             )
     if failure:
         sys.exit(1)
