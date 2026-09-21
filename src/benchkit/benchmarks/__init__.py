@@ -11,6 +11,7 @@ from benchkit.benchmarks.hellaswag import HellaSwag
 from benchkit.benchmarks.humaneval import HumanEval
 from benchkit.benchmarks.ifeval import IFEval
 from benchkit.benchmarks.mbpp import MBPP
+from benchkit.benchmarks.mc_arena import MCArena
 from benchkit.benchmarks.medfailbench import MedFailBench
 from benchkit.benchmarks.mmlu import MMLU
 from benchkit.benchmarks.mmlu_pro import MMLUPro
@@ -30,6 +31,7 @@ REGISTRY: dict[str, type] = {
     "git-surgery": GitSurgery,
     "patcheval": PatchEval,
     "sanity": Sanity,
+    "mc-arena": MCArena,
     "treejs-arena": TreeJSArena,
     "humaneval": HumanEval,
     "humaneval-plus": HumanEvalPlus,
@@ -58,6 +60,7 @@ DESCRIPTIONS: dict[str, str] = {
     "aider-polyglot": "repository editing across six languages with the Pi agent",
     "git-surgery": "stateful Git operations in isolated repositories with Pi",
     "patcheval": "real Python bug fixes with externally isolated hidden tests",
+    "mc-arena": "frozen Minecraft build prompts, scored on the block list a generated script prints",
     "treejs-arena": "frozen creative three.js scenes, scored only on whether they render",
     "sanity": "25 curated checks across code, math, instructions, science, and commonsense",
     "humaneval": "Python function completions with the original unit tests",

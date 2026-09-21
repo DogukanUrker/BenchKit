@@ -350,9 +350,11 @@ def test_report_collects_screenshots_and_embeds_them(staged) -> None:
     assert 'target="_blank" rel="noopener noreferrer"' in gallery
     # Previews run the page itself, sandboxed, in whatever browser opens the
     # gallery - the machine that ran the benchmark may have had none.
-    assert (
-        'frame.setAttribute("sandbox", "allow-scripts allow-pointer-lock")' in gallery
-    )
+    assert '"allow-scripts allow-pointer-lock"' in gallery
+    # Only BenchKit's own mc-arena viewer is given a real origin, and it is
+    # keyed on a block list a treejs task never has - so a page the model
+    # wrote can never reach the trusted branch.
+    assert "blocks_json" not in workspace
     assert "frame.src = stage.dataset.page" in gallery
 
 

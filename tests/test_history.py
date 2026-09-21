@@ -10,7 +10,13 @@ import urllib.request
 import pytest
 
 from benchkit import cli
-from benchkit.history import build_archive, create_history_server, render_history_html
+from benchkit.history import (
+    build_archive,
+    create_history_server,
+    render_history_html,
+    resolve_artifact,
+    resolve_viewer_asset,
+)
 
 
 def _write_report(root, run_id, name, payload) -> None:
@@ -186,3 +192,90 @@ def test_history_cli_forwards_repeatable_directories(monkeypatch) -> None:
         "port": 8765,
         "open_browser": False,
     }
+
+
+def test_run_pages_only_lists_pages_the_run_actually_wrote(tmp_path) -> None:
+    _write_report(
+        tmp_path,
+        "2026-01-01_00-00-00",
+        "results.json",
+        [{"model": "m", "benchmark": "mc-arena", "score": 100, "total": 1}],
+    )
+    run = tmp_path / "2026-01-01_00-00-00"
+    (run / "arena.html").write_text("<h1>gallery</h1>", encoding="utf-8")
+
+    row = build_archive([tmp_path])["benchmark_rows"][0]
+
+    # results.html was never written, so the dashboard must not offer it.
+    assert row["pages"] == {"gallery": "/files/0/2026-01-01_00-00-00/arena.html"}
+
+
+def test_artifacts_resolve_inside_their_root_and_nowhere_else(tmp_path) -> None:
+    root = tmp_path / "results"
+    run = root / "2026-01-01_00-00-00"
+    run.mkdir(parents=True)
+    (run / "arena.html").write_text("gallery", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("private", encoding="utf-8")
+    roots = (root.resolve(),)
+
+    assert resolve_artifact(roots, "/files/0/2026-01-01_00-00-00/arena.html") == (
+        run / "arena.html"
+    )
+    for path in (
+        "/files/0/../secret.txt",
+        "/files/0/%2e%2e/secret.txt",
+        "/files/0/2026-01-01_00-00-00/../../secret.txt",
+        "/files/1/2026-01-01_00-00-00/arena.html",
+        "/files/0/2026-01-01_00-00-00",
+        "/files/0",
+        "/etc/passwd",
+    ):
+        assert resolve_artifact(roots, path) is None, path
+
+
+def test_viewer_assets_are_one_flat_directory(tmp_path) -> None:
+    assert resolve_viewer_asset("/viewer/viewer.html") is not None
+    assert resolve_viewer_asset("/viewer/atlas.png") is not None
+    for path in (
+        "/viewer/../history.py",
+        "/viewer/%2e%2e/history.py",
+        "/viewer/nested/viewer.html",
+        "/viewer/nested\\viewer.html",
+        "/viewer/%5C%5Cserver%5Cshare",
+        "/viewer/",
+        "/viewer/missing.js",
+    ):
+        assert resolve_viewer_asset(path) is None, path
+
+
+def test_model_written_pages_are_served_into_an_opaque_origin(tmp_path) -> None:
+    _write_report(
+        tmp_path,
+        "2026-01-01_00-00-00",
+        "results.json",
+        [{"model": "m", "benchmark": "treejs-arena", "score": 100, "total": 1}],
+    )
+    run = tmp_path / "2026-01-01_00-00-00"
+    (run / "arena.html").write_text("<h1>gallery</h1>", encoding="utf-8")
+    (run / "pages").mkdir()
+    (run / "pages" / "m__T-0.html").write_text("<script>1</script>", encoding="utf-8")
+
+    server = create_history_server([tmp_path])
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}/files/0/2026-01-01_00-00-00"
+        with urllib.request.urlopen(f"{base}/arena.html") as response:
+            gallery = response.headers
+        with urllib.request.urlopen(f"{base}/pages/m__T-0.html") as response:
+            generated = response.headers
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    # BenchKit's own gallery needs its origin; the model's page must not have
+    # one, or it could read every other run this server exposes.
+    assert gallery.get("Content-Security-Policy") is None
+    assert generated.get("Content-Security-Policy") == "sandbox allow-scripts"
+    assert generated.get("X-Content-Type-Options") == "nosniff"

@@ -46,7 +46,11 @@ tables in the README.
 - `--headless` uses the same engine and report pipeline as the TUI. `--verbose`
   prints prompts, available reasoning traces, and responses.
 - `benchkit history` serves completed benchmark and performance reports from
-  one or more results directories on localhost.
+  one or more results directories on localhost. It also serves the files inside
+  those run directories, so a run's gallery and HTML report open from the
+  dashboard. Artifact URLs name their results root by index and are resolved
+  and checked to stay inside it; pages the model wrote (`pages/`) are served
+  with a sandbox CSP so they cannot read anything else the server exposes.
 - `benchkit perf MODEL` profiles prompt processing, generation speed, time to
   first token, wall time, and client overhead across configurable contexts.
 
@@ -125,12 +129,64 @@ tables in the README.
   deliberately not standalone. `results.html` keeps the numbers and links to the
   gallery rather than embedding images.
 - A preview runs the generated page itself, in an iframe sandboxed to
-  `allow-scripts allow-pointer-lock`, so a scene the benchmark machine could not
-  render still plays in whatever browser opens the gallery. Frames load and
+  `allow-scripts allow-pointer-lock` - an opaque origin, because the page is
+  the model's own code - so a scene the benchmark machine could not render
+  still plays in whatever browser opens the gallery. Frames load and
   unload with an IntersectionObserver and are capped, because browsers keep only
   a handful of WebGL contexts alive; the captured screenshot sits underneath as
   the poster and the record of what the run actually saw. `Open ↗` opens the page
   in a full tab, and the header toggle turns live previews off.
+
+### Minecraft Builds (mc-arena)
+- `mc-arena` has no ground truth either, but "it rendered" is deliberately not
+  the score: a block list renders whether it is a watchtower or three blocks of
+  dirt. Frozen prompts ask for one self-contained PEP 723 Python script that
+  prints a JSON array of `{x, y, z, block}` into a fixed 32x32x32 volume with
+  its origin at (0, 0, 0). The prompt shows a full block id, because without one
+  smaller models answer `oak plank` and every block fails validation for the
+  wrong reason.
+- The script is untrusted and runs through `sandbox.run_python_script`: a
+  throwaway container with no network, no capabilities, a read-only rootfs and
+  memory, process and time limits. Do not give it network, host mounts, or the
+  answer to anything. A `SandboxError` is a harness error, not a wrong answer.
+- Scoring is deterministic and never uses a judge. Passing means the block list
+  is *usable*: the script ran, the ids all exist, everything stayed in the
+  volume, the entries were well formed and something was built. Quality is
+  reported rather than scored - block count, palette size and evenness, the
+  dominant block's share, floating (unsupported) fraction, duplicate positions,
+  bounding box and fill. Keep it that way: these numbers are the signal, and a
+  pass rate on its own would say almost nothing.
+- Repairs come from the engine's `--repair-attempts`, fed by the verifier
+  feedback (a traceback, a parse failure, or the offending ids). `mc-arena` is
+  excluded from the overall average, like RULER and treejs-arena.
+- Block ids are validated against `datasets/mc_blocks_1_20_1.jsonl`, the same
+  Minecraft version the renderer draws, so a build cannot pass with an id the
+  renderer would silently drop. Update both together.
+- Rendering is prismarine-viewer, pinned and committed under `mc_viewer/`; see
+  `mc_viewer/build/README.md`. Each build is photographed from three fixed
+  cameras (isometric, side, top-down) at a fixed distance, lens and size, and
+  the rig lives in `mc_viewer/build/entry.js`. Changing the rig or the prompt
+  set makes old screenshots incomparable - version it, do not edit in place.
+- The viewer is served over a loopback HTTP server because Chromium refuses to
+  start a web worker from a `file://` page. The page is BenchKit's own code;
+  the model contributes block coordinates, never markup or script.
+- A machine with no browser or no WebGL is an ordinary place to run mc-arena.
+  The render is skipped, `render_status` is `skipped` with a `skip_reason`, and
+  the build still scores from its block list - the picture is an illustration,
+  never the verdict.
+- The gallery can also explore a build in 3D: `viewer.html?interactive=1&build=`
+  drops the three-camera rig for one full-window canvas with orbit, pan and
+  zoom. The card loads it in place of a page preview, with the screenshot as
+  the poster underneath. Unlike a treejs scene this frame is BenchKit's own
+  code - the model contributed block coordinates, not markup - so it gets
+  `allow-scripts allow-same-origin`; prismarine-viewer meshes in a web worker
+  and an opaque origin cannot start one.
+- Interactive viewing only works over HTTP, for the same reason the renderer
+  runs its own loopback server: browsers refuse to start a worker from a
+  `file://` page. `benchkit history` serves the viewer straight from the
+  installed package at `/viewer/`, so it is never copied into a run directory.
+  A gallery opened straight off disk keeps the screenshots and loses only the
+  3D - never the scores, which never depended on it.
 
 ### Concurrency and Metrics
 - Request concurrency is detected from server slot endpoints or explicit

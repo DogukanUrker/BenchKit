@@ -41,6 +41,7 @@ benchkit = [
     "datasets/*.txt",
     "git_surgery/**/*.sh",
     "git_surgery/**/*.md",
+    "mc_viewer/dist/*",
     "pi_package/*.json",
     "templates/*.html",
     "tui/*.tcss",

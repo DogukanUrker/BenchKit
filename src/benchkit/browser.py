@@ -122,6 +122,11 @@ def _host_allowed(url: str, hosts: tuple[str, ...]) -> bool:
     return any(host == allowed or host.endswith(f".{allowed}") for allowed in hosts)
 
 
+def chromium_executable() -> str | None:
+    """An existing Chromium build to use instead of Playwright's own download."""
+    return os.environ.get("BENCHKIT_RENDER_CHROMIUM") or None
+
+
 @dataclass
 class RenderResult:
     """Everything one page load told us about the generated file."""
@@ -165,7 +170,7 @@ class RenderResult:
         return "\n".join(lines)
 
 
-def _launch_args() -> list[str]:
+def launch_args() -> list[str]:
     args = [
         # SwiftShader keeps WebGL working on headless machines without a GPU.
         "--use-gl=angle",
@@ -215,11 +220,11 @@ def _render(
         result.blocked_requests.append(url)
         route.abort()
 
-    executable = os.environ.get("BENCHKIT_RENDER_CHROMIUM") or None
+    executable = chromium_executable()
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(
-                args=_launch_args(),
+                args=launch_args(),
                 executable_path=executable,
             )
             try:
