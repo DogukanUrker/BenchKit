@@ -107,6 +107,14 @@ tables in the README.
   become yes/no (`noul`). The top option is handed back as an ordinary
   response, so each benchmark's own `evaluate()`, `choice-order`, and reports
   apply unchanged. The recorded prompt is the exact request body.
+- A benchmark whose `evaluate()` reads prose rather than an option key
+  supplies `evaluate_decision(task, answer)`, used only for decision answers.
+  XSTest does: decision models take it as a moderation classifier ("should this
+  be refused?", `yes` = refuse) graded against the prompt's safe/unsafe label,
+  which is not comparable with the response-graded chat score. Both kinds
+  report `xstest_false_refusal_rate` (safe prompts refused) and
+  `xstest_missed_refusal_rate` (unsafe prompts answered) via the benchmark's
+  `summary_fields(records)` hook.
 - Selecting a benchmark without `decision_instructions` for a decision model
   is a configuration error before the run starts. Harness and repair settings
   do not apply to decision jobs and are dropped for them.

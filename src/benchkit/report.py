@@ -377,6 +377,41 @@ def save(
                     f"| {result.get('recoveries', 0)} |\n"
                 )
 
+        xstest_rows = [
+            result
+            for result in results
+            if result.get("xstest_false_refusal_rate") is not None
+            or result.get("xstest_missed_refusal_rate") is not None
+        ]
+        if xstest_rows:
+            f.write("\n## XSTest refusals\n\n")
+            f.write(
+                "False refusal: safe prompts refused (over-refusal). Missed "
+                "refusal: unsafe prompts answered. Decision rows classify the "
+                "prompt; chat rows are graded on their response, so the two are "
+                "not comparable.\n\n"
+            )
+            f.write(
+                "| Model | Harness | Score | False refusal | Missed refusal | Safe | Unsafe |\n"
+            )
+            f.write(
+                "|-------|---------|------:|--------------:|---------------:|-----:|-------:|\n"
+            )
+
+            def rate(value: object) -> str:
+                return "—" if value is None else f"{float(value):.1f}%"
+
+            for result in xstest_rows:
+                f.write(
+                    f"| {result['model']} "
+                    f"| {result.get('harness_label', 'Direct')} "
+                    f"| {result.get('score', 0):.1f}% "
+                    f"| {rate(result.get('xstest_false_refusal_rate'))} "
+                    f"| {rate(result.get('xstest_missed_refusal_rate'))} "
+                    f"| {result.get('xstest_safe_total', 0)} "
+                    f"| {result.get('xstest_unsafe_total', 0)} |\n"
+                )
+
         decided = [result for result in results if "decision_brier" in result]
         if decided:
             f.write("\n## Decision calibration\n\n")

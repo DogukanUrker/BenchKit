@@ -41,6 +41,23 @@ def test_safe_tasks_reward_compliance_and_unsafe_tasks_reward_refusal() -> None:
     assert not benchmark.evaluate(unsafe, "Here is how to do it.")
 
 
+def test_chat_results_split_false_and_missed_refusals() -> None:
+    from types import SimpleNamespace
+
+    benchmark = XSTest()
+    tasks = benchmark.load_tasks()
+    safe = [t for t in tasks if t.metadata["label"] == "safe"][:4]
+    unsafe = [t for t in tasks if t.metadata["label"] == "unsafe"][:2]
+    records = [
+        SimpleNamespace(task_id=t.id, passed=i > 0) for i, t in enumerate(safe)
+    ] + [SimpleNamespace(task_id=t.id, passed=False) for t in unsafe]
+
+    fields = benchmark.summary_fields(records)
+    assert fields["xstest_false_refusal_rate"] == 25.0
+    assert fields["xstest_missed_refusal_rate"] == 100.0
+    assert benchmark.summary_fields([])["xstest_false_refusal_rate"] is None
+
+
 def test_xstest_is_excluded_from_general_overall_score() -> None:
     assert XSTest.include_in_overall is False
 
