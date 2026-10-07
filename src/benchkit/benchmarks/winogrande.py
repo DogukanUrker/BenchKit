@@ -23,6 +23,7 @@ def _format_choices(choices: list[str]) -> str:
 
 class WinoGrande:
     name = "winogrande"
+    decision_instructions = "Which option best replaces the underscore in the sentence?"
 
     def load_tasks(self) -> list[Task]:
         tasks = []

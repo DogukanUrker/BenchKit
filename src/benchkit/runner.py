@@ -43,7 +43,13 @@ from benchkit.engine import (
     TaskRecord,
     slice_label,
 )
-from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
+from benchkit.metrics import (
+    aggregate_tok_s,
+    decision_speed,
+    effective_concurrency,
+    is_decision,
+    stream_tok_s,
+)
 
 RECENT_TASKS = 5
 
@@ -537,11 +543,14 @@ class _Reporter:
         line.append("  ")
         line.append(word.ljust(11), style=f"bold {style}")
         line.append(record.label)
-        line.append(
-            f"  {record.response_time_s:.1f}s {glyphs.dot} "
-            f"{record.tok_s:.0f} stream tok/s",
-            style="dim",
-        )
+        if record.decision:
+            line.append(f"  {record.decision['latency_ms']:.0f} ms", style="dim")
+        else:
+            line.append(
+                f"  {record.response_time_s:.1f}s {glyphs.dot} "
+                f"{record.tok_s:.0f} stream tok/s",
+                style="dim",
+            )
         if record.recovered_cycle:
             line.append(f" {glyphs.dot} loop recovered", style="yellow")
         elif record.loop_state == "looping" and not record.loop_killed:
@@ -640,7 +649,10 @@ class _Reporter:
         line.append_text(_score_text(result["score"]))
         line.append("  ")
         line.append_text(_counters(stats))
-        if result.get("concurrency", 1) > 1:
+        if is_decision(result):
+            speed, latency = decision_speed(result)
+            throughput = f" {glyphs.dot} {speed} {glyphs.dot} {latency}"
+        elif result.get("concurrency", 1) > 1:
             throughput = (
                 f" {glyphs.dot} {aggregate_tok_s(result):.1f} aggregate tok/s"
                 f" {glyphs.dot} {stream_tok_s(result):.1f} stream tok/s"

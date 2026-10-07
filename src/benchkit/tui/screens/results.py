@@ -12,7 +12,14 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
-from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
+from benchkit.metrics import (
+    aggregate_tok_s,
+    decision_speed,
+    effective_concurrency,
+    is_decision,
+    latency_text,
+    stream_tok_s,
+)
 from benchkit.tui.formatting import (
     bar,
     fmt_count,
@@ -34,6 +41,12 @@ def _is_parallel(result: dict) -> bool:
 
 def _display_tok_s(result: dict) -> float:
     return aggregate_tok_s(result) if _is_parallel(result) else stream_tok_s(result)
+
+
+def _display_speed(result: dict) -> float:
+    if is_decision(result):
+        return float(result.get("decisions_per_s") or 0.0)
+    return _display_tok_s(result)
 
 
 def _delta_cell(result: dict) -> Text | str:
@@ -99,6 +112,9 @@ class ResultsScreen(Screen[None]):
         super().__init__()
         self.results = list(results)
         self.has_parallel = any(_is_parallel(result) for result in self.results)
+        # Decision rows are measured in dec/s, so a table that mixes them with
+        # generating rows names the unit in every cell instead of the header.
+        self.has_decisions = any(is_decision(result) for result in self.results)
         self.has_perturbations = any(
             result.get("perturbation") for result in self.results
         )
@@ -151,11 +167,19 @@ class ResultsScreen(Screen[None]):
         table.add_column("Failures F/L/T/Len/H", key="errors", width=21)
         if self.has_parallel:
             table.add_column("Parallel", key="parallel", width=8)
-            table.add_column("Agg tok/s", key="aggregate", width=10)
+            table.add_column(
+                "Agg speed" if self.has_decisions else "Agg tok/s",
+                key="aggregate",
+                width=14 if self.has_decisions else 10,
+            )
             table.add_column("Stream", key="stream", width=8)
             table.add_column("Eff", key="effective", width=7)
         else:
-            table.add_column("Tok/s", key="stream", width=9)
+            table.add_column(
+                "Speed" if self.has_decisions else "Tok/s",
+                key="stream",
+                width=14 if self.has_decisions else 9,
+            )
         table.add_column("Avg", key="avg", width=8)
         table.add_column("Wall", key="time", width=9)
 
@@ -236,24 +260,29 @@ class ResultsScreen(Screen[None]):
                     f"{result.get('harness_errors', 0)}",
                 ]
             )
+            decisions = is_decision(result)
+            unit = " tok/s" if self.has_decisions else ""
             if self.has_parallel:
                 parallel = _is_parallel(result)
                 cells.extend(
                     [
                         str(result.get("concurrency", 1)),
-                        f"{aggregate_tok_s(result):.1f}" if parallel else "—",
-                        f"{stream_tok_s(result):.1f}",
+                        decision_speed(result)[0]
+                        if decisions
+                        else f"{aggregate_tok_s(result):.1f}{unit}"
+                        if parallel
+                        else "—",
+                        "—" if decisions else f"{stream_tok_s(result):.1f}",
                         f"{effective_concurrency(result):.2f}x" if parallel else "—",
                     ]
                 )
             else:
-                cells.append(f"{stream_tok_s(result):.1f}")
-            cells.extend(
-                [
-                    f"{result['avg_response_time']}s",
-                    fmt_duration(result["total_time"]),
-                ]
-            )
+                cells.append(
+                    decision_speed(result)[0]
+                    if decisions
+                    else f"{stream_tok_s(result):.1f}{unit}"
+                )
+            cells.extend([latency_text(result), fmt_duration(result["total_time"])])
             table.add_row(
                 *cells,
                 key=str(index),
@@ -266,7 +295,10 @@ class ResultsScreen(Screen[None]):
             result for result in self.results if result.get("include_in_overall", True)
         ]
         best = max(overall_results or self.results, key=lambda r: r["score"])
-        fastest = max(self.results, key=_display_tok_s)
+        # Tokens/s and decisions/s are different units, so the fastest card
+        # compares generating runs and only falls back to decision runs.
+        generating = [r for r in self.results if not is_decision(r)]
+        fastest = max(generating or self.results, key=_display_speed)
         tasks = sum(r["total"] for r in self.results)
         total_time = sum(r["total_time"] for r in self.results)
         loops = sum(r.get("loops", 0) for r in self.results)
@@ -284,12 +316,16 @@ class ResultsScreen(Screen[None]):
             (f"{loops / tasks * 100:.1f}% · {loop_kills} killed" if tasks else ""),
         )
         fastest_card = self.query_one("#stat-fastest", StatCard)
-        value, hint = throughput_stat(
-            concurrency=fastest.get("concurrency", 1),
-            aggregate=aggregate_tok_s(fastest),
-            stream=stream_tok_s(fastest),
-            effective=effective_concurrency(fastest),
-            precision=0,
+        value, hint = (
+            decision_speed(fastest)
+            if is_decision(fastest)
+            else throughput_stat(
+                concurrency=fastest.get("concurrency", 1),
+                aggregate=aggregate_tok_s(fastest),
+                stream=stream_tok_s(fastest),
+                effective=effective_concurrency(fastest),
+                precision=0,
+            )
         )
         fastest_card.set_state(value, f"{fastest['model']} · {hint}")
         self.query_one("#stat-time", StatCard).set_state(fmt_duration(total_time))

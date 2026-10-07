@@ -28,6 +28,7 @@ def _format_choices(choices: list[str]) -> str:
 
 class MMLUPro:
     name = "mmlu-pro"
+    decision_instructions = "Which option correctly answers the question?"
 
     def load_tasks(self) -> list[Task]:
         if not DATASET.exists():

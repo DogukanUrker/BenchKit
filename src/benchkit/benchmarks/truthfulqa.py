@@ -23,6 +23,7 @@ def _format_choices(choices: list[str]) -> str:
 
 class TruthfulQA:
     name = "truthfulqa"
+    decision_instructions = "Which answer is true?"
 
     def load_tasks(self) -> list[Task]:
         tasks = []

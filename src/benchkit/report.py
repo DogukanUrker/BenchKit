@@ -8,7 +8,14 @@ from importlib.resources import files
 from pathlib import Path
 
 from benchkit import artifacts
-from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
+from benchkit.metrics import (
+    aggregate_tok_s,
+    decision_speed,
+    effective_concurrency,
+    is_decision,
+    latency_text,
+    stream_tok_s,
+)
 
 
 def _fmt_time(s: float) -> str:
@@ -228,16 +235,18 @@ def save(
                 f"| {result.get('concurrency', 1)} "
                 f"| {result.get('trace_coverage', 0)}% "
                 f"| {result.get('throughput_coverage', 100)}% "
-                f"| {aggregate_tok_s(result):.1f} "
-                f"| {stream_tok_s(result):.1f} "
+                f"| {decision_speed(result)[0] if is_decision(result) else f'{aggregate_tok_s(result):.1f}'} "
+                f"| {'—' if is_decision(result) else f'{stream_tok_s(result):.1f}'} "
                 f"| {effective_concurrency(result):.2f}x "
-                f"| {result['avg_response_time']}s "
+                f"| {latency_text(result)} "
                 f"| {_fmt_time(result['total_time'])} |\n"
             )
 
         f.write(
             "\n**Throughput:** Agg tok/s is covered output tokens divided by job "
             "covered wall time. Stream tok/s uses covered server decode time. "
+            "Decision models generate no tokens; their rows show decisions per "
+            "second of wall time and median latency instead. "
             "Effective concurrency is summed request time divided by covered wall "
             "time. Throughput coverage is the share of request wall time represented "
             "by completed generations; loop kills, timeouts and harness errors retain "
@@ -366,6 +375,34 @@ def save(
                     f"| {result.get('score_delta_pp', 0):+.1f}pp "
                     f"| {result.get('regressions', 0)} "
                     f"| {result.get('recoveries', 0)} |\n"
+                )
+
+        decided = [result for result in results if "decision_brier" in result]
+        if decided:
+            f.write("\n## Decision calibration\n\n")
+            f.write(
+                "Brier: 0 is perfect, 2 is confidently wrong. ECE: gap between "
+                "stated confidence and accuracy (10 bins). Dec/s is answered "
+                "decisions per second of wall time, including concurrency.\n\n"
+            )
+            f.write(
+                "| Model | Benchmark | Accuracy | Mean confidence | P(correct) | Brier | ECE | Dec/s | p50 | p95 |\n"
+            )
+            f.write(
+                "|-------|-----------|---------:|----------------:|-----------:|------:|----:|------:|----:|----:|\n"
+            )
+            for result in decided:
+                f.write(
+                    f"| {result['model']} "
+                    f"| {result.get('benchmark_label', result['benchmark'])} "
+                    f"| {result.get('score', 0):.1f}% "
+                    f"| {result['decision_confidence']:.1f}% "
+                    f"| {result['decision_p_correct']:.1f}% "
+                    f"| {result['decision_brier']:.4f} "
+                    f"| {result['decision_ece']:.4f} "
+                    f"| {result.get('decisions_per_s', 0):.1f} "
+                    f"| {result.get('decision_latency_p50_ms', 0):.0f} ms "
+                    f"| {result.get('decision_latency_p95_ms', 0):.0f} ms |\n"
                 )
 
         f.write("\n---\n\n")

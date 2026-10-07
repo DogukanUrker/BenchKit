@@ -23,11 +23,19 @@ from benchkit.engine import (
     SliceError,
     expand_jobs,
     parse_slice,
+    route_decision_jobs,
     slice_task_count,
     task_count,
 )
 from benchkit.history import serve_history
-from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
+from benchkit.metrics import (
+    aggregate_tok_s,
+    decision_speed,
+    effective_concurrency,
+    is_decision,
+    latency_text,
+    stream_tok_s,
+)
 from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
 from benchkit.perf_report import save_profile
 from benchkit.perturbations import PERTURBATIONS, perturbations_for
@@ -101,6 +109,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Execution harness: raw API, latest stock Pi in Docker, or paired "
             "direct + Pi runs (default: direct)"
+        ),
+    )
+    parser.add_argument(
+        "--decision-models",
+        default="",
+        metavar="MODELS",
+        help=(
+            "Comma-separated models to run as decision models over "
+            "/v1/systemone, for servers or proxies that do not advertise them "
+            "(llama.cpp's own listing is detected automatically)"
         ),
     )
     parser.add_argument(
@@ -416,6 +434,9 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
 
 
 def _headless(args: argparse.Namespace) -> None:
+    if args.demo and args.decision_models.strip():
+        console.print("[red]Decision models are unavailable in demo mode.[/red]")
+        sys.exit(1)
     if args.demo and args.harness != "direct":
         console.print("[red]Pi harness is unavailable in demo mode.[/red]")
         sys.exit(1)
@@ -433,10 +454,21 @@ def _headless(args: argparse.Namespace) -> None:
         console.print(f"[red]Connection failed:[/red] {exc}")
         sys.exit(1)
 
-    jobs = expand_jobs(
-        _headless_jobs(args, [model["name"] for model in models]),
-        client,
-    )
+    selected = _headless_jobs(args, [model["name"] for model in models])
+    forced = {name.strip() for name in args.decision_models.split(",") if name.strip()}
+    stray = sorted(forced - {job.model for job in selected})
+    if stray:
+        console.print(
+            "[red]--decision-models names models that are not in --models:[/red] "
+            + ", ".join(stray)
+        )
+        sys.exit(1)
+    try:
+        jobs = route_decision_jobs(selected, client, forced)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
+    jobs = expand_jobs(jobs, client)
     if not jobs:
         console.print(
             "[red]No supported RULER context bucket fits the selected model(s).[/red]"
@@ -496,13 +528,17 @@ def _headless(args: argparse.Namespace) -> None:
     table.add_column("Pass/Scored", justify="right")
     table.add_column("Fail/Loop/TO/Len/HE", justify="right")
     has_parallel = any(result.get("concurrency", 1) > 1 for result in results)
+    # Decision rows are measured in dec/s, so a table that mixes them with
+    # generating rows names the unit in every cell instead of the header.
+    has_decisions = any(is_decision(result) for result in results)
+    unit = " tok/s" if has_decisions else ""
     if has_parallel:
         table.add_column("Parallel", justify="right", style="dim")
-        table.add_column("Agg tok/s", justify="right")
+        table.add_column("Agg speed" if has_decisions else "Agg tok/s", justify="right")
         table.add_column("Stream tok/s", justify="right", style="dim")
         table.add_column("Eff", justify="right", style="dim")
     else:
-        table.add_column("Tok/s", justify="right")
+        table.add_column("Speed" if has_decisions else "Tok/s", justify="right")
     table.add_column("Avg Time", justify="right", style="dim")
     table.add_column("Wall", justify="right", style="dim")
 
@@ -557,23 +593,27 @@ def _headless(args: argparse.Namespace) -> None:
                 f"{result.get('harness_errors', errors)}",
             ]
         )
+        decisions = is_decision(result)
         if has_parallel:
             row.extend(
                 [
                     str(result.get("concurrency", 1)),
-                    f"{aggregate_tok_s(result):.1f}" if parallel else "—",
-                    f"{stream_tok_s(result):.1f}",
+                    decision_speed(result)[0]
+                    if decisions
+                    else f"{aggregate_tok_s(result):.1f}{unit}"
+                    if parallel
+                    else "—",
+                    "—" if decisions else f"{stream_tok_s(result):.1f}",
                     f"{effective_concurrency(result):.2f}x" if parallel else "—",
                 ]
             )
         else:
-            row.append(f"{stream_tok_s(result):.1f}")
-        row.extend(
-            [
-                f"{result['avg_response_time']}s",
-                _fmt_time(result["total_time"]),
-            ]
-        )
+            row.append(
+                decision_speed(result)[0]
+                if decisions
+                else f"{stream_tok_s(result):.1f}{unit}"
+            )
+        row.extend([latency_text(result), _fmt_time(result["total_time"])])
         table.add_row(
             *row,
         )

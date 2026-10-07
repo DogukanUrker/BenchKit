@@ -23,6 +23,7 @@ def _format_choices(choices: list[str]) -> str:
 
 class MMLU:
     name = "mmlu"
+    decision_instructions = "Which option correctly answers the question?"
 
     def load_tasks(self) -> list[Task]:
         tasks = []
