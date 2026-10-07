@@ -28,7 +28,14 @@ from benchkit.engine import (
     task_count,
 )
 from benchkit.history import serve_history
-from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
+from benchkit.metrics import (
+    aggregate_tok_s,
+    decision_speed,
+    effective_concurrency,
+    is_decision,
+    latency_text,
+    stream_tok_s,
+)
 from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
 from benchkit.perf_report import save_profile
 from benchkit.perturbations import PERTURBATIONS, perturbations_for
@@ -502,13 +509,17 @@ def _headless(args: argparse.Namespace) -> None:
     table.add_column("Pass/Scored", justify="right")
     table.add_column("Fail/Loop/TO/Len/HE", justify="right")
     has_parallel = any(result.get("concurrency", 1) > 1 for result in results)
+    # Decision rows are measured in dec/s, so a table that mixes them with
+    # generating rows names the unit in every cell instead of the header.
+    has_decisions = any(is_decision(result) for result in results)
+    unit = " tok/s" if has_decisions else ""
     if has_parallel:
         table.add_column("Parallel", justify="right", style="dim")
-        table.add_column("Agg tok/s", justify="right")
+        table.add_column("Agg speed" if has_decisions else "Agg tok/s", justify="right")
         table.add_column("Stream tok/s", justify="right", style="dim")
         table.add_column("Eff", justify="right", style="dim")
     else:
-        table.add_column("Tok/s", justify="right")
+        table.add_column("Speed" if has_decisions else "Tok/s", justify="right")
     table.add_column("Avg Time", justify="right", style="dim")
     table.add_column("Wall", justify="right", style="dim")
 
@@ -563,23 +574,27 @@ def _headless(args: argparse.Namespace) -> None:
                 f"{result.get('harness_errors', errors)}",
             ]
         )
+        decisions = is_decision(result)
         if has_parallel:
             row.extend(
                 [
                     str(result.get("concurrency", 1)),
-                    f"{aggregate_tok_s(result):.1f}" if parallel else "—",
-                    f"{stream_tok_s(result):.1f}",
+                    decision_speed(result)[0]
+                    if decisions
+                    else f"{aggregate_tok_s(result):.1f}{unit}"
+                    if parallel
+                    else "—",
+                    "—" if decisions else f"{stream_tok_s(result):.1f}",
                     f"{effective_concurrency(result):.2f}x" if parallel else "—",
                 ]
             )
         else:
-            row.append(f"{stream_tok_s(result):.1f}")
-        row.extend(
-            [
-                f"{result['avg_response_time']}s",
-                _fmt_time(result["total_time"]),
-            ]
-        )
+            row.append(
+                decision_speed(result)[0]
+                if decisions
+                else f"{stream_tok_s(result):.1f}{unit}"
+            )
+        row.extend([latency_text(result), _fmt_time(result["total_time"])])
         table.add_row(
             *row,
         )

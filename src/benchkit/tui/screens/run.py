@@ -108,6 +108,7 @@ class RunScreen(Screen[None]):
         self.current_completed = 0
         self.current_scored_total = 0
         self.latency_sum = 0.0
+        self.decision_latencies_ms: list[float] = []
         self.tok_s_sum = 0.0
         self.output_tokens_sum = 0
         self.job_started_at = time.monotonic()
@@ -281,6 +282,7 @@ class RunScreen(Screen[None]):
         self.current_completed = 0
         self.current_scored_total = 0
         self.latency_sum = 0.0
+        self.decision_latencies_ms: list[float] = []
         self.tok_s_sum = 0.0
         self.output_tokens_sum = 0
         self.job_started_at = time.monotonic()
@@ -527,6 +529,8 @@ class RunScreen(Screen[None]):
             )
             self.overall_scored_tasks += 1
         self.latency_sum += record.response_time_s
+        if record.decision:
+            self.decision_latencies_ms.append(record.decision["latency_ms"])
         self.tok_s_sum += record.tok_s
         self.output_tokens_sum += record.output_tokens
         self.current_loops += int(record.loop_state == "looping")
@@ -765,6 +769,13 @@ class RunScreen(Screen[None]):
         self.query_one("#stat-failed", StatCard).set_state(str(failed))
         speed = self.query_one("#stat-speed", StatCard)
         stream_speed = self.tok_s_sum / completed
+        if self.decision_latencies_ms:
+            latencies = sorted(self.decision_latencies_ms)
+            speed.set_state(
+                f"{self.current_completed / elapsed:.0f} dec/s",
+                f"p50 {latencies[len(latencies) // 2]:.0f} ms",
+            )
+            return
         speed.set_state(
             *throughput_stat(
                 concurrency=self.current_concurrency,

@@ -11,7 +11,14 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Input
 
 from benchkit.engine import slice_label
-from benchkit.metrics import aggregate_tok_s, effective_concurrency, stream_tok_s
+from benchkit.metrics import (
+    aggregate_tok_s,
+    decision_speed,
+    effective_concurrency,
+    is_decision,
+    latency_text,
+    stream_tok_s,
+)
 from benchkit.tui.formatting import (
     fmt_count,
     fmt_duration,
@@ -112,16 +119,18 @@ class JobDetailScreen(Screen[None]):
         )
         speed = self.query_one("#stat-speed", StatCard)
         speed.set_state(
-            *throughput_stat(
-                concurrency=result.get("concurrency", 1),
-                aggregate=aggregate_tok_s(result),
-                stream=stream_tok_s(result),
-                effective=effective_concurrency(result),
+            *(
+                decision_speed(result)
+                if is_decision(result)
+                else throughput_stat(
+                    concurrency=result.get("concurrency", 1),
+                    aggregate=aggregate_tok_s(result),
+                    stream=stream_tok_s(result),
+                    effective=effective_concurrency(result),
+                )
             )
         )
-        self.query_one("#stat-latency", StatCard).set_state(
-            f"{result['avg_response_time']}s"
-        )
+        self.query_one("#stat-latency", StatCard).set_state(latency_text(result))
         self.query_one("#stat-duration", StatCard).set_state(
             fmt_duration(result["total_time"])
         )

@@ -103,7 +103,7 @@ class Decider:
             "done_reason": "decision",
             "trace_status": "unavailable",
             "input_tokens": int(usage.get("input_tokens") or 0),
-            "decision": {"probabilities": probs},
+            "decision": {"probabilities": probs, "latency_ms": elapsed * 1000},
         }
 
 
@@ -115,6 +115,7 @@ def calibration(decision: dict | None, answer: object) -> dict:
     target = str(answer).strip()
     confidence = max(probs.values())
     return {
+        "latency_ms": round(float(decision.get("latency_ms") or 0.0), 2),
         "probabilities": {key: round(value, 4) for key, value in probs.items()},
         "confidence": round(confidence, 4),
         "p_correct": round(probs.get(target, 0.0), 4),
@@ -126,12 +127,24 @@ def calibration(decision: dict | None, answer: object) -> dict:
     }
 
 
-def summary(decisions: list[dict]) -> dict:
-    """Aggregate calibration for one job; empty when it used no decisions."""
+def _percentile(values: list[float], fraction: float) -> float:
+    """Nearest-rank percentile, so the value is one that was measured."""
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, round(fraction * len(ordered) + 0.5) - 1))
+    return ordered[index]
+
+
+def summary(decisions: list[dict], wall_time_s: float = 0.0) -> dict:
+    """Aggregate calibration and speed for one job; empty without decisions.
+
+    Decisions per second is the job's real rate: answered decisions over wall
+    time, so it already includes any request concurrency.
+    """
     rows = [row for row in decisions if row]
     if not rows:
         return {}
     total = len(rows)
+    latencies = [float(row.get("latency_ms") or 0.0) for row in rows]
     bins: list[list[dict]] = [[] for _ in range(ECE_BINS)]
     for row in rows:
         bins[min(int(row["confidence"] * ECE_BINS), ECE_BINS - 1)].append(row)
@@ -154,4 +167,7 @@ def summary(decisions: list[dict]) -> dict:
         "decision_p_correct": round(
             sum(row["p_correct"] for row in rows) / total * 100, 1
         ),
+        "decisions_per_s": round(total / wall_time_s, 1) if wall_time_s > 0 else 0.0,
+        "decision_latency_p50_ms": round(_percentile(latencies, 0.50), 1),
+        "decision_latency_p95_ms": round(_percentile(latencies, 0.95), 1),
     }

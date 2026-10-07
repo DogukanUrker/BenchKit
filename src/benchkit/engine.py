@@ -1505,7 +1505,9 @@ class Engine:
                 }
                 for record in records
             ],
-            **decision.summary([record.decision for record in scored_records]),
+            **decision.summary(
+                [record.decision for record in scored_records], wall_time_s
+            ),
             **pi_metadata,
             **_result_metadata(job),
         }

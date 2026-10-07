@@ -77,3 +77,24 @@ def aggregate_tok_s(result: Mapping[str, object]) -> float:
     # Legacy CSV summaries do not contain tasks. Stream throughput multiplied
     # by measured slot occupancy is the closest derivation available.
     return stream_tok_s(result) * effective_concurrency(result)
+
+
+def is_decision(result: Mapping[str, object]) -> bool:
+    """Whether a result came from a native decision model."""
+    return result.get("harness") == "decision"
+
+
+def decision_speed(result: Mapping[str, object]) -> tuple[str, str]:
+    """Decision models emit no tokens, so speed is decisions/s plus latency."""
+    return (
+        f"{_number(result.get('decisions_per_s')):.1f} dec/s",
+        f"p50 {_number(result.get('decision_latency_p50_ms')):.0f} ms · "
+        f"p95 {_number(result.get('decision_latency_p95_ms')):.0f} ms",
+    )
+
+
+def latency_text(result: Mapping[str, object]) -> str:
+    """Typical request time: median ms for decisions, mean seconds otherwise."""
+    if is_decision(result):
+        return f"{_number(result.get('decision_latency_p50_ms')):.0f}ms"
+    return f"{result.get('avg_response_time', 0)}s"

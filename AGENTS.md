@@ -111,6 +111,11 @@ tables in the README.
   jobs report mean confidence, P(correct), Brier (0 perfect, 2 confidently
   wrong), and 10-bin ECE. Servers only scale probabilities with the
   temperatures in the GGUF, so calibration is a measured result, not a given.
+- Decision models emit no tokens, so tok/s is meaningless for them. Their speed
+  is `decisions_per_s` (answered decisions over job wall time, concurrency
+  included) plus nearest-rank p50/p95 latency in ms, shown everywhere tok/s
+  is (`metrics.decision_speed`, `metrics.latency_text`). Tables that mix both
+  kinds of rows say "Speed" and put the unit in each cell.
 
 ### Creative Rendering (treejs-arena)
 - `treejs-arena` has no ground truth. Frozen prompts ask for one

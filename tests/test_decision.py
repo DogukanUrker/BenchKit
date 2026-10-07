@@ -110,6 +110,35 @@ class CalibrationTests(unittest.TestCase):
         self.assertAlmostEqual(stats["decision_confidence"], 90.0)
         self.assertEqual(decision.summary([{}, {}]), {})
 
+    def test_summary_speed(self) -> None:
+        rows = [
+            decision.calibration(
+                {"probabilities": {"A": 1.0, "B": 0.0}, "latency_ms": ms}, "A"
+            )
+            for ms in (10, 20, 30, 40, 100)
+        ]
+        stats = decision.summary(rows, wall_time_s=0.5)
+        self.assertEqual(stats["decisions_per_s"], 10.0)
+        self.assertEqual(stats["decision_latency_p50_ms"], 30.0)
+        self.assertEqual(stats["decision_latency_p95_ms"], 100.0)
+        self.assertEqual(decision.summary(rows)["decisions_per_s"], 0.0)
+
+    def test_display_helpers(self) -> None:
+        from benchkit.metrics import decision_speed, latency_text
+
+        result = {
+            "harness": "decision",
+            "decisions_per_s": 20.44,
+            "decision_latency_p50_ms": 48.2,
+            "decision_latency_p95_ms": 61.0,
+            "avg_response_time": 0.0,
+        }
+        self.assertEqual(
+            decision_speed(result), ("20.4 dec/s", "p50 48 ms · p95 61 ms")
+        )
+        self.assertEqual(latency_text(result), "48ms")
+        self.assertEqual(latency_text({"avg_response_time": 1.2}), "1.2s")
+
 
 class RoutingTests(unittest.TestCase):
     def test_decision_models_are_routed_and_chat_models_are_untouched(self) -> None:
@@ -185,6 +214,10 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result["total_output_tokens"], 0)
         self.assertEqual(result["total_input_tokens"], 36)
         self.assertAlmostEqual(result["decision_p_correct"], 70.0)
+        self.assertGreater(result["decisions_per_s"], 0)
+        self.assertGreaterEqual(
+            result["decision_latency_p95_ms"], result["decision_latency_p50_ms"]
+        )
         task = result["tasks"][0]
         self.assertEqual(len(task["response"]), 1)
         self.assertEqual(json.loads(task["prompt"]), client.requests[0])
