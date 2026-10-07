@@ -12,7 +12,7 @@ import contextlib
 import os
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from statistics import median
@@ -622,17 +622,27 @@ def expand_jobs(jobs: list[JobSpec], client: object) -> list[JobSpec]:
     return expanded
 
 
-def route_decision_jobs(jobs: list[JobSpec], client: object) -> list[JobSpec]:
-    """Send native decision models through /v1/systemone automatically.
+def route_decision_jobs(
+    jobs: list[JobSpec],
+    client: object,
+    forced: Collection[str] = (),
+) -> list[JobSpec]:
+    """Send native decision models through /v1/systemone.
 
-    Harness and repair settings are generation options, so a decision model's
-    jobs drop them (``--harness both`` collapses to one job). A benchmark that
-    cannot be asked as a typed question is a configuration error, raised
-    before anything runs.
+    A model is a decision model when the server says so, or when the user
+    names it in ``forced`` (``--decision-models``) because a proxy in between
+    hides it. Harness and repair settings are generation options, so a
+    decision model's jobs drop them (``--harness both`` collapses to one job).
+    A benchmark that cannot be asked as a typed question is a configuration
+    error, raised before anything runs.
     """
-    is_decision = getattr(client, "is_decision_model", None)
-    if not callable(is_decision):
+    detect = getattr(client, "is_decision_model", None)
+    if not callable(detect) and not forced:
         return jobs
+
+    def is_decision(model: str) -> bool:
+        return model in forced or (callable(detect) and bool(detect(model)))
+
     routed: dict[str, JobSpec] = {}
     unsupported: dict[str, None] = {}
     for job in jobs:

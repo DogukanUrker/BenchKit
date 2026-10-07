@@ -161,6 +161,17 @@ class RoutingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "d1 × humaneval"):
             route_decision_jobs(jobs, client)
 
+    def test_forced_models_route_without_server_detection(self) -> None:
+        client = FakeDecisionClient(set())
+        jobs = [JobSpec("d1", "arc"), JobSpec("qwen", "arc")]
+        routed = route_decision_jobs(jobs, client, forced={"d1"})
+        self.assertEqual([job.harness for job in routed], ["decision", "direct"])
+        # A client with no detection at all still honors the forced list.
+        routed = route_decision_jobs(jobs, object(), forced={"d1"})
+        self.assertEqual(routed[0].harness, "decision")
+        with self.assertRaisesRegex(ValueError, "d1 × humaneval"):
+            route_decision_jobs([JobSpec("d1", "humaneval")], object(), {"d1"})
+
     def test_clients_without_detection_are_unchanged(self) -> None:
         jobs = [JobSpec("m", "humaneval")]
         self.assertIs(route_decision_jobs(jobs, object()), jobs)

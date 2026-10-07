@@ -112,6 +112,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--decision-models",
+        default="",
+        metavar="MODELS",
+        help=(
+            "Comma-separated models to run as decision models over "
+            "/v1/systemone, for servers or proxies that do not advertise them "
+            "(llama.cpp's own listing is detected automatically)"
+        ),
+    )
+    parser.add_argument(
         "--repair-attempts",
         type=int,
         choices=range(MAX_REPAIR_ATTEMPTS + 1),
@@ -424,6 +434,9 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
 
 
 def _headless(args: argparse.Namespace) -> None:
+    if args.demo and args.decision_models.strip():
+        console.print("[red]Decision models are unavailable in demo mode.[/red]")
+        sys.exit(1)
     if args.demo and args.harness != "direct":
         console.print("[red]Pi harness is unavailable in demo mode.[/red]")
         sys.exit(1)
@@ -441,11 +454,17 @@ def _headless(args: argparse.Namespace) -> None:
         console.print(f"[red]Connection failed:[/red] {exc}")
         sys.exit(1)
 
-    try:
-        jobs = route_decision_jobs(
-            _headless_jobs(args, [model["name"] for model in models]),
-            client,
+    selected = _headless_jobs(args, [model["name"] for model in models])
+    forced = {name.strip() for name in args.decision_models.split(",") if name.strip()}
+    stray = sorted(forced - {job.model for job in selected})
+    if stray:
+        console.print(
+            "[red]--decision-models names models that are not in --models:[/red] "
+            + ", ".join(stray)
         )
+        sys.exit(1)
+    try:
+        jobs = route_decision_jobs(selected, client, forced)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         sys.exit(1)

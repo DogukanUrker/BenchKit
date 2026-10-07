@@ -175,7 +175,14 @@ uv run benchkit --headless --models <decision-model> \
   --benchmarks mmlu-pro:100,boolq:100
 ```
 
-Behind llama-swap (v262+), mark the model in its config so BenchKit can tell:
+Behind a proxy that hides this, such as llama-swap (v262+), name the model:
+
+```bash
+uv run benchkit --headless --models d1-3b,qwen3:8b --benchmarks gpqa \
+  --decision-models d1-3b
+```
+
+or mark it once in the llama-swap config:
 
 ```yaml
 models:
