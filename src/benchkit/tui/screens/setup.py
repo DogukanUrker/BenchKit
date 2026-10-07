@@ -30,6 +30,7 @@ from benchkit.engine import (
     SliceError,
     expand_jobs,
     parse_slice,
+    route_decision_jobs,
     slice_label,
     slice_task_count,
     task_count,
@@ -218,6 +219,8 @@ class SetupScreen(Screen[None]):
             text.append("✗ template".rjust(11), style="red")
         elif status == "unavailable":
             text.append("— n/a".rjust(11), style="dim")
+        elif meta.get("decision"):
+            text.append("decision".rjust(9), style="cyan")
         else:
             text.append(detail.rjust(9), style="dim")
         return text
@@ -602,6 +605,12 @@ class SetupScreen(Screen[None]):
                                 repair_attempts=repair_attempts,
                             )
                         )
+        try:
+            jobs = route_decision_jobs(jobs, self.app.client)
+        except ValueError as exc:
+            self.notify(str(exc), severity="error", timeout=8)
+            self.query_one("#bench-list", SelectionList).focus()
+            return None
         expanded = expand_jobs(jobs, self.app.client)
         if not expanded:
             self.notify(

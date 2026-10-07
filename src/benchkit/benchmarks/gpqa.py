@@ -23,6 +23,9 @@ def _format_choices(choices: list[str]) -> str:
 
 class GPQA:
     name = "gpqa"
+    decision_instructions = (
+        "Which option correctly answers this graduate-level science question?"
+    )
 
     def load_tasks(self) -> list[Task]:
         tasks = []

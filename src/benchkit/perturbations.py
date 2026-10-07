@@ -28,7 +28,7 @@ CHOICE_ORDER_BENCHMARKS = frozenset(
         "winogrande",
     }
 )
-_VISIBLE_CHOICE_LIMITS = {"truthfulqa": 4}
+VISIBLE_CHOICE_LIMITS = {"truthfulqa": 4}
 
 
 @dataclass(frozen=True)
@@ -67,7 +67,7 @@ def _choice_order(benchmark_key: str, task: Task, seed: int) -> PerturbedCase:
     choices = list(raw_choices)
     visible_count = min(
         len(choices),
-        _VISIBLE_CHOICE_LIMITS.get(benchmark_key, len(choices)),
+        VISIBLE_CHOICE_LIMITS.get(benchmark_key, len(choices)),
     )
     if visible_count < 2:
         raise ValueError(f"{benchmark_key}/{task.id} needs at least two choices")

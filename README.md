@@ -165,6 +165,16 @@ uv run benchkit --headless --models qwen3:8b \
   --benchmarks mmlu-pro:100 --perturbation choice-order
 ```
 
+Decision models served by llama.cpp (`/v1/systemone`) are detected
+automatically and run on the multiple-choice and yes/no suites, scored on
+accuracy plus calibration (Brier, ECE):
+
+```bash
+llama-server -hf ggml-org/Kev-4B-GGUF
+uv run benchkit --headless --models <decision-model> \
+  --benchmarks mmlu-pro:100,boolq:100
+```
+
 Profile inference performance:
 
 ```bash

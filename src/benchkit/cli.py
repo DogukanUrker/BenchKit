@@ -23,6 +23,7 @@ from benchkit.engine import (
     SliceError,
     expand_jobs,
     parse_slice,
+    route_decision_jobs,
     slice_task_count,
     task_count,
 )
@@ -433,10 +434,15 @@ def _headless(args: argparse.Namespace) -> None:
         console.print(f"[red]Connection failed:[/red] {exc}")
         sys.exit(1)
 
-    jobs = expand_jobs(
-        _headless_jobs(args, [model["name"] for model in models]),
-        client,
-    )
+    try:
+        jobs = route_decision_jobs(
+            _headless_jobs(args, [model["name"] for model in models]),
+            client,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
+    jobs = expand_jobs(jobs, client)
     if not jobs:
         console.print(
             "[red]No supported RULER context bucket fits the selected model(s).[/red]"

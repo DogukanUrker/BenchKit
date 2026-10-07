@@ -20,6 +20,7 @@ def _format_choices(choices: list[str]) -> str:
 
 class HellaSwag:
     name = "hellaswag"
+    decision_instructions = "Which option is the most plausible continuation?"
 
     def load_tasks(self) -> list[Task]:
         tasks = []

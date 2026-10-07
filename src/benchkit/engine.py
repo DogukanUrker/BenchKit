@@ -20,6 +20,7 @@ from typing import Literal
 
 import httpx
 
+from benchkit import decision
 from benchkit.benchmarks import REGISTRY
 from benchkit.benchmarks.base import Task
 from benchkit.client import GenerationUpdate, InferenceClient
@@ -165,7 +166,7 @@ class JobSpec:
     variant: str | None = None
     perturbation: str | None = None
     perturbation_seed: int = 42
-    harness: Literal["direct", "pi"] = "direct"
+    harness: Literal["direct", "pi", "decision"] = "direct"
     repair_attempts: int = 0
 
     def __post_init__(self) -> None:
@@ -198,7 +199,7 @@ class JobSpec:
 
     @property
     def harness_label(self) -> str:
-        label = "Pi agent" if self.harness == "pi" else "Direct"
+        label = {"pi": "Pi agent", "decision": "Decision"}.get(self.harness, "Direct")
         return f"{label} + repair" if self.repair_attempts else label
 
     def planned_total(self) -> int:
@@ -283,6 +284,7 @@ class TaskRecord:
     first_attempt_score: float = 0.0
     repaired: bool = False
     workspace: dict = field(default_factory=dict)
+    decision: dict = field(default_factory=dict)
 
     @property
     def label(self) -> str:
@@ -618,6 +620,36 @@ def expand_jobs(jobs: list[JobSpec], client: object) -> list[JobSpec]:
                 )
             )
     return expanded
+
+
+def route_decision_jobs(jobs: list[JobSpec], client: object) -> list[JobSpec]:
+    """Send native decision models through /v1/systemone automatically.
+
+    Harness and repair settings are generation options, so a decision model's
+    jobs drop them (``--harness both`` collapses to one job). A benchmark that
+    cannot be asked as a typed question is a configuration error, raised
+    before anything runs.
+    """
+    is_decision = getattr(client, "is_decision_model", None)
+    if not callable(is_decision):
+        return jobs
+    routed: dict[str, JobSpec] = {}
+    unsupported: dict[str, None] = {}
+    for job in jobs:
+        if is_decision(job.model):
+            if not decision.supports(job.benchmark):
+                unsupported[f"{job.model} × {job.benchmark}"] = None
+                continue
+            job = replace(job, harness="decision", repair_attempts=0)
+        routed.setdefault(job.key, job)
+    if unsupported:
+        raise ValueError(
+            "Decision models only answer multiple-choice and yes/no benchmarks ("
+            + ", ".join(decision.supported_benchmarks())
+            + "). Unsupported: "
+            + ", ".join(unsupported)
+        )
+    return list(routed.values())
 
 
 def tasks_for_job(job: JobSpec) -> list[Task]:
@@ -963,6 +995,8 @@ class Engine:
         self, index: int, job: JobSpec, overall_total: int
     ) -> tuple[dict | None, bool]:
         bench = benchmark(job.benchmark)
+        if job.harness == "decision" and not decision.supports(job.benchmark):
+            raise ValueError(f"{job.benchmark} cannot run on a decision model")
         if getattr(bench, "workspace_task", False) and job.harness != "pi":
             raise ValueError(
                 f"{job.benchmark} requires the Pi harness; use --harness pi"
@@ -1467,9 +1501,11 @@ class Engine:
                     "repaired": record.repaired,
                     "workspace": record.workspace or None,
                     "agentic_metrics": record.workspace.get("agentic_metrics") or None,
+                    "decision": record.decision or None,
                 }
                 for record in records
             ],
+            **decision.summary([record.decision for record in scored_records]),
             **pi_metadata,
             **_result_metadata(job),
         }
@@ -1572,7 +1608,11 @@ class Engine:
             job.perturbation_seed,
         )
         task = case.evaluation_task
-        prompt = prompt_for(bench, case.prompt_task, self.client, job.model)
+        prompt = (
+            decision.render_request(bench, case.prompt_task)
+            if job.harness == "decision"
+            else prompt_for(bench, case.prompt_task, self.client, job.model)
+        )
         error = ""
         errors = 0
         entry_point = str(task.metadata.get("entry_point", ""))
@@ -1722,7 +1762,13 @@ class Engine:
 
         request_started = time.perf_counter()
         try:
-            generator = self._pi(bench, task) if job.harness == "pi" else self.client
+            generator = (
+                self._pi(bench, task)
+                if job.harness == "pi"
+                else decision.Decider(self.client)
+                if job.harness == "decision"
+                else self.client
+            )
             workspace = bool(getattr(bench, "workspace_task", False))
             workspace_setup = None
             workspace_verifier = None
@@ -2099,6 +2145,9 @@ class Engine:
             first_attempt_score=float(gen.get("first_attempt_score", evaluation_score)),
             repaired=bool(gen.get("repaired")),
             workspace=evaluation_details,
+            decision=decision.calibration(
+                gen.get("decision"), task.metadata.get("answer")
+            ),
         )
         return _TaskOutcome(
             record=record,

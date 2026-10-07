@@ -20,6 +20,7 @@ def _extract_answer(response: str) -> str | None:
 
 class BoolQ:
     name = "boolq"
+    decision_instructions = "Based on the passage, is the answer to the question yes?"
 
     def load_tasks(self) -> list[Task]:
         tasks = []

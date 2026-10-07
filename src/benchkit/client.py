@@ -137,6 +137,17 @@ def _capacity_from_payload(payload: object) -> int | None:
     return total or None
 
 
+def _is_decision_model(model: dict) -> bool:
+    """Read llama.cpp's native decision-model marker from a /v1/models entry."""
+    architecture = model.get("architecture")
+    modalities = (
+        architecture.get("output_modalities")
+        if isinstance(architecture, dict)
+        else None
+    )
+    return isinstance(modalities, list) and "decisions" in modalities
+
+
 def _describe_http_error(exc: Exception) -> str:
     """Human message for an unload failure, reading error bodies when present."""
     if isinstance(exc, httpx.HTTPStatusError):
@@ -447,6 +458,7 @@ class InferenceClient:
                     "meta": model.get("meta") or {},
                     "parallelism": _parallelism_hint(model),
                     "context_length": _context_length_hint(model),
+                    "decision": _is_decision_model(model),
                 }
             )
         return sorted(normalized, key=lambda model: model["name"].lower())
@@ -667,6 +679,27 @@ class InferenceClient:
         if self.provider == "openai":
             return self._generate_openai(model, prompt, on_progress, cancel_event)
         return self._generate_ollama(model, prompt, on_progress, cancel_event)
+
+    def is_decision_model(self, model: str) -> bool:
+        """Return whether a discovered model answers through /v1/systemone."""
+        return bool(self._models_by_name.get(model, {}).get("decision"))
+
+    def decide(
+        self,
+        model: str,
+        request: dict,
+        cancel_event: threading.Event | None = None,
+    ) -> dict:
+        """Ask a native decision model typed questions (llama.cpp /v1/systemone)."""
+        response = self._request(
+            "POST",
+            f"{_openai_base(self.host)}/systemone",
+            cancel_event=cancel_event,
+            headers=self._headers(),
+            json={"model": model, **request},
+            timeout=self._generation_timeout(),
+        )
+        return response.json()
 
     def _generation_timeout(self) -> httpx.Timeout:
         """Apply the configured timeout to every transport operation."""

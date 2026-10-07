@@ -23,6 +23,7 @@ def _format_choices(choices: list[str]) -> str:
 
 class ARC:
     name = "arc"
+    decision_instructions = "Which option correctly answers the question?"
 
     def load_tasks(self) -> list[Task]:
         tasks = []

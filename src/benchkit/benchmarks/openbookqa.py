@@ -23,6 +23,7 @@ def _format_choices(choices: list[str]) -> str:
 
 class OpenBookQA:
     name = "openbookqa"
+    decision_instructions = "Which option correctly answers this science question?"
 
     def load_tasks(self) -> list[Task]:
         tasks = []

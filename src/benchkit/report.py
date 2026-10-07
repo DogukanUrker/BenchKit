@@ -368,6 +368,30 @@ def save(
                     f"| {result.get('recoveries', 0)} |\n"
                 )
 
+        decided = [result for result in results if "decision_brier" in result]
+        if decided:
+            f.write("\n## Decision calibration\n\n")
+            f.write(
+                "Brier: 0 is perfect, 2 is confidently wrong. ECE: gap between "
+                "stated confidence and accuracy (10 bins).\n\n"
+            )
+            f.write(
+                "| Model | Benchmark | Accuracy | Mean confidence | P(correct) | Brier | ECE |\n"
+            )
+            f.write(
+                "|-------|-----------|---------:|----------------:|-----------:|------:|----:|\n"
+            )
+            for result in decided:
+                f.write(
+                    f"| {result['model']} "
+                    f"| {result.get('benchmark_label', result['benchmark'])} "
+                    f"| {result.get('score', 0):.1f}% "
+                    f"| {result['decision_confidence']:.1f}% "
+                    f"| {result['decision_p_correct']:.1f}% "
+                    f"| {result['decision_brier']:.4f} "
+                    f"| {result['decision_ece']:.4f} |\n"
+                )
+
         f.write("\n---\n\n")
         for result in results:
             benchmark_label = result.get("benchmark_label", result["benchmark"])

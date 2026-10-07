@@ -87,6 +87,26 @@ tables in the README.
   deterministic permutation whose correct option moves. Perturbed jobs are
   paired with the baseline and excluded from the overall model score.
 
+### Decision Models
+- Native decision models (laya, openjev, kev, d1, ...) answer typed questions
+  through llama.cpp's `POST /v1/systemone` in one forward pass and return a
+  probability per option, with zero output tokens. They are detected, never
+  flagged: a `/v1/models` entry whose `architecture.output_modalities` contains
+  `decisions` routes the model there (`route_decision_jobs`). Chat models in
+  the same run are untouched.
+- Benchmarks opt in with a `decision_instructions` attribute. Rows with
+  `choices` become a `choice` question keyed by option letter; rows without
+  become yes/no (`noul`). The top option is handed back as an ordinary
+  response, so each benchmark's own `evaluate()`, `choice-order`, and reports
+  apply unchanged. The recorded prompt is the exact request body.
+- Selecting a benchmark without `decision_instructions` for a decision model
+  is a configuration error before the run starts. Harness and repair settings
+  do not apply to decision jobs and are dropped for them.
+- Every decision task keeps its probabilities, `p_correct`, and Brier score;
+  jobs report mean confidence, P(correct), Brier (0 perfect, 2 confidently
+  wrong), and 10-bin ECE. Servers only scale probabilities with the
+  temperatures in the GGUF, so calibration is a measured result, not a given.
+
 ### Creative Rendering (treejs-arena)
 - `treejs-arena` has no ground truth. Frozen prompts ask for one
   self-contained HTML file each; the file is opened in headless Chromium and the

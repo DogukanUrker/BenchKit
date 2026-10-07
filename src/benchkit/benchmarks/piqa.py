@@ -23,6 +23,7 @@ def _format_choices(choices: list[str]) -> str:
 
 class PIQA:
     name = "piqa"
+    decision_instructions = "Which solution best achieves the goal?"
 
     def load_tasks(self) -> list[Task]:
         tasks = []
