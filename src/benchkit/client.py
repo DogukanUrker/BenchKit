@@ -138,14 +138,24 @@ def _capacity_from_payload(payload: object) -> int | None:
 
 
 def _is_decision_model(model: dict) -> bool:
-    """Read llama.cpp's native decision-model marker from a /v1/models entry."""
+    """Read the native decision-model marker from a /v1/models entry.
+
+    llama-server reports ``decisions`` in ``architecture.output_modalities``.
+    llama-swap builds its own listing and cannot advertise that modality, so a
+    model there is marked by hand with ``metadata: {decision: true}`` in its
+    config, which llama-swap returns under ``meta.llamaswap``.
+    """
     architecture = model.get("architecture")
     modalities = (
         architecture.get("output_modalities")
         if isinstance(architecture, dict)
         else None
     )
-    return isinstance(modalities, list) and "decisions" in modalities
+    if isinstance(modalities, list) and "decisions" in modalities:
+        return True
+    meta = model.get("meta")
+    swap = meta.get("llamaswap") if isinstance(meta, dict) else None
+    return isinstance(swap, dict) and swap.get("decision") is True
 
 
 def _describe_http_error(exc: Exception) -> str:

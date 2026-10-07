@@ -175,6 +175,15 @@ uv run benchkit --headless --models <decision-model> \
   --benchmarks mmlu-pro:100,boolq:100
 ```
 
+Behind llama-swap (v262+), mark the model in its config so BenchKit can tell:
+
+```yaml
+models:
+  d1-3b:
+    metadata:
+      decision: true
+```
+
 Profile inference performance:
 
 ```bash

@@ -94,6 +94,11 @@ tables in the README.
   flagged: a `/v1/models` entry whose `architecture.output_modalities` contains
   `decisions` routes the model there (`route_decision_jobs`). Chat models in
   the same run are untouched.
+- llama-swap builds its own `/v1/models` and cannot advertise `decisions`, so
+  a decision model behind it is marked in the llama-swap config with
+  `metadata: {decision: true}` (read from `meta.llamaswap.decision`). llama-swap
+  proxies `/v1/systemone` from v262. Without the marker the model silently
+  runs as a chat model, so check that the harness column says `Decision`.
 - Benchmarks opt in with a `decision_instructions` attribute. Rows with
   `choices` become a `choice` question keyed by option letter; rows without
   become yes/no (`noul`). The top option is handed back as an ordinary

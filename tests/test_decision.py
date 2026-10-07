@@ -150,6 +150,14 @@ class RoutingTests(unittest.TestCase):
         )
         self.assertFalse(_is_decision_model({}))
 
+    def test_llama_swap_metadata_marker(self) -> None:
+        def entry(metadata: dict) -> dict:
+            return {"meta": {"llamaswap": {"type": "model", **metadata}}}
+
+        self.assertTrue(_is_decision_model(entry({"decision": True})))
+        self.assertFalse(_is_decision_model(entry({"decision": "yes"})))
+        self.assertFalse(_is_decision_model(entry({})))
+
     def test_client_reads_marker_from_discovery(self) -> None:
         client = InferenceClient("http://x")
         client._models_by_name = {"d1": {"decision": True}, "qwen": {}}
