@@ -1524,6 +1524,9 @@ class Engine:
         task_statistics = getattr(bench, "task_statistics", None)
         if callable(task_statistics):
             result["task_statistics"] = task_statistics(records)
+        job_metrics = getattr(bench, "job_metrics", None)
+        if callable(job_metrics):
+            result.update(job_metrics(scored_records))
         return result, skipped
 
     def _verify_response(

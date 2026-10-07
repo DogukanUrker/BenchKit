@@ -107,6 +107,10 @@ tables in the README.
   become yes/no (`noul`). The top option is handed back as an ordinary
   response, so each benchmark's own `evaluate()`, `choice-order`, and reports
   apply unchanged. The recorded prompt is the exact request body.
+- A benchmark whose answer is a label rather than a letter supplies its own
+  option keys with `decision_criteria(task)`; the chosen key is the response
+  `evaluate()` sees. `banking77` uses it to offer all 77 intents keyed by
+  intent name - never filter the options, every task sees the full list.
 - Selecting a benchmark without `decision_instructions` for a decision model
   is a configuration error before the run starts. Harness and repair settings
   do not apply to decision jobs and are dropped for them.
@@ -119,6 +123,17 @@ tables in the README.
   included) plus nearest-rank p50/p95 latency in ms, shown everywhere tok/s
   is (`metrics.decision_speed`, `metrics.latency_text`). Tables that mix both
   kinds of rows say "Speed" and put the unit in each cell.
+
+### Intent Routing (banking77)
+- `banking77` routes a customer message to one of 77 intents (3,080-message
+  test split). Decision models get one `choice` question over every intent;
+  chat models get the same list and must reply with the intent name, scored by
+  exact match up to case and surrounding quotes or markdown.
+- Rows are stored interleaved across intents because slices are contiguous;
+  keep that order when regenerating the dataset.
+- A benchmark's optional `job_metrics(records)` hook adds job-level numbers to
+  the result. `banking77` uses it for `macro_f1`, which the reports show next
+  to accuracy and speed in an "Intent routing" section.
 
 ### Creative Rendering (treejs-arena)
 - `treejs-arena` has no ground truth. Frozen prompts ask for one
