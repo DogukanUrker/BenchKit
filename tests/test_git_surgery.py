@@ -148,17 +148,16 @@ def test_same_seed_produces_identical_reachable_repository() -> None:
     assert first_refs == second_refs
 
 
-def test_git_surgery_registers_all_five_tasks_in_slice_order() -> None:
+def test_git_surgery_registers_the_original_tasks_first_in_slice_order() -> None:
     benchmark = GitSurgery()
 
-    assert [item.id for item in benchmark.load_tasks()] == [
+    assert [item.id for item in benchmark.load_tasks()][:5] == [
         "secret-in-history",
         "bisect-the-regression",
         "split-the-mega-commit",
         "recover-lost-work",
         "rebase-conflict-chain",
     ]
-    assert benchmark.task_count == 5
 
 
 def test_new_task_initial_states_receive_only_deterministic_partial_credit() -> None:
@@ -541,3 +540,364 @@ def test_cli_slice_selects_the_first_git_surgery_task() -> None:
 def test_dedicated_image_pins_git_and_bundles_all_task_assets() -> None:
     assert "GIT_DEBIAN_VERSION=1:2.39.5-0+deb12u3" in GIT_SURGERY_PI_DOCKERFILE
     assert "COPY git-surgery /opt/git-surgery" in GIT_SURGERY_PI_DOCKERFILE
+
+
+HARD_TASKS = [
+    "backport-release-stack",
+    "revert-merge-with-followups",
+    "recover-complex-stash",
+    "repair-force-pushed-remote",
+    "untangle-nested-submodules",
+]
+
+HARD_ENV = dict(
+    os.environ,
+    GIT_EDITOR="true",
+    GIT_CONFIG_GLOBAL="/dev/null",
+    GIT_CONFIG_COUNT="1",
+    GIT_CONFIG_KEY_0="protocol.file.allow",
+    GIT_CONFIG_VALUE_0="always",
+)
+
+SOLUTIONS = Path(__file__).with_name("git_surgery_solutions")
+
+
+def reference_solution(task_id: str) -> str:
+    return (SOLUTIONS / f"{task_id}.sh").read_text()
+
+
+REFERENCE_TRACES = {
+    "revert-merge-with-followups": "git revert -m 1 MERGE",
+    "recover-complex-stash": "git fsck --dangling",
+}
+
+
+def setup_hard(root: Path, task_id: str, seed: int = 424242) -> Path:
+    workspace = root / task_id
+    setup = ROOT / "src/benchkit/git_surgery" / task_id / "setup.sh"
+    run("bash", str(setup), str(seed), str(workspace))
+    return workspace
+
+
+def shell(workspace: Path, script: str) -> None:
+    subprocess.run(
+        ["bash", "-c", script],
+        cwd=workspace,
+        env=HARD_ENV,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+
+def bash_trace(command: str) -> list[dict]:
+    return [{"name": "bash", "arguments": {"command": command}, "is_error": False}]
+
+
+def verify_hard(workspace: Path, task_id: str, trace: list[dict] | None = None):
+    return GitSurgery().verify_workspace(
+        task_named(task_id), LocalEnvironment(workspace), trace or []
+    )
+
+
+def checkpoint_map(result) -> dict[str, bool]:
+    return {item["id"]: item["passed"] for item in result.details["checkpoints"]}
+
+
+def repository_fingerprint(workspace: Path) -> str:
+    """Refs and unreachable objects of every repository under the workspace."""
+    repositories = sorted(
+        path.parent
+        for path in workspace.rglob("HEAD")
+        if (path.parent / "objects").is_dir() and (path.parent / "refs").is_dir()
+    )
+    lines = []
+    for repo in repositories:
+        refs = run("git", "--git-dir", str(repo), "for-each-ref").stdout
+        lost = run(
+            "git", "--git-dir", str(repo), "fsck", "--unreachable", "--no-reflogs"
+        ).stdout
+        relative = repo.relative_to(workspace)
+        lines.append(f"{relative}\n{refs}{sorted(lost.splitlines())}")
+    return "\n".join(lines)
+
+
+def test_git_surgery_hard_tasks_are_appended_to_the_slice_order() -> None:
+    ids = [item.id for item in GitSurgery().load_tasks()]
+
+    assert ids[5:] == HARD_TASKS
+    assert GitSurgery().task_count == 10
+
+
+def test_hard_task_assets_and_prompts_exist() -> None:
+    for task_id in HARD_TASKS:
+        directory = ROOT / "src/benchkit/git_surgery" / task_id
+        assert (directory / "setup.sh").is_file()
+        assert (directory / "verify.sh").is_file()
+        assert GitSurgery().build_prompt(task_named(task_id))
+
+
+def test_hard_tasks_are_deterministic_for_the_same_seed() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for task_id in HARD_TASKS:
+            first = repository_fingerprint(setup_hard(root / "a", task_id))
+            second = repository_fingerprint(setup_hard(root / "b", task_id))
+
+            assert first, task_id
+            assert first == second, task_id
+
+
+def test_hard_task_initial_states_score_deterministic_partial_credit() -> None:
+    expected = {
+        "backport-release-stack": 0.0,
+        "revert-merge-with-followups": 0.0,
+        "recover-complex-stash": 0.0,
+        "repair-force-pushed-remote": 0.0,
+        "untangle-nested-submodules": 0.0,
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        for task_id, score in expected.items():
+            workspace = setup_hard(Path(directory), task_id)
+            result = verify_hard(workspace, task_id)
+
+            assert result.score == score, task_id
+            assert not result.details["trap_fired"], task_id
+            assert result.details["max_points"] == 8
+
+
+def test_hard_task_reference_solutions_score_every_checkpoint() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        for task_id in HARD_TASKS:
+            workspace = setup_hard(Path(directory), task_id)
+            shell(workspace, reference_solution(task_id))
+            trace = bash_trace(REFERENCE_TRACES.get(task_id, "git status"))
+            result = verify_hard(workspace, task_id, trace)
+
+            assert result.score == 1.0, (task_id, result.details["checkpoints"])
+            assert (
+                sum(
+                    item["weight"]
+                    for item in result.details["checkpoints"]
+                    if item["weight"] > 0
+                )
+                == 8
+            )
+
+
+def test_backport_merging_the_release_branch_fires_the_trap() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "backport-release-stack")
+        shell(workspace, "git merge -q --no-edit -X theirs release-2.x")
+        result = verify_hard(workspace, "backport-release-stack")
+
+    assert result.details["trap_fired"]
+    assert result.score == 0.0
+
+
+def test_backport_blanket_theirs_resolution_leaks_release_code() -> None:
+    script = """
+fix() { git log release-2.x --format=%H --grep="^Fixes: $1\\$" -1; }
+for issue in BK-101 BK-104 BK-107 BK-115; do
+    if ! git cherry-pick -x "$(fix "$issue")"; then
+        git checkout --theirs ledger/money.py
+        git add ledger/money.py
+        git cherry-pick --continue
+    fi
+done
+"""
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "backport-release-stack")
+        shell(workspace, script)
+        checkpoints = checkpoint_map(verify_hard(workspace, "backport-release-stack"))
+
+    assert checkpoints["selected_fixes"]
+    assert checkpoints["intermediate_tests"]
+    assert not checkpoints["no_release_leak"]
+
+
+def test_backport_keeping_the_redundant_pick_loses_the_equivalence_point() -> None:
+    script = reference_solution("backport-release-stack").replace(
+        'git cherry-pick -x "$(fix BK-112)" || git cherry-pick --skip',
+        'git cherry-pick -x --keep-redundant-commits "$(fix BK-112)"',
+    )
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "backport-release-stack")
+        shell(workspace, script)
+        checkpoints = checkpoint_map(verify_hard(workspace, "backport-release-stack"))
+
+    assert not checkpoints["selected_fixes"]
+    assert not checkpoints["skipped_equivalent"]
+
+
+def test_revert_with_the_wrong_mainline_or_default_inverse_is_not_credited() -> None:
+    trace = bash_trace("git revert -m 2 MERGE")
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "revert-merge-with-followups")
+        shell(
+            workspace,
+            """
+merge="$(git log --merges --format=%H --grep="^Merge branch 'pricing-engine'$" -1)"
+git revert -m 2 "$merge" || true
+git checkout --theirs pricing.py test_pricing.py
+git add pricing.py test_pricing.py
+git revert --continue
+""",
+        )
+        wrong_parent = checkpoint_map(
+            verify_hard(workspace, "revert-merge-with-followups", trace)
+        )
+        workspace = setup_hard(
+            Path(directory) / "inverse", "revert-merge-with-followups"
+        )
+        shell(
+            workspace,
+            """
+merge="$(git log --merges --format=%H --grep="^Merge branch 'pricing-engine'$" -1)"
+git revert -m 1 "$merge" || true
+git checkout --theirs pricing.py
+git rm -q test_bulk.py
+git add pricing.py
+git revert --continue
+""",
+        )
+        inverse = verify_hard(workspace, "revert-merge-with-followups", trace)
+
+    assert not wrong_parent["revert_commit"]
+    assert checkpoint_map(inverse)["revert_commit"]
+    assert not checkpoint_map(inverse)["both_parents_kept"]
+    assert inverse.details["trap_fired"]
+
+
+def test_revert_resetting_before_the_merge_fires_the_trap() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "revert-merge-with-followups")
+        shell(
+            workspace,
+            "git reset -q --hard "
+            '"$(git log --merges --format=%H --grep=pricing-engine -1)^1"',
+        )
+        result = verify_hard(workspace, "revert-merge-with-followups")
+
+    assert result.details["trap_fired"]
+    assert result.score == 0.0
+
+
+def test_stash_committing_the_conflicted_index_loses_staged_boundaries() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "recover-complex-stash")
+        shell(
+            workspace,
+            '''
+stash="$(for commit in $(git fsck --dangling --no-reflogs | awk '/commit/{print $3}'); do
+    echo "$commit $(git log -1 --format=%s "$commit")"
+done | grep ' On main: rates migration$' | cut -d' ' -f1)"
+git stash apply --index "$stash" || true
+printf '"""Quote settings."""\n\nDEFAULT_CURRENCY = "EUR"\nPRECISION = 4\n' > settings.py
+git add settings.py
+git restore --staged settings.py
+git commit -q -m "Migrate rates module"
+git add -A
+git commit -q -m "Finish rates migration"
+''',
+        )
+        result = verify_hard(
+            workspace, "recover-complex-stash", bash_trace("git fsck --dangling")
+        )
+
+    checkpoints = checkpoint_map(result)
+    assert checkpoints["two_commits"]
+    assert not checkpoints["staged_commit_exact"]
+    assert checkpoints["remaining_commit_exact"]
+    assert not result.details["trap_fired"]
+
+
+def test_stash_applying_the_newest_decoy_fires_the_trap() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "recover-complex-stash")
+        shell(
+            workspace,
+            """
+stash="$(for commit in $(git fsck --dangling --no-reflogs | awk '/commit/{print $3}'); do
+    echo "$commit $(git log -1 --format=%s "$commit")"
+done | grep ' On main: rates migration v2$' | cut -d' ' -f1)"
+git stash apply "$stash" || true
+git checkout --theirs settings.py || true
+git add -A
+git commit -q -m "Migrate rates module"
+""",
+        )
+        result = verify_hard(workspace, "recover-complex-stash")
+
+    assert result.details["trap_fired"]
+
+
+def test_force_push_restoring_the_dangling_candidate_fires_the_trap() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "repair-force-pushed-remote")
+        shell(
+            workspace,
+            """
+candidate="$(git -C origin.git fsck --dangling --no-reflogs | awk '/commit/{print $3}')"
+git -C origin.git update-ref refs/heads/release "$candidate"
+""",
+        )
+        result = verify_hard(workspace, "repair-force-pushed-remote")
+
+    assert result.details["trap_fired"]
+    assert not checkpoint_map(result)["followup_retained"]
+
+
+def test_force_push_mirroring_a_clone_fires_the_trap() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "repair-force-pushed-remote")
+        shell(
+            workspace,
+            reference_solution("repair-force-pushed-remote").replace(
+                '--force-with-lease="release:$fix" origin release',
+                "--force --mirror origin",
+            ),
+        )
+        result = verify_hard(workspace, "repair-force-pushed-remote")
+
+    assert result.details["trap_fired"]
+    assert not checkpoint_map(result)["healthy_refs_untouched"]
+
+
+def test_submodule_files_copied_into_superproject_fire_the_trap() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "untangle-nested-submodules")
+        shell(
+            workspace,
+            """
+cd app
+cp -r libs/engine "$TMPDIR_COPY"
+git rm -q --cached libs/engine
+rm -rf libs/engine
+cp -r "$TMPDIR_COPY" libs/engine
+rm -rf libs/engine/.git libs/engine/vendor/codec/.git
+git add -f libs/engine
+git commit -q -m "Vendor engine"
+""".replace("$TMPDIR_COPY", str(Path(directory) / "engine-copy")),
+        )
+        result = verify_hard(workspace, "untangle-nested-submodules")
+
+    assert result.details["trap_fired"]
+    assert result.score == 0.0
+
+
+def test_submodule_update_without_pushing_fails_the_recursive_clone() -> None:
+    script = reference_solution("untangle-nested-submodules").replace(
+        "git -C libs/engine push -q origin HEAD:main\n", ""
+    )
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = setup_hard(Path(directory), "untangle-nested-submodules")
+        shell(workspace, script)
+        checkpoints = checkpoint_map(
+            verify_hard(workspace, "untangle-nested-submodules")
+        )
+
+    assert checkpoints["codec_commit"]
+    assert checkpoints["top_commit_repaired"]
+    assert not checkpoints["engine_commit"]
+    assert not checkpoints["recursive_checkout"]

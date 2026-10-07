@@ -221,6 +221,26 @@ tables in the README.
   A gallery opened straight off disk keeps the screenshots and loses only the
   3D - never the scores, which never depended on it.
 
+### Git Surgery (git-surgery)
+- Every task is a directory under `src/benchkit/git_surgery/` with a
+  `setup.sh SEED WORKSPACE` and a `verify.sh SEED WORKSPACE`. Setup must be
+  byte-for-byte deterministic for a seed: fixed identities and timestamps, no
+  global Git config (`GIT_CONFIG_GLOBAL=/dev/null` in the newer tasks), and
+  relative submodule URLs so paths never reach an object. The verifier rebuilds
+  a reference copy from the same seed instead of reading anything left in the
+  workspace, so nothing in the agent workspace names the answer.
+- `verify.sh` prints `id<TAB>0|1<TAB>evidence` lines. Checkpoint weights live
+  in `_evaluate_generic` and must total eight positive points, plus one `trap`
+  line for the four-point destructive shortcut. Behavioral checks run against
+  committed state (`git archive`), never the working tree, so an uncommitted
+  repair cannot pass.
+- The task order is the slicing order: append new tasks, never reorder.
+- `tests/git_surgery_solutions/` holds a hand solution per newer task. The
+  tests require each one to score 1.0, the untouched workspace to earn only its
+  fixed partial credit, and each named shortcut to fire the trap or lose its
+  checkpoint. Update the solution together with the task. The image enables
+  `protocol.file.allow` system-wide so local-path submodules work offline.
+
 ### Concurrency and Metrics
 - Request concurrency is detected from server slot endpoints or explicit
   metadata and is bounded by task count. Model jobs remain sequential; tasks
