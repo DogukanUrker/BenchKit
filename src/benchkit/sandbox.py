@@ -163,6 +163,7 @@ RUN apt-get update \\
     && apt-get install -y --no-install-recommends \\
        bash ca-certificates git=${{GIT_DEBIAN_VERSION}} python3 ripgrep \\
     && test "$(git --version)" = "git version 2.39.5" \\
+    && git config --system protocol.file.allow always \\
     && rm -rf /var/lib/apt/lists/*
 {_PI_INSTALL}
 

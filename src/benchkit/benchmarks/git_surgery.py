@@ -63,6 +63,77 @@ _TASKS = [
         "will lose functionality. Preserve the three feature commits and their "
         "order, then run the tests and verify the completed rebase.",
     ),
+    (
+        "backport-release-stack",
+        "Backport the fixes for BK-101, BK-104, BK-107, BK-112 and BK-115 from "
+        "release-2.x onto the checked-out maint-1.x branch. A fix is a commit "
+        "whose message carries the trailer 'Fixes: BK-NNN' for that exact "
+        "issue; if a fix was reverted and redone on release-2.x, backport only "
+        "the version still in effect there. Cherry-pick with -x so every "
+        "backport records its source commit, apply them in the order they "
+        "landed on release-2.x, and do not duplicate a fix that maint-1.x "
+        "already contains. Resolve conflicts for maint-1.x's code; do not merge "
+        "release-2.x or bring over any other release-2.x change. Every new "
+        "commit on maint-1.x must pass the test suite (python3 -m unittest "
+        "discover -v). Leave release-2.x and maint-1.x's existing commits "
+        "untouched.",
+    ),
+    (
+        "revert-merge-with-followups",
+        "The tests on main fail because one of its merges introduced a "
+        "regression. Find that merge and undo the regression with a single "
+        "'git revert -m' of the merge commit on top of main, choosing the "
+        "mainline parent correctly. Resolve the revert so that it removes only "
+        "the regression: every other change either side of the merge brought "
+        "in, and every later commit on main, must keep working. Do not reset, "
+        "rebase or otherwise rewrite main, and do not edit the tests. Run the "
+        "tests and verify the result.",
+    ),
+    (
+        "recover-complex-stash",
+        "A stash holding an in-progress rates migration was dropped, along "
+        "with other stashes and stray commits that are still in the object "
+        "store. Recover the stash that renamed legacy_rates.py to rates.py as a "
+        "staged change and also created an untracked fixtures/eur.json. "
+        "Re-apply its work on top of the current main branch as exactly two "
+        "commits: first 'Migrate rates module', containing exactly the changes "
+        "that were staged in that stash, then 'Finish rates migration', "
+        "containing its unstaged edits and its untracked files. Where main has "
+        "changed since the stash was made, keep main's changes as well. Recover "
+        "the contents from Git's object store rather than retyping them, and "
+        "run the tests on the result.",
+    ),
+    (
+        "repair-force-pushed-remote",
+        "This workspace holds an offline bare remote, origin.git, and two "
+        "clones of it, alice and bob. Someone force-pushed origin's release "
+        "branch and discarded published work. Restore origin's release branch "
+        "so it is the release history exactly as it was published before the "
+        "force-push, followed by the one legitimate commit that was pushed "
+        "after the force-push, re-applied on top as a single new commit. Drop "
+        "the rewritten commit the force-push introduced. Do not change origin's "
+        "other branches or any tag, leave no extra refs behind on origin, do "
+        "not delete, re-create or replace origin.git, and run the tests on the "
+        "restored branch.",
+    ),
+    (
+        "untangle-nested-submodules",
+        "app is a superproject whose submodule libs/engine has its own nested "
+        "submodule vendor/codec; their remotes live in remotes/. app's top "
+        "commit points libs/engine at a commit that exists only in this "
+        "checkout, so a fresh recursive clone fails. Amend that top commit so "
+        "libs/engine points at the commit published on engine's main branch "
+        "with the same content, keeping the commit's message and its other "
+        "changes. The nested codec checkout also has uncommitted work that "
+        "belongs upstream: commit it in codec as 'Fix codec frame whitespace' "
+        "on top of codec's main and push it, then commit 'Pick up codec "
+        "whitespace fix' in engine on top of engine's main pointing "
+        "vendor/codec at it and push that, then record a new app commit, also "
+        "'Pick up codec whitespace fix', that moves libs/engine to the new "
+        "engine commit. Keep .gitmodules unchanged, keep both modules as real "
+        "submodules, and make sure a fresh clone of app with "
+        "--recurse-submodules checks out and passes its tests.",
+    ),
 ]
 
 
@@ -163,7 +234,7 @@ class GitSurgery:
     task_count = len(_TASKS)
     workspace_task = True
     evaluation_activity = "checking Git history with plumbing commands"
-    list_note = "5 agentic Git tasks · requires Pi"
+    list_note = f"{len(_TASKS)} agentic Git tasks · requires Pi"
 
     def load_tasks(self) -> list[Task]:
         return [
@@ -325,6 +396,42 @@ class GitSurgery:
                 ("both_sides_preserved", 3),
                 ("tests_pass", 2),
             ],
+            "backport-release-stack": [
+                ("selected_fixes", 2),
+                ("skipped_equivalent", 1),
+                ("intermediate_tests", 2),
+                ("final_behavior", 1),
+                ("no_release_leak", 2),
+            ],
+            "revert-merge-with-followups": [
+                ("revert_commit", 2),
+                ("topology_preserved", 1),
+                ("regression_removed", 2),
+                ("both_parents_kept", 2),
+                ("tests_pass", 1),
+            ],
+            "recover-complex-stash": [
+                ("explored_objects", 1),
+                ("two_commits", 1),
+                ("staged_commit_exact", 2),
+                ("remaining_commit_exact", 2),
+                ("main_changes_kept", 1),
+                ("tests_pass", 1),
+            ],
+            "repair-force-pushed-remote": [
+                ("remote_intact", 1),
+                ("lineage_restored", 2),
+                ("followup_retained", 2),
+                ("healthy_refs_untouched", 2),
+                ("tests_pass", 1),
+            ],
+            "untangle-nested-submodules": [
+                ("codec_commit", 2),
+                ("engine_commit", 1),
+                ("top_commit_repaired", 2),
+                ("superproject_update", 1),
+                ("recursive_checkout", 2),
+            ],
         }
         command_text = "\n".join(_command(call) for call in trace)
         trace_checks = {
@@ -333,6 +440,7 @@ class GitSurgery:
                 re.search(r"\bgit\s+(?:reflog|fsck|cat-file)\b", command_text)
             ),
             "started_rebase": bool(re.search(r"\bgit\s+rebase\b", command_text)),
+            "revert_commit": bool(re.search(r"\bgit\s+revert\b", command_text)),
         }
         checkpoints = []
         for checkpoint_id, weight in specs[task.id]:
