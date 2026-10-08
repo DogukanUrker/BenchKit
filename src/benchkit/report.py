@@ -440,6 +440,39 @@ def save(
                     f"| {result.get('xstest_unsafe_total', 0)} |\n"
                 )
 
+        verified = [result for result in results if "verifier_pass_total" in result]
+        if verified:
+            f.write("\n## Code verification\n\n")
+            f.write(
+                "Accuracy on solutions that pass their tests and on solutions "
+                "that fail them. The suite is balanced, so always answering yes "
+                "scores 50% overall; the split shows which way a verifier leans.\n\n"
+            )
+            f.write(
+                "| Model | Harness | Accuracy | On passing | On failing | Speed | Latency |\n"
+            )
+            f.write(
+                "|-------|---------|---------:|-----------:|-----------:|------:|--------:|\n"
+            )
+
+            def class_rate(value: object) -> str:
+                return "—" if value is None else f"{float(value):.1f}%"
+
+            for result in verified:
+                speed, latency = (
+                    decision_speed(result)
+                    if is_decision(result)
+                    else (f"{aggregate_tok_s(result):.1f} tok/s", latency_text(result))
+                )
+                f.write(
+                    f"| {result['model']} "
+                    f"| {result.get('harness_label', 'Direct')} "
+                    f"| {result.get('score', 0):.1f}% "
+                    f"| {class_rate(result.get('verifier_pass_accuracy'))} "
+                    f"| {class_rate(result.get('verifier_fail_accuracy'))} "
+                    f"| {speed} | {latency} |\n"
+                )
+
         decided = [result for result in results if "decision_brier" in result]
         if decided:
             f.write("\n## Decision calibration\n\n")

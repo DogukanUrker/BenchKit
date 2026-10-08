@@ -76,6 +76,7 @@ class RequestTests(unittest.TestCase):
                 "arc",
                 "banking77",
                 "boolq",
+                "code-verifier",
                 "gpqa",
                 "hellaswag",
                 "mmlu",

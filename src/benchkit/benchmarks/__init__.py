@@ -4,6 +4,7 @@ from benchkit.benchmarks.aider_polyglot import AiderPolyglot
 from benchkit.benchmarks.arc import ARC
 from benchkit.benchmarks.banking77 import Banking77
 from benchkit.benchmarks.boolq import BoolQ
+from benchkit.benchmarks.code_verifier import CodeVerifier
 from benchkit.benchmarks.evalplus import HumanEvalPlus, MBPPPlus
 from benchkit.benchmarks.git_surgery import GitSurgery
 from benchkit.benchmarks.gpqa import GPQA
@@ -47,6 +48,7 @@ REGISTRY: dict[str, type] = {
     "gpqa": GPQA,
     "mmlu-pro": MMLUPro,
     "banking77": Banking77,
+    "code-verifier": CodeVerifier,
     # Multiple-choice suites.
     "mmlu": MMLU,
     "arc": ARC,
@@ -79,6 +81,7 @@ DESCRIPTIONS: dict[str, str] = {
     "gpqa": "expert-written graduate science questions designed to resist search",
     "mmlu-pro": "harder MMLU successor: ten options and reasoning-heavy questions",
     "banking77": "route a banking customer message to one of 77 intents",
+    "code-verifier": "judge whether a model-written HumanEval+ solution passes its tests",
     "mmlu": "zero-shot coverage of 57 academic and professional subjects",
     "openbookqa": "elementary science questions requiring facts plus reasoning",
     "winogrande": "commonsense pronoun resolution in ambiguous sentences",
