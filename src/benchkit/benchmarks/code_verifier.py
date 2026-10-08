@@ -9,12 +9,8 @@ from benchkit.benchmarks.utils import strip_think_tags
 
 DATASET = Path(__file__).parent.parent / "datasets" / "code_verifier.jsonl"
 
-SYSTEM = (
-    "You are reviewing a candidate solution to a programming problem. It will "
-    "be run against a hidden test suite that is much stricter than the "
-    "docstring examples (edge cases, empty inputs, large inputs). Decide "
-    "whether it passes every test. Reply with ONLY YES or NO."
-)
+# One neutral question for both harnesses, so neither is nudged either way.
+QUESTION = "Does this solution correctly solve the problem?"
 
 
 def _extract_answer(response: str) -> str | None:
@@ -25,10 +21,7 @@ def _extract_answer(response: str) -> str | None:
 
 class CodeVerifier:
     name = "code-verifier"
-    decision_instructions = (
-        "Does the candidate solution pass every hidden test for this problem, "
-        "including edge cases?"
-    )
+    decision_instructions = QUESTION
     task_count = 500
 
     def load_tasks(self) -> list[Task]:
@@ -40,9 +33,9 @@ class CodeVerifier:
                     Task(
                         id=d["id"],
                         prompt=(
-                            f"Problem:\n```python\n{d['prompt'].rstrip()}\n```\n\n"
-                            f"Candidate solution:\n```python\n"
-                            f"{d['solution'].rstrip()}\n```"
+                            f"Problem:\n```python\n{d['prompt'].strip()}\n```\n\n"
+                            f"Solution:\n```python\n"
+                            f"{d['solution'].strip()}\n```"
                         ),
                         metadata={
                             "answer": "yes" if d["passes"] else "no",
@@ -54,7 +47,7 @@ class CodeVerifier:
         return tasks
 
     def build_prompt(self, task: Task) -> str:
-        return f"{SYSTEM}\n\n{task.prompt}"
+        return f"{task.prompt}\n\n{QUESTION} Reply with only YES or NO."
 
     def evaluate(self, task: Task, response: str) -> bool:
         return _extract_answer(response) == task.metadata["answer"]

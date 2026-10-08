@@ -27,7 +27,7 @@ def test_state_shows_problem_and_candidate_but_not_the_label() -> None:
     task = CodeVerifier().load_tasks()[0]
 
     assert task.prompt.startswith("Problem:\n```python\n")
-    assert "Candidate solution:\n```python\n" in task.prompt
+    assert "Solution:\n```python\n" in task.prompt
     assert task.metadata["model"] not in task.prompt
     assert '"passes"' not in task.prompt
 
