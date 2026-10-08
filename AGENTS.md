@@ -150,6 +150,19 @@ tables in the README.
   the result. `banking77` uses it for `macro_f1`, which the reports show next
   to accuracy and speed in an "Intent routing" section.
 
+### Code Verification (code-verifier)
+- `code-verifier` asks whether a model-written HumanEval+ solution passes
+  its tests: 500 rows, 250 pass and 250 fail, labelled by executing each
+  program with EvalPlus. Decision models get a `noul` question; chat models
+  answer YES or NO. Nothing is executed at benchmark time.
+- The dataset is published as `DogukanUrker/humaneval-plus-verifier` on
+  Hugging Face, together with its build script. The bundled JSONL is the
+  frozen copy; never edit it in place, publish a new version instead. The
+  `model` field names the source model, so only released models may appear.
+- Rows alternate fail/pass, so slices stay balanced. `summary_fields` reports
+  accuracy on passing and on failing solutions, because the overall score
+  hides a verifier that leans one way.
+
 ### Creative Rendering (treejs-arena)
 - `treejs-arena` has no ground truth. Frozen prompts ask for one
   self-contained HTML file each; the file is opened in headless Chromium and the

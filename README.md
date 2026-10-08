@@ -116,6 +116,7 @@ uv run benchkit --help
 | GPQA | `gpqa` | 198 | Graduate-level science questions |
 | MMLU-Pro | `mmlu-pro` | 12,032 | Reasoning across 14 knowledge categories |
 | BANKING77 | `banking77` | 3,080 | Route a banking message to one of 77 intents |
+| Code Verifier | `code-verifier` | 500 | Judge whether a model-written HumanEval+ solution passes its tests |
 | MMLU | `mmlu` | 14,042 | Academic and professional knowledge |
 | ARC | `arc` | 1,172 | Grade-school science reasoning |
 | OpenBookQA | `openbookqa` | 500 | Elementary science knowledge |
