@@ -63,6 +63,19 @@ scripts/build_mmlu_pro.py`. BenchKit evaluates it zero-shot.
 - Paper: <https://arxiv.org/abs/2406.01574>
 - Dataset license: MIT
 
+## BANKING77
+
+`banking77.jsonl` is a transformed copy of the 3,080-message BANKING77 test
+split, and `banking77_intents.json` is the upstream list of its 77 intents.
+Only the schema changed - each row keeps its upstream position in `task_id` -
+and rows are interleaved round-robin across intents so that any slice covers
+them evenly. Regenerate both with `uv run python scripts/build_banking77.py`.
+
+- Source: <https://github.com/PolyAI-LDN/task-specific-datasets>
+- Paper: Casanueva et al., "Efficient Intent Detection with Dual Sentence
+  Encoders" (2020), <https://arxiv.org/abs/2003.04807>
+- Dataset license: [Creative Commons Attribution 4.0 International][cc-by-4.0]
+
 ## OpenBookQA
 
 `openbookqa.jsonl` is a transformed copy of the 500-question OpenBookQA test

@@ -377,6 +377,34 @@ def save(
                     f"| {result.get('recoveries', 0)} |\n"
                 )
 
+        routed = [result for result in results if "macro_f1" in result]
+        if routed:
+            f.write("\n## Intent routing\n\n")
+            f.write(
+                "Macro-F1 is the unweighted mean F1 across intents, so a router "
+                "that ignores rare intents cannot hide behind the common ones.\n\n"
+            )
+            f.write(
+                "| Model | Harness | Benchmark | Accuracy | Macro-F1 | Speed | Latency |\n"
+            )
+            f.write(
+                "|-------|---------|-----------|---------:|---------:|------:|--------:|\n"
+            )
+            for result in routed:
+                speed, latency = (
+                    decision_speed(result)
+                    if is_decision(result)
+                    else (f"{aggregate_tok_s(result):.1f} tok/s", latency_text(result))
+                )
+                f.write(
+                    f"| {result['model']} "
+                    f"| {result.get('harness_label', 'Direct')} "
+                    f"| {result.get('benchmark_label', result['benchmark'])} "
+                    f"| {result.get('score', 0):.1f}% "
+                    f"| {result['macro_f1']:.1f}% "
+                    f"| {speed} | {latency} |\n"
+                )
+
         xstest_rows = [
             result
             for result in results

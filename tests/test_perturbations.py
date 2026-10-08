@@ -299,6 +299,11 @@ class SetupPerturbationTUITests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             screen = app.screen
             assert isinstance(screen, SetupScreen)
+            # Task counts rebuild the benchmark list as they arrive, and a
+            # rebuild re-syncs the selection from the widget, so let counting
+            # finish before setting the selection directly.
+            await screen.workers.wait_for_complete()
+            await pilot.pause()
             screen.selected_models = {"demo-mini:3b"}
             screen.selected_benchmarks = {"arc"}
             screen.counts["arc"] = 1

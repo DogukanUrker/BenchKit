@@ -74,6 +74,7 @@ class RequestTests(unittest.TestCase):
             set(decision.supported_benchmarks()),
             {
                 "arc",
+                "banking77",
                 "boolq",
                 "gpqa",
                 "hellaswag",

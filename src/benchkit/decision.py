@@ -5,8 +5,9 @@ probability for every option instead of generated text. BenchKit routes every
 model whose ``/v1/models`` entry lists the ``decisions`` output modality here,
 with no flag to set. Benchmarks opt in through a ``decision_instructions``
 attribute. The most likely option is handed back to the engine as an ordinary
-response (an option letter, or ``yes``/``no``), so each benchmark's own
-``evaluate()`` scores it unchanged and perturbations and reports keep working.
+response (an option letter, a benchmark's own option key, or ``yes``/``no``),
+so each benchmark's own ``evaluate()`` scores it unchanged and perturbations
+and reports keep working.
 """
 
 from __future__ import annotations
@@ -36,12 +37,21 @@ def request_for(bench: object, task: Task) -> dict:
     """Build the ``/v1/systemone`` body for one task.
 
     Multiple-choice tasks become a ``choice`` question keyed by option letter,
-    so the chosen key is directly the answer letter. Tasks without choices are
-    yes/no questions (``noul``).
+    so the chosen key is directly the answer letter. A benchmark whose answer is
+    a label rather than a letter (an intent router) supplies its own keys
+    through ``decision_criteria(task)``; the chosen key is then the label.
+    Tasks without either are yes/no questions (``noul``).
     """
     instructions = str(bench.decision_instructions)
     choices = task.metadata.get("choices")
-    if choices:
+    criteria = getattr(bench, "decision_criteria", None)
+    if callable(criteria):
+        question = {
+            "type": "choice",
+            "instructions": instructions,
+            "criteria": {str(key): str(text) for key, text in criteria(task).items()},
+        }
+    elif choices:
         name = str(getattr(bench, "name", ""))
         visible = choices[: VISIBLE_CHOICE_LIMITS.get(name, len(choices))]
         question = {
