@@ -131,7 +131,7 @@ class Banking77:
     def evaluate(self, task: Task, response: str) -> bool:
         return extract_intent(response) == task.metadata["answer"]
 
-    def job_metrics(self, records: list[object]) -> dict:
+    def summary_fields(self, records: list[object]) -> dict:
         """Macro-F1 over the scored tasks, for a router's per-intent quality.
 
         Tasks that never reached the verifier (timeouts, loop kills) count as

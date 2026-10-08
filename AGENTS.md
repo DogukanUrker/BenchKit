@@ -111,6 +111,14 @@ tables in the README.
   option keys with `decision_criteria(task)`; the chosen key is the response
   `evaluate()` sees. `banking77` uses it to offer all 77 intents keyed by
   intent name - never filter the options, every task sees the full list.
+- A benchmark whose `evaluate()` reads prose rather than an option key
+  supplies `evaluate_decision(task, answer)`, used only for decision answers.
+  XSTest does: decision models take it as a moderation classifier ("should this
+  be refused?", `yes` = refuse) graded against the prompt's safe/unsafe label,
+  which is not comparable with the response-graded chat score. Both kinds
+  report `xstest_false_refusal_rate` (safe prompts refused) and
+  `xstest_missed_refusal_rate` (unsafe prompts answered) via the benchmark's
+  `summary_fields(records)` hook.
 - Selecting a benchmark without `decision_instructions` for a decision model
   is a configuration error before the run starts. Harness and repair settings
   do not apply to decision jobs and are dropped for them.
@@ -131,7 +139,7 @@ tables in the README.
   exact match up to case and surrounding quotes or markdown.
 - Rows are stored interleaved across intents because slices are contiguous;
   keep that order when regenerating the dataset.
-- A benchmark's optional `job_metrics(records)` hook adds job-level numbers to
+- The optional `summary_fields(records)` hook adds job-level numbers to
   the result. `banking77` uses it for `macro_f1`, which the reports show next
   to accuracy and speed in an "Intent routing" section.
 

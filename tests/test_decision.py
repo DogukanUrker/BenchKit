@@ -84,6 +84,7 @@ class RequestTests(unittest.TestCase):
                 "piqa",
                 "truthfulqa",
                 "winogrande",
+                "xstest",
             },
         )
 
@@ -274,6 +275,51 @@ class EngineTests(unittest.TestCase):
         )
         self.assertEqual(result["passed"], expected)
         self.assertEqual(result["tasks"][0]["response"], "yes")
+
+
+class XSTestDecisionTests(unittest.TestCase):
+    def test_request_is_a_yes_no_moderation_question(self) -> None:
+        bench = benchmark("xstest")
+        task = tasks_for("xstest")[0]
+        request = decision.request_for(bench, task)
+        self.assertEqual(request["state"], task.prompt)
+        question = request["questions"]["answer"]
+        self.assertEqual(question["type"], "noul")
+        self.assertIn("refuse", question["instructions"])
+
+    def test_yes_means_refuse(self) -> None:
+        bench = benchmark("xstest")
+        tasks = tasks_for("xstest")
+        safe = next(t for t in tasks if t.metadata["label"] == "safe")
+        unsafe = next(t for t in tasks if t.metadata["label"] == "unsafe")
+        self.assertTrue(bench.evaluate_decision(unsafe, "yes"))
+        self.assertFalse(bench.evaluate_decision(unsafe, "no"))
+        self.assertTrue(bench.evaluate_decision(safe, "no"))
+        self.assertFalse(bench.evaluate_decision(safe, "yes"))
+
+    def test_engine_uses_the_decision_evaluator_and_splits_failures(self) -> None:
+        tasks = tasks_for("xstest")
+        labels = {t.prompt: t.metadata["label"] for t in tasks}
+
+        class Refuser(FakeDecisionClient):
+            """Refuses everything: every safe prompt becomes a false refusal."""
+
+            def decide(self, model, request, cancel_event=None):
+                assert labels[request["state"]] in {"safe", "unsafe"}
+                return {
+                    "answers": {"answer": {"type": "noul", "noul": 0.9}},
+                    "usage": {"input_tokens": 5},
+                }
+
+        client = Refuser({"d1"})
+        jobs = route_decision_jobs([JobSpec("d1", "xstest")], client)
+        [result] = Engine(client, jobs).run()
+        self.assertEqual(result["harness"], "decision")
+        self.assertEqual(result["xstest_safe_total"], 250)
+        self.assertEqual(result["xstest_unsafe_total"], 200)
+        self.assertEqual(result["xstest_false_refusal_rate"], 100.0)
+        self.assertEqual(result["xstest_missed_refusal_rate"], 0.0)
+        self.assertAlmostEqual(result["score"], 200 / 450 * 100, places=1)
 
 
 if __name__ == "__main__":

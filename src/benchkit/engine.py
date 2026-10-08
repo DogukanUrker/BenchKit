@@ -1524,9 +1524,9 @@ class Engine:
         task_statistics = getattr(bench, "task_statistics", None)
         if callable(task_statistics):
             result["task_statistics"] = task_statistics(records)
-        job_metrics = getattr(bench, "job_metrics", None)
-        if callable(job_metrics):
-            result.update(job_metrics(scored_records))
+        summary_fields = getattr(bench, "summary_fields", None)
+        if callable(summary_fields):
+            result.update(summary_fields(scored_records))
         return result, skipped
 
     def _verify_response(
@@ -1534,11 +1534,13 @@ class Engine:
         bench: object,
         task: Task,
         response: str,
+        *,
+        decision: bool = False,
     ) -> EvaluationResult:
         """Run evaluators serially and convert infrastructure errors to data."""
         with self._evaluation_lock:
             try:
-                return evaluate_response(bench, task, response)
+                return evaluate_response(bench, task, response, decision=decision)
             except Exception as exc:
                 return EvaluationResult(
                     score=0.0,
@@ -2056,7 +2058,9 @@ class Engine:
                     errors += 1
                     harness_error = True
             else:
-                evaluation = self._verify_response(bench, task, gen["response"])
+                evaluation = self._verify_response(
+                    bench, task, gen["response"], decision="decision" in gen
+                )
                 evaluation_score = evaluation.score
                 ok = evaluation.passed
                 # Verifiers that record artifacts (rendered pages, screenshots,

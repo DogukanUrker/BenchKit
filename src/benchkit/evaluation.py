@@ -30,11 +30,22 @@ def _score(value: object) -> float:
     return 1.0 if bool(value) else 0.0
 
 
-def evaluate_response(bench: object, task: Task, response: str) -> EvaluationResult:
-    """Evaluate one response and add generic feedback when needed."""
+def evaluate_response(
+    bench: object, task: Task, response: str, *, decision: bool = False
+) -> EvaluationResult:
+    """Evaluate one response and add generic feedback when needed.
+
+    A decision model's response is the chosen option key, not text. Most
+    benchmarks score that with their ordinary ``evaluate()``; one whose
+    evaluator reads prose (XSTest's refusal matcher) supplies
+    ``evaluate_decision`` instead.
+    """
     detailed = getattr(bench, "evaluate_with_feedback", None)
+    decide = getattr(bench, "evaluate_decision", None) if decision else None
     raw = (
-        detailed(task, response)
+        decide(task, response)
+        if callable(decide)
+        else detailed(task, response)
         if callable(detailed)
         else bench.evaluate(task, response)
     )
