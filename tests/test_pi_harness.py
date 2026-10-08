@@ -923,6 +923,61 @@ class HarnessPairingTests(unittest.TestCase):
         self.assertEqual(result["length_exceeded"], 1)
         self.assertEqual(result["tasks"][0]["outcome"], "pass")
 
+    def test_each_pi_task_builds_its_image_then_removes_it(self) -> None:
+        calls: list[str] = []
+        runner = Mock(version="test")
+        runner.prepare.side_effect = lambda: calls.append("build")
+        runner.cleanup.side_effect = lambda: calls.append("remove")
+
+        def generate(*_args, **_kwargs):
+            calls.append("solve")
+            return {
+                "thinking": "",
+                "response": "pass",
+                "trace_status": "unavailable",
+                "eval_count": 1,
+                "eval_duration_ns": 100_000_000,
+                "response_time_s": 0.1,
+                "done_reason": "stop",
+            }
+
+        runner.generate.side_effect = generate
+        engine = Engine(
+            client=SimpleNamespace(provider="openai", timeout=1.0),
+            jobs=[JobSpec("model", "sanity", "2", harness="pi")],
+        )
+        engine._pi_runner = runner
+
+        with (
+            patch("benchkit.engine.cleanup_run_resources"),
+            patch.object(
+                engine,
+                "_verify_response",
+                return_value=EvaluationResult(score=1.0),
+            ),
+        ):
+            result = engine.run()[0]
+
+        self.assertEqual(result["passed"], 2)
+        # Nothing is built ahead of time; the final entry is the run-level
+        # safety net, which is idempotent.
+        self.assertEqual(
+            calls,
+            ["build", "solve", "remove", "build", "solve", "remove", "remove"],
+        )
+
+    def test_pi_image_survives_while_another_task_still_uses_it(self) -> None:
+        runner = Mock()
+        engine = Engine(client=SimpleNamespace(provider="openai"), jobs=[])
+        engine._pi_runner = runner
+
+        first = engine._acquire_pi_image(None, None)
+        second = engine._acquire_pi_image(None, None)
+        engine._release_pi_image(first)
+        runner.cleanup.assert_not_called()
+        engine._release_pi_image(second)
+        runner.cleanup.assert_called_once_with()
+
     def test_engine_cleans_the_image_after_a_failed_pi_job(self) -> None:
         runner = Mock()
         engine = Engine(

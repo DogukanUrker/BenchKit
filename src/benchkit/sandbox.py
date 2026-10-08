@@ -304,7 +304,7 @@ def _verify_absent(
 
 @dataclass
 class LatestPiImage:
-    """Build the reproducibly pinned stock Pi image once per run."""
+    """Build a reproducibly pinned Pi image; the engine builds one per task."""
 
     docker: str = field(default_factory=_docker_binary)
     image: str = PI_IMAGE
@@ -694,7 +694,44 @@ CMD ["sleep", "infinity"]
 
 
 _MC_ARENA_READY = False
+_MC_ARENA_USERS = 0
 _MC_ARENA_LOCK = threading.Lock()
+
+
+def run_resources_created() -> bool:
+    """Whether this process built anything the run-level sweep must remove."""
+    with _BUILD_LOCK:
+        return bool(_BUILD_STATE["builder"])
+
+
+@contextlib.contextmanager
+def _mc_arena_image_lease():
+    """Hold the mc-arena image for one script; the last holder removes it.
+
+    Each task builds the image (a cache hit on the run's builder), runs its
+    script, and deletes it, so a run never keeps the image between tasks.
+    """
+    global _MC_ARENA_USERS, _MC_ARENA_READY
+    with _MC_ARENA_LOCK:
+        _MC_ARENA_USERS += 1
+    try:
+        yield mc_arena_image()
+    finally:
+        with _MC_ARENA_LOCK:
+            _MC_ARENA_USERS -= 1
+            release = (
+                _MC_ARENA_USERS == 0
+                and _MC_ARENA_READY
+                and not os.environ.get("BENCHKIT_MC_ARENA_IMAGE", "").strip()
+            )
+            if release:
+                _MC_ARENA_READY = False
+                with contextlib.suppress(Exception):
+                    _run(
+                        [_docker_binary(), "image", "rm", "--force", MC_ARENA_IMAGE],
+                        timeout=60,
+                        check=False,
+                    )
 
 
 def mc_arena_image() -> str:
@@ -830,8 +867,20 @@ def run_python_script(
     time limits: a script that forks, allocates or spins is bounded by the
     sandbox rather than by anything the script itself agrees to.
     """
+    with _mc_arena_image_lease() as image:
+        return _run_python_script_in(
+            image, code, timeout_s=timeout_s, stdout_limit=stdout_limit
+        )
+
+
+def _run_python_script_in(
+    image: str,
+    code: str,
+    *,
+    timeout_s: float,
+    stdout_limit: int,
+) -> ScriptRun:
     docker = _docker_binary()
-    image = mc_arena_image()
     container = f"benchkit-mc-arena-{uuid.uuid4().hex[:12]}"
     memory = os.environ.get("BENCHKIT_MC_ARENA_MEMORY", "512m")
     cpus = os.environ.get("BENCHKIT_MC_ARENA_CPUS", "1")

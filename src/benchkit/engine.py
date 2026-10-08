@@ -34,7 +34,7 @@ from benchkit.looping import LoopAnalyzer
 from benchkit.metrics import throughput_metrics
 from benchkit.perturbations import annotate_robustness, perturb_task
 from benchkit.pi_agent import PiAgentRunner
-from benchkit.sandbox import cleanup_run_resources
+from benchkit.sandbox import cleanup_run_resources, run_resources_created
 
 MAX_REPAIR_ATTEMPTS = 10
 
@@ -864,6 +864,14 @@ class Engine:
     _workspace_pi_runners: dict[str, PiAgentRunner] = field(
         default_factory=dict, init=False, repr=False
     )
+    # Every Pi image is built right before a task and removed right after it;
+    # the count keeps an image alive while a concurrent task still uses it.
+    _pi_image_users: dict[str, int] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _pi_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self.loop_kill_percent = min(100.0, max(0.0, self.loop_kill_percent))
@@ -877,31 +885,62 @@ class Engine:
             with self._emit_lock:
                 self.sink(event)
 
+    def _pi_entry(
+        self, bench: object | None = None, task: Task | None = None
+    ) -> tuple[str, PiAgentRunner]:
+        """Return the runner for a task's image and the key it is cached under."""
+        name = str(getattr(bench, "name", type(bench).__name__))
+        task_image_factory = getattr(bench, "pi_image_for_task", None)
+        image_factory = getattr(bench, "pi_image", None)
+        if callable(task_image_factory) and task is not None:
+            image = task_image_factory(task)
+            key = f"{name}:{image.image}"
+        elif callable(image_factory):
+            image, key = None, name
+        else:
+            with self._pi_lock:
+                if self._pi_runner is None:
+                    if getattr(self.client, "provider", None) == "demo":
+                        raise RuntimeError("Pi harness is unavailable in demo mode")
+                    self._pi_runner = PiAgentRunner(self.client)
+                return "", self._pi_runner
+        with self._pi_lock:
+            if key not in self._workspace_pi_runners:
+                self._workspace_pi_runners[key] = PiAgentRunner(
+                    self.client, image=image if image is not None else image_factory()
+                )
+            return key, self._workspace_pi_runners[key]
+
     def _pi(
         self, bench: object | None = None, task: Task | None = None
     ) -> PiAgentRunner:
-        task_image_factory = getattr(bench, "pi_image_for_task", None)
-        if callable(task_image_factory) and task is not None:
-            image = task_image_factory(task)
-            key = f"{getattr(bench, 'name', type(bench).__name__)}:{image.image}"
-            if key not in self._workspace_pi_runners:
-                self._workspace_pi_runners[key] = PiAgentRunner(
-                    self.client, image=image
-                )
-            return self._workspace_pi_runners[key]
-        image_factory = getattr(bench, "pi_image", None)
-        if callable(image_factory):
-            key = str(getattr(bench, "name", type(bench).__name__))
-            if key not in self._workspace_pi_runners:
-                self._workspace_pi_runners[key] = PiAgentRunner(
-                    self.client, image=image_factory()
-                )
-            return self._workspace_pi_runners[key]
-        if self._pi_runner is None:
-            if getattr(self.client, "provider", None) == "demo":
-                raise RuntimeError("Pi harness is unavailable in demo mode")
-            self._pi_runner = PiAgentRunner(self.client)
-        return self._pi_runner
+        return self._pi_entry(bench, task)[1]
+
+    def _acquire_pi_image(self, bench: object, task: Task) -> str:
+        """Claim the task's Pi image so no other task removes it mid-use."""
+        key, _runner = self._pi_entry(bench, task)
+        with self._pi_lock:
+            self._pi_image_users[key] = self._pi_image_users.get(key, 0) + 1
+        return key
+
+    def _release_pi_image(self, key: str) -> None:
+        """Remove a task's Pi image once no running task needs it any more."""
+        with self._pi_lock:
+            users = self._pi_image_users.get(key, 0) - 1
+            if users > 0:
+                self._pi_image_users[key] = users
+                return
+            self._pi_image_users.pop(key, None)
+            runner = (
+                self._pi_runner
+                if key == ""
+                else self._workspace_pi_runners.pop(key, None)
+            )
+        if runner is not None:
+            # The runner rebuilds on its next prepare(); a failed removal is
+            # retried by the run-level, label-scoped sweep.
+            with contextlib.suppress(Exception):
+                runner.cleanup()
 
     def run(self) -> list[dict]:
         """Run every job and return the results, including a partial run.
@@ -942,7 +981,9 @@ class Engine:
             for runner in self._workspace_pi_runners.values():
                 with contextlib.suppress(Exception):
                     runner.cleanup()
-            if used_pi:
+            # mc-arena builds on the same run builder without using Pi, so
+            # the sweep runs whenever anything was built, not only for Pi.
+            if used_pi or run_resources_created():
                 # Removes the run's shared builder, its build cache, and any
                 # image, container, network, or volume still carrying the run
                 # label. Scoped by label, never a global prune.
@@ -1031,28 +1072,12 @@ class Engine:
             )
         )
 
-        if job.harness == "pi" and tasks:
-            first = tasks[0]
-            self.emit(
-                TaskPhase(
-                    index=index,
-                    job=job,
-                    position=1,
-                    total=len(tasks),
-                    task_id=first.id,
-                    entry_point=str(first.metadata.get("entry_point", "")),
-                    phase="generating",
-                    activity="preparing pinned Pi sandbox image",
-                )
-            )
-            for task in tasks:
-                self._pi(bench, task).prepare()
-
         if not tasks:
             return None, False
 
-        # Image resolution is run setup, not task execution. Per-task Pi
-        # container startup and every agent/tool turn remain in the timing.
+        # Pi images are built per task: the build lands in the job wall time
+        # but never in a task's response time. Container startup and every
+        # agent/tool turn do count.
         wall_start = time.perf_counter()
         passed = 0
         score_points = 0.0
@@ -1777,8 +1802,27 @@ class Engine:
                 )
             )
 
+        # Build this task's Pi image now, run the task, then remove the image:
+        # a run never holds more images than it has tasks in flight.
+        pi_image = self._acquire_pi_image(bench, task) if job.harness == "pi" else None
         request_started = time.perf_counter()
         try:
+            if pi_image is not None:
+                self.emit(
+                    TaskPhase(
+                        index=index,
+                        job=job,
+                        position=position + 1,
+                        total=total,
+                        task_id=task.id,
+                        entry_point=entry_point,
+                        phase="generating",
+                        activity="building Pi sandbox image",
+                    )
+                )
+                self._pi(bench, task).prepare()
+                # The build is setup, not generation: keep it out of the timing.
+                request_started = time.perf_counter()
             generator = (
                 self._pi(bench, task)
                 if job.harness == "pi"
@@ -1884,6 +1928,11 @@ class Engine:
                 )
             if not gen.get("cancelled"):
                 errors += 1
+        finally:
+            # Workspace verification runs inside generate(), so the image is
+            # done once it returns, whichever way it ended.
+            if pi_image is not None:
+                self._release_pi_image(pi_image)
 
         if (
             gen.get("loop_killed") or gen.get("timed_out") or gen.get("length_exceeded")
