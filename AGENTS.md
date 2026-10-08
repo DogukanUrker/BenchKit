@@ -78,6 +78,13 @@ tables in the README.
   isolated container plus a restricted inference proxy. Do not add host
   mounts, the Docker socket, direct network egress, hidden answers, or hidden
   tests to the agent environment.
+- Docker images are built per task, never for the whole run up front: a Pi
+  task builds its image, runs, and removes it (`Engine._acquire_pi_image` /
+  `_release_pi_image`), and each mc-arena script does the same through
+  `sandbox._mc_arena_image_lease`. A refcount keeps an image while a concurrent
+  task still uses it. Rebuilds are cache hits on the run's private builder,
+  which the run-level sweep removes at the end. The build is kept out of task
+  response time but counts in job wall time.
 - `--repair-attempts 1` gives an incorrect answer one sanitized verifier
   message and one full replacement attempt. Feedback must never expose the
   expected answer or hidden test bodies.

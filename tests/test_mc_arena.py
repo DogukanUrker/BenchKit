@@ -382,3 +382,55 @@ def test_cleanup_forgets_the_image_it_deleted(monkeypatch) -> None:
     sandbox.cleanup_run_resources()
 
     assert sandbox._MC_ARENA_READY is False
+
+
+def test_each_script_builds_the_image_and_removes_it_afterwards(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def build() -> str:
+        calls.append("build")
+        sandbox._MC_ARENA_READY = True
+        return sandbox.MC_ARENA_IMAGE
+
+    def run(image, code, **_kwargs):
+        assert image == sandbox.MC_ARENA_IMAGE
+        calls.append(f"run {code}")
+        return ScriptRun(exit_code=0, stdout="[]", stderr="")
+
+    def docker(command, **_kwargs):
+        calls.append(" ".join(command[1:4]))
+
+    monkeypatch.delenv("BENCHKIT_MC_ARENA_IMAGE", raising=False)
+    monkeypatch.setattr(sandbox, "_docker_binary", lambda: "docker")
+    monkeypatch.setattr(sandbox, "_MC_ARENA_READY", False)
+    monkeypatch.setattr(sandbox, "mc_arena_image", build)
+    monkeypatch.setattr(sandbox, "_run_python_script_in", run)
+    monkeypatch.setattr(sandbox, "_run", docker)
+
+    sandbox.run_python_script("one")
+    sandbox.run_python_script("two")
+
+    assert calls == [
+        "build",
+        "run one",
+        "image rm --force",
+        "build",
+        "run two",
+        "image rm --force",
+    ]
+    assert sandbox._MC_ARENA_READY is False
+
+
+def test_a_prebuilt_mc_arena_image_is_never_removed(monkeypatch) -> None:
+    removed: list[list[str]] = []
+    monkeypatch.setenv("BENCHKIT_MC_ARENA_IMAGE", "mine:latest")
+    monkeypatch.setattr(sandbox, "_docker_binary", lambda: "docker")
+    monkeypatch.setattr(
+        sandbox,
+        "_run_python_script_in",
+        lambda image, code, **_kwargs: ScriptRun(exit_code=0, stdout=image, stderr=""),
+    )
+    monkeypatch.setattr(sandbox, "_run", lambda command, **_k: removed.append(command))
+
+    assert sandbox.run_python_script("x").stdout == "mine:latest"
+    assert removed == []
