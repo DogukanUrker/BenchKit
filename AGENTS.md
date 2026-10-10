@@ -264,6 +264,56 @@ tables in the README.
   A gallery opened straight off disk keeps the screenshots and loses only the
   3D - never the scores, which never depended on it.
 
+### Vision (ocrbench, chartqa, mmvp, vstar)
+- A vision suite sets `vision = True` and puts local image paths in
+  `task.metadata["images"]`. The engine passes them to `client.generate(...,
+  images=...)` on direct calls and on every repair attempt. The client sends
+  them inline: base64 `image_url` data URIs placed before the text part for
+  OpenAI-compatible servers, and the `images` field for Ollama. Never send
+  remote URLs; llama-swap and most local servers cannot fetch them. Prompts
+  stay plain strings, so reports, the demo client and decision routing are
+  unchanged.
+- Pi cannot forward images, so a vision suite on `--harness pi` is a
+  configuration error.
+- Decision models take images too: `/v1/systemone` accepts an `images` list
+  of data URIs (up to 8) when the model is served with an mmproj.
+  `decision.request_for` records the task's local paths under `images`, so the
+  recorded prompt stays small, and `Decider` swaps them for data URIs at send
+  time. `mmvp` and `vstar` are plain multiple choice and opt in with
+  `decision_instructions`; `ocrbench` and `chartqa` are free-form and do not.
+- Datasets are not bundled. `benchmarks/vision.py` fetches a pinned Hugging
+  Face revision (`REVISION` in each suite): `load_rows` for one parquet file
+  with embedded images (ocrbench, chartqa), `load_files` for a question
+  manifest plus one file per image (mmvp, vstar). Images land in
+  `~/.cache/benchkit/vision/<suite>/<revision>/` (override with
+  `BENCHKIT_VISION_CACHE`) and `rows.jsonl` is written last as the completion
+  marker. Do not switch to the datasets-server rows API: it rate-limits a full
+  download. Keep one pooled HTTP client per download; a connection per image
+  means a DNS lookup per image, and home resolvers drop them under load. A new
+  upstream revision is a deliberate suite update.
+- Suites declare `task_count` so `--list` and the TUI never trigger a
+  download. Upstream rows are grouped by category, so `vision.spread` orders
+  tasks to keep every category's share in any prefix slice; never slice the
+  upstream order. Both suites report `category_scores` through
+  `summary_fields`.
+- `ocrbench` follows the official evaluator: substring match of any reference
+  answer, case-insensitive, except HME100k math, which keeps case and drops all
+  spaces. The question goes out as written.
+- `chartqa` asks for a final `Answer: X` line and scores relaxed accuracy (5%
+  numeric tolerance, otherwise case-insensitive exact match). It deliberately
+  accepts a `%` answer read raw or over 100, because no test label carries a
+  `%` and models add one; keep that documented if scoring changes.
+- `mmvp` is 150 consecutive pairs: one two-option question on two look-alike
+  images with opposite answers. The headline score is per-question accuracy,
+  so averages and decision calibration stay comparable; `summary_fields` adds
+  the official `pair_accuracy` (both right, chance 25%) over pairs that were
+  fully scored. Keep the upstream order so even-sized slices keep pairs whole.
+- `vstar` has two categories: `direct_attributes` (four options) and
+  `relative_position` (two options). Its images are large on purpose; a server
+  that downsizes them hard loses the detail, and that is the measurement.
+- Both are in `CHOICE_ORDER_BENCHMARKS`. With two options a letter bias looks
+  like skill, so `--perturbation choice-order` is worth running on `mmvp`.
+
 ### Git Surgery (git-surgery)
 - Every task is a directory under `src/benchkit/git_surgery/` with a
   `setup.sh SEED WORKSPACE` and a `verify.sh SEED WORKSPACE`. Setup must be

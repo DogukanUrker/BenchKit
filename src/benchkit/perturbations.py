@@ -22,9 +22,11 @@ CHOICE_ORDER_BENCHMARKS = frozenset(
         "hellaswag",
         "mmlu",
         "mmlu-pro",
+        "mmvp",
         "openbookqa",
         "piqa",
         "truthfulqa",
+        "vstar",
         "winogrande",
     }
 )

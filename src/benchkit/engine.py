@@ -1052,6 +1052,11 @@ class Engine:
             raise ValueError(
                 f"{job.benchmark} requires the Pi harness; use --harness pi"
             )
+        if getattr(bench, "vision", False) and job.harness == "pi":
+            raise ValueError(
+                f"{job.benchmark} sends images, which the Pi harness cannot "
+                "forward; use --harness direct"
+            )
         all_tasks = tasks_for_job(job)
 
         slice_spec = job.slice_spec
@@ -1578,6 +1583,7 @@ class Engine:
         prompt: str,
         verifier: Callable[[str], EvaluationResult],
         on_progress: Callable[[GenerationUpdate], None],
+        images: list[str] | None = None,
     ) -> dict:
         """Run stateless direct calls with an explicit feedback transcript."""
         attempts: list[tuple[dict, EvaluationResult]] = []
@@ -1606,6 +1612,7 @@ class Engine:
                 request_prompt,
                 on_progress=forward,
                 cancel_event=self.controls.cancel_event,
+                **({"images": images} if images else {}),
             )
             terminal = bool(
                 gen.get("cancelled") or gen.get("timed_out") or gen.get("loop_killed")
@@ -1655,6 +1662,8 @@ class Engine:
             if job.harness == "decision"
             else prompt_for(bench, case.prompt_task, self.client, job.model)
         )
+        # Vision suites attach local image files; only direct calls carry them.
+        images = list(case.prompt_task.metadata.get("images") or ())
         error = ""
         errors = 0
         entry_point = str(task.metadata.get("entry_point", ""))
@@ -1869,6 +1878,7 @@ class Engine:
                         prompt,
                         verifier,
                         on_progress,
+                        images,
                     )
             else:
                 gen = generator.generate(
@@ -1883,6 +1893,9 @@ class Engine:
                         }
                         if workspace
                         else {}
+                    ),
+                    **(
+                        {"images": images} if images and job.harness == "direct" else {}
                     ),
                 )
         except _GenerationCancelled:
