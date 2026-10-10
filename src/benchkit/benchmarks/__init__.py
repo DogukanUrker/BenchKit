@@ -4,6 +4,7 @@ from benchkit.benchmarks.aider_polyglot import AiderPolyglot
 from benchkit.benchmarks.arc import ARC
 from benchkit.benchmarks.banking77 import Banking77
 from benchkit.benchmarks.boolq import BoolQ
+from benchkit.benchmarks.chartqa import ChartQA
 from benchkit.benchmarks.code_verifier import CodeVerifier
 from benchkit.benchmarks.evalplus import HumanEvalPlus, MBPPPlus
 from benchkit.benchmarks.git_surgery import GitSurgery
@@ -17,6 +18,8 @@ from benchkit.benchmarks.mc_arena import MCArena
 from benchkit.benchmarks.medfailbench import MedFailBench
 from benchkit.benchmarks.mmlu import MMLU
 from benchkit.benchmarks.mmlu_pro import MMLUPro
+from benchkit.benchmarks.mmvp import MMVP
+from benchkit.benchmarks.ocrbench import OCRBench
 from benchkit.benchmarks.openbookqa import OpenBookQA
 from benchkit.benchmarks.patcheval import PatchEval
 from benchkit.benchmarks.piqa import PIQA
@@ -24,6 +27,7 @@ from benchkit.benchmarks.ruler import RULER, RULERFull
 from benchkit.benchmarks.sanity import Sanity
 from benchkit.benchmarks.treejs_arena import TreeJSArena
 from benchkit.benchmarks.truthfulqa import TruthfulQA
+from benchkit.benchmarks.vstar import VStar
 from benchkit.benchmarks.winogrande import WinoGrande
 from benchkit.benchmarks.xstest import XSTest
 
@@ -49,6 +53,11 @@ REGISTRY: dict[str, type] = {
     "mmlu-pro": MMLUPro,
     "banking77": Banking77,
     "code-verifier": CodeVerifier,
+    # Vision suites send images and run on the direct harness only.
+    "ocrbench": OCRBench,
+    "chartqa": ChartQA,
+    "mmvp": MMVP,
+    "vstar": VStar,
     # Multiple-choice suites.
     "mmlu": MMLU,
     "arc": ARC,
@@ -82,6 +91,10 @@ DESCRIPTIONS: dict[str, str] = {
     "mmlu-pro": "harder MMLU successor: ten options and reasoning-heavy questions",
     "banking77": "route a banking customer message to one of 77 intents",
     "code-verifier": "judge whether a model-written HumanEval+ solution passes its tests",
+    "ocrbench": "text recognition and text-centric VQA across ten image categories",
+    "chartqa": "questions about real charts, scored with 5% relaxed numeric accuracy",
+    "mmvp": "pairs of look-alike images that differ in one detail, two options",
+    "vstar": "small details in high-resolution images, two or four options",
     "mmlu": "zero-shot coverage of 57 academic and professional subjects",
     "openbookqa": "elementary science questions requiring facts plus reasoning",
     "winogrande": "commonsense pronoun resolution in ambiguous sentences",

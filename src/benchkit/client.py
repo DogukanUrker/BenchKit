@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
+import mimetypes
 import os
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
@@ -52,6 +55,18 @@ def _without_v1(url: str) -> str:
 def _openai_base(url: str) -> str:
     url = url.rstrip("/")
     return url if url.endswith("/v1") else f"{url}/v1"
+
+
+def _encode_image(path: str) -> tuple[str, str]:
+    """Return the media type and base64 payload of a local image file."""
+    mime = mimetypes.guess_type(path)[0] or "image/png"
+    return mime, base64.b64encode(Path(path).read_bytes()).decode("ascii")
+
+
+def image_data_uri(path: str) -> str:
+    """Return a local image file as a base64 data URI."""
+    mime, data = _encode_image(path)
+    return f"data:{mime};base64,{data}"
 
 
 def _positive_int(value: object) -> int | None:
@@ -683,12 +698,17 @@ class InferenceClient:
         prompt: str,
         on_progress: ProgressCallback | None = None,
         cancel_event: threading.Event | None = None,
+        images: list[str] | None = None,
     ) -> dict:
+        """Stream one completion. ``images`` are local files sent inline."""
         if self.provider is None:
             raise RuntimeError("Call list_models() before generate()")
+        encoded = [_encode_image(path) for path in images or ()]
         if self.provider == "openai":
-            return self._generate_openai(model, prompt, on_progress, cancel_event)
-        return self._generate_ollama(model, prompt, on_progress, cancel_event)
+            return self._generate_openai(
+                model, prompt, on_progress, cancel_event, encoded
+            )
+        return self._generate_ollama(model, prompt, on_progress, cancel_event, encoded)
 
     def is_decision_model(self, model: str) -> bool:
         """Return whether a discovered model answers through /v1/systemone."""
@@ -721,10 +741,25 @@ class InferenceClient:
         prompt: str,
         on_progress: ProgressCallback | None,
         cancel_event: threading.Event | None,
+        images: list[tuple[str, str]] | None = None,
     ) -> dict:
+        content: str | list[dict] = prompt
+        if images:
+            # Data URIs, not URLs: llama-swap and many local servers cannot
+            # fetch remote images, and inline bytes keep runs reproducible.
+            content = [
+                *(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{data}"},
+                    }
+                    for mime, data in images
+                ),
+                {"type": "text", "text": prompt},
+            ]
         body = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": content}],
             "stream": True,
             "temperature": 0.0,
             "stream_options": {"include_usage": True},
@@ -919,10 +954,16 @@ class InferenceClient:
         prompt: str,
         on_progress: ProgressCallback | None,
         cancel_event: threading.Event | None,
+        images: list[tuple[str, str]] | None = None,
     ) -> dict:
         return self._retry_stream(
             lambda state: self._stream_ollama(
-                model, prompt, on_progress, cancel_event, state
+                model,
+                prompt,
+                on_progress,
+                cancel_event,
+                state,
+                [data for _, data in images or ()],
             ),
             cancel_event,
         )
@@ -934,6 +975,7 @@ class InferenceClient:
         on_progress: ProgressCallback | None,
         cancel_event: threading.Event | None,
         state: _StreamState | None = None,
+        images: list[str] | None = None,
     ) -> dict:
         state = state if state is not None else _StreamState()
         started = time.perf_counter()
@@ -954,6 +996,7 @@ class InferenceClient:
                     "prompt": prompt,
                     "stream": True,
                     "options": {"temperature": 0.0},
+                    **({"images": images} if images else {}),
                 },
                 timeout=self._generation_timeout(),
             ) as response:

@@ -59,9 +59,11 @@ class ChoiceOrderTests(unittest.TestCase):
             "hellaswag",
             "mmlu",
             "mmlu-pro",
+            "mmvp",
             "openbookqa",
             "piqa",
             "truthfulqa",
+            "vstar",
             "winogrande",
         }
 
