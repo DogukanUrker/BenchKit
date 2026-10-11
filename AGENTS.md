@@ -88,6 +88,15 @@ tables in the README.
 - `--repair-attempts 1` gives an incorrect answer one sanitized verifier
   message and one full replacement attempt. Feedback must never expose the
   expected answer or hidden test bodies.
+- Multiple choice is repaired differently (`engine.option_count`,
+  `repair_budget`). A task with at most two options (`metadata["choices"]` of
+  length 2, or a yes/no suite declaring `answer_options = 2`) is never
+  repaired: telling a model its pick of two was wrong hands it the answer.
+  Tasks with more options are repaired, but when every task of a job is
+  multiple choice the headline `score` and `passed` are the first attempt
+  (`headline: "first_attempt"`), and the repaired numbers move to
+  `repaired_score` / `repaired_passed` beside `repair_delta_pp`. Code and
+  open-answer suites keep the repaired score as their headline.
 - `aider-polyglot` is Pi-only and uses pinned task content and toolchains. It
   measures the stock Pi protocol on Aider tasks, not Aider's edit formats.
 - `--perturbation choice-order` runs supported MCQ tasks clean and with a

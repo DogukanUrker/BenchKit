@@ -335,6 +335,11 @@ def save(
         if repair_rows:
             f.write("\n## Verifier repair effect\n\n")
             f.write(
+                "Multiple-choice rows report the first attempt as their score; "
+                "the repaired score appears here only. Questions with two "
+                "options are never repaired.\n\n"
+            )
+            f.write(
                 "| Model | Harness | Benchmark | Max repairs | First attempt | Final | Delta | Retried tasks | Repair turns | Repaired |\n"
             )
             f.write(
@@ -347,7 +352,7 @@ def save(
                     f"| {result.get('benchmark_label', result['benchmark'])} "
                     f"| {result.get('repair_attempts', 0)} "
                     f"| {result.get('first_attempt_score', 0):.1f}% "
-                    f"| {result.get('score', 0):.1f}% "
+                    f"| {result.get('repaired_score', result.get('score', 0)):.1f}% "
                     f"| {result.get('repair_delta_pp', 0):+.1f}pp "
                     f"| {result.get('repair_attempted', 0)} "
                     f"| {result.get('repair_turns', result.get('repair_attempted', 0))} "

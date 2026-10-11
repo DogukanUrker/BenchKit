@@ -680,6 +680,29 @@ def prompt_for(bench: object, task: Task, client: object, model: str) -> str:
     return str(bench.build_prompt(task))
 
 
+def option_count(bench: object, task: Task) -> int | None:
+    """Return how many answers a multiple-choice task offers, else None.
+
+    Tasks list their options in ``metadata["choices"]``; yes/no suites that
+    keep no list declare ``answer_options`` on the benchmark instead.
+    """
+    choices = task.metadata.get("choices")
+    if choices:
+        return len(choices)
+    declared = getattr(bench, "answer_options", None)
+    return declared if isinstance(declared, int) and declared > 0 else None
+
+
+def repair_budget(bench: object, task: Task, requested: int) -> int:
+    """Repairs allowed for one task: none when it has at most two options.
+
+    Telling a model its pick of two was wrong hands it the answer, so a
+    repair there measures nothing.
+    """
+    count = option_count(bench, task)
+    return 0 if count is not None and count <= 2 else requested
+
+
 def plan_total_tasks(jobs: list[JobSpec], client: object | None = None) -> int:
     concrete = expand_jobs(jobs, client) if client is not None else jobs
     return sum(job.planned_total() for job in concrete)
@@ -1554,6 +1577,23 @@ class Engine:
         task_statistics = getattr(bench, "task_statistics", None)
         if callable(task_statistics):
             result["task_statistics"] = task_statistics(records)
+        # Multiple choice: a repair is a second guess at a small option set,
+        # so the headline is the first attempt and the repair gain sits beside
+        # it. Code and open-answer suites keep the repaired score.
+        if (
+            job.repair_attempts
+            and tasks
+            and all(option_count(bench, task) for task in tasks)
+        ):
+            result.update(
+                headline="first_attempt",
+                repaired_score=result["score"],
+                repaired_passed=result["passed"],
+                score=result["first_attempt_score"],
+                passed=sum(
+                    record.first_attempt_score >= 1.0 for record in scored_records
+                ),
+            )
         summary_fields = getattr(bench, "summary_fields", None)
         if callable(summary_fields):
             result.update(summary_fields(scored_records))
@@ -1584,6 +1624,7 @@ class Engine:
         verifier: Callable[[str], EvaluationResult],
         on_progress: Callable[[GenerationUpdate], None],
         images: list[str] | None = None,
+        repairs: int | None = None,
     ) -> dict:
         """Run stateless direct calls with an explicit feedback transcript."""
         attempts: list[tuple[dict, EvaluationResult]] = []
@@ -1591,7 +1632,8 @@ class Engine:
         request_prompt = prompt
         elapsed_offset = 0.0
 
-        for attempt in range(job.repair_attempts + 1):
+        repairs = job.repair_attempts if repairs is None else repairs
+        for attempt in range(repairs + 1):
 
             def forward(
                 update: GenerationUpdate,
@@ -1625,7 +1667,7 @@ class Engine:
             attempts.append((gen, evaluation))
             if terminal or evaluation.passed or evaluation.error:
                 break
-            if attempt >= job.repair_attempts:
+            if attempt >= repairs:
                 break
 
             feedback_sent.append(evaluation.feedback)
@@ -1634,7 +1676,7 @@ class Engine:
                 str(gen.get("response") or ""),
                 evaluation.feedback,
                 attempt + 1,
-                job.repair_attempts,
+                repairs,
             )
             elapsed_offset += float(gen.get("response_time_s") or 0.0)
 
@@ -1855,7 +1897,8 @@ class Engine:
                 if callable(candidate_builder):
                     repair_prompt_builder = candidate_builder
 
-            if job.repair_attempts:
+            repairs = repair_budget(bench, task, job.repair_attempts)
+            if repairs:
 
                 def verifier(response: str) -> EvaluationResult:
                     return self._verify_response(bench, task, response)
@@ -1867,7 +1910,7 @@ class Engine:
                         on_progress=on_progress,
                         cancel_event=self.controls.cancel_event,
                         verifier=verifier,
-                        repair_attempts=job.repair_attempts,
+                        repair_attempts=repairs,
                         workspace_setup=workspace_setup,
                         workspace_verifier=workspace_verifier,
                         repair_prompt_builder=repair_prompt_builder,
@@ -1879,6 +1922,7 @@ class Engine:
                         verifier,
                         on_progress,
                         images,
+                        repairs,
                     )
             else:
                 gen = generator.generate(

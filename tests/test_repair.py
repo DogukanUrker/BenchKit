@@ -335,3 +335,74 @@ class PiRepairTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeChoices:
+    """Multiple choice with a configurable number of options; answer is A."""
+
+    name = "fake-choices"
+    options = 4
+
+    def load_tasks(self):
+        from benchkit.benchmarks.base import Task
+
+        letters = "ABCDEFGHIJ"[: self.options]
+        return [Task("q/0", "pick", {"choices": list(letters), "answer": "A"})]
+
+    def build_prompt(self, task):
+        return task.prompt
+
+    def evaluate(self, task, response: str) -> bool:
+        return response.strip() == task.metadata["answer"]
+
+
+class MultipleChoiceRepairTests(unittest.TestCase):
+    def _run(self, options: int, responses: list[str]):
+        from benchkit import engine as engine_module
+        from benchkit.benchmarks import REGISTRY
+
+        bench = type("Bench", (FakeChoices,), {"options": options})
+        client = RepairClient(responses)
+        with (
+            patch.dict(REGISTRY, {"fake-choices": bench}),
+            patch.dict(engine_module._TASKS, clear=False),
+            patch.dict(engine_module._BENCHMARKS, clear=False),
+        ):
+            # Both caches are keyed by name; each test brings its own class.
+            engine_module._TASKS.pop("fake-choices", None)
+            engine_module._BENCHMARKS.pop("fake-choices", None)
+            job = JobSpec("model", "fake-choices", repair_attempts=1)
+            result = Engine(client=client, jobs=[job]).run()[0]
+        return client, result
+
+    def test_two_option_questions_are_never_repaired(self) -> None:
+        client, result = self._run(2, ["B", "A"])
+
+        self.assertEqual(len(client.prompts), 1)
+        self.assertEqual(result["score"], 0.0)
+        self.assertEqual(result["repair_attempted"], 0)
+
+    def test_multiple_choice_headline_is_the_first_attempt(self) -> None:
+        client, result = self._run(10, ["B", "A"])
+
+        self.assertEqual(len(client.prompts), 2)
+        self.assertEqual(result["headline"], "first_attempt")
+        self.assertEqual(result["score"], 0.0)
+        self.assertEqual(result["passed"], 0)
+        self.assertEqual(result["repaired_score"], 100.0)
+        self.assertEqual(result["repaired_passed"], 1)
+        self.assertEqual(result["repair_delta_pp"], 100.0)
+
+    def test_open_answer_suites_keep_the_repaired_score(self) -> None:
+        client = RepairClient(["wrong", "right"])
+        job = JobSpec("model", "sanity", "1", repair_attempts=1)
+        general = benchmark("sanity")
+
+        def verify(_task, response: str) -> EvaluationResult:
+            return EvaluationResult(1.0 if response == "right" else 0.0, "No.")
+
+        with patch.object(general, "evaluate_with_feedback", side_effect=verify):
+            result = Engine(client=client, jobs=[job]).run()[0]
+
+        self.assertNotIn("headline", result)
+        self.assertEqual(result["score"], 100.0)
