@@ -562,9 +562,14 @@ class InferenceClient:
         router mode accepts the model as a query parameter, while llama-swap
         exposes the same endpoint below ``/upstream/<model>/``. Other server
         types stay at one request unless their model metadata contains an
-        explicit positive concurrency value.
+        explicit positive concurrency value. ``BENCHKIT_CONCURRENCY`` overrides
+        discovery, for hosted APIs that expose no slot endpoint.
         """
         if model in self._parallelism:
+            return self._parallelism[model]
+        forced = _positive_int(os.environ.get("BENCHKIT_CONCURRENCY"))
+        if forced is not None:
+            self._parallelism[model] = min(MAX_DISCOVERED_CONCURRENCY, forced)
             return self._parallelism[model]
 
         info = self._models_by_name.get(model, {})

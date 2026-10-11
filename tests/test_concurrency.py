@@ -640,3 +640,28 @@ class ConcurrentTUITests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConcurrencyOverrideTests(unittest.TestCase):
+    def test_env_override_skips_discovery_for_hosted_apis(self) -> None:
+        from benchkit.client import InferenceClient
+
+        client = InferenceClient("https://api.example.com/v1", "openai")
+        client.provider = "openai"
+        with (
+            patch.dict("os.environ", {"BENCHKIT_CONCURRENCY": "8"}),
+            patch.object(client, "_request") as request,
+        ):
+            self.assertEqual(client.max_parallel_requests("hosted"), 8)
+        request.assert_not_called()
+
+    def test_invalid_override_falls_back_to_one(self) -> None:
+        from benchkit.client import InferenceClient
+
+        client = InferenceClient("https://api.example.com/v1", "openai")
+        client.provider = "openai"
+        with (
+            patch.dict("os.environ", {"BENCHKIT_CONCURRENCY": "zero"}),
+            patch.object(client, "_request", side_effect=RuntimeError),
+        ):
+            self.assertEqual(client.max_parallel_requests("hosted"), 1)
