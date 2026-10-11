@@ -311,3 +311,20 @@ def test_vstar_two_option_answers_ignore_other_letters() -> None:
     task = Task("v", "left or right?", {"choices": ["left", "right"], "answer": "B"})
     assert VStar().evaluate(task, "B")
     assert not VStar().evaluate(task, "C")
+
+
+def test_extensionless_images_are_typed_from_their_bytes(tmp_path) -> None:
+    from benchkit.client import image_data_uri
+
+    jpeg = tmp_path / "frame"
+    jpeg.write_bytes(b"\xff\xd8\xff\xe0rest")
+    assert image_data_uri(str(jpeg)).startswith("data:image/jpeg;base64,")
+
+
+def test_files_that_are_not_images_are_refused(tmp_path) -> None:
+    from benchkit.client import image_data_uri
+
+    junk = tmp_path / "notes"
+    junk.write_bytes(b"just text")
+    with pytest.raises(ValueError, match="not a PNG"):
+        image_data_uri(str(junk))

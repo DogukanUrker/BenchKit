@@ -57,10 +57,38 @@ def _openai_base(url: str) -> str:
     return url if url.endswith("/v1") else f"{url}/v1"
 
 
+_IMAGE_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def image_media_type(data: bytes) -> str | None:
+    """Return an image's media type from its leading bytes, or None."""
+    for signature, mime in _IMAGE_SIGNATURES:
+        if data.startswith(signature):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 def _encode_image(path: str) -> tuple[str, str]:
-    """Return the media type and base64 payload of a local image file."""
-    mime = mimetypes.guess_type(path)[0] or "image/png"
-    return mime, base64.b64encode(Path(path).read_bytes()).decode("ascii")
+    """Return the media type and base64 payload of a local image file.
+
+    The extension decides when it names an image type; otherwise the leading
+    bytes do. A file that is neither is refused rather than mislabelled,
+    since servers may reject a data URI whose bytes contradict its type.
+    """
+    data = Path(path).read_bytes()
+    mime = mimetypes.guess_type(path)[0]
+    if not (mime and mime.startswith("image/")):
+        mime = image_media_type(data)
+    if mime is None:
+        raise ValueError(f"{path} is not a PNG, JPEG, GIF or WebP image")
+    return mime, base64.b64encode(data).decode("ascii")
 
 
 def image_data_uri(path: str) -> str:

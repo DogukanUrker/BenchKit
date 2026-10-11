@@ -1897,7 +1897,13 @@ class Engine:
                 if callable(candidate_builder):
                     repair_prompt_builder = candidate_builder
 
-            repairs = repair_budget(bench, task, job.repair_attempts)
+            # Decision models emit no text to repair; routing already zeroes
+            # their repairs, this also covers jobs built without routing.
+            repairs = (
+                0
+                if job.harness == "decision"
+                else repair_budget(bench, task, job.repair_attempts)
+            )
             if repairs:
 
                 def verifier(response: str) -> EvaluationResult:

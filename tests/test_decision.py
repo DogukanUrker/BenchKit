@@ -327,3 +327,31 @@ class XSTestDecisionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DecisionRepairTests(unittest.TestCase):
+    def test_unrouted_decision_jobs_never_take_the_repair_path(self) -> None:
+        from benchkit.engine import Engine, JobSpec
+
+        class Client:
+            timeout = 5.0
+            label = "test"
+            host = "test://local"
+
+            def max_parallel_requests(self, _model):
+                return 1
+
+            def decide(self, _model, request, _cancel=None):
+                probs = dict.fromkeys(request["questions"]["answer"]["criteria"], 0.0)
+                probs["A"] = 1.0
+                return {"answers": {"answer": {"probabilities": probs}}}
+
+            def generate(self, *_args, **_kwargs):
+                raise AssertionError("decision jobs must not call generate()")
+
+        job = JobSpec("d1", "arc", "1", harness="decision", repair_attempts=1)
+        result = Engine(client=Client(), jobs=[job]).run()[0]
+        task = result["tasks"][0]
+        self.assertEqual(task.get("error", ""), "")
+        self.assertTrue(task["decision"])
+        self.assertFalse(task["harness_error"])
