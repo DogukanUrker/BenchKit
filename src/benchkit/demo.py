@@ -337,6 +337,7 @@ class DemoClient:
         prompt: str,
         on_progress: Callable[[GenerationUpdate], None] | None = None,
         cancel_event: threading.Event | None = None,
+        images: list[str] | None = None,
     ) -> dict:
         profile = self._profile(model)
         entry = self._answers.get(prompt)

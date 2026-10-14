@@ -20,6 +20,8 @@ def _extract_answer(response: str) -> str | None:
 
 class BoolQ:
     name = "boolq"
+    # Yes/no without a choices list; two options means no repair.
+    answer_options = 2
     decision_instructions = "Based on the passage, is the answer to the question yes?"
 
     def load_tasks(self) -> list[Task]:

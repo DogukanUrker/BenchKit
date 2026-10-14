@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from collections import Counter
 from itertools import pairwise
-from os.path import commonprefix
+
+
+def _common_prefix(values: list[str]) -> str:
+    """Longest shared leading substring, compared character by character.
+
+    Keys are not paths, so this is deliberately not ``os.path.commonpath``.
+    """
+    first, last = min(values), max(values)
+    for index, (a, b) in enumerate(zip(first, last, strict=False)):
+        if a != b:
+            return first[:index]
+    return first if len(first) <= len(last) else last
 
 
 class PromptLeakageError(ValueError):
@@ -20,9 +31,9 @@ def assert_candidate_parity(
 ) -> None:
     """Reject simple key markers and value-distribution shortcuts."""
     if target_keys and distractor_keys:
-        target_prefix = commonprefix(target_keys) if len(target_keys) > 1 else ""
+        target_prefix = _common_prefix(target_keys) if len(target_keys) > 1 else ""
         distractor_prefix = (
-            commonprefix(distractor_keys) if len(distractor_keys) > 1 else ""
+            _common_prefix(distractor_keys) if len(distractor_keys) > 1 else ""
         )
         if len(target_prefix) >= 3 and target_prefix != distractor_prefix:
             raise PromptLeakageError("target keys have a distinguishing prefix")

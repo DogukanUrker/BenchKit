@@ -21,6 +21,8 @@ def _extract_answer(response: str) -> str | None:
 
 class CodeVerifier:
     name = "code-verifier"
+    # Yes/no without a choices list; two options means no repair.
+    answer_options = 2
     decision_instructions = QUESTION
     task_count = 500
 

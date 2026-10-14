@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
+import mimetypes
 import os
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
@@ -52,6 +55,46 @@ def _without_v1(url: str) -> str:
 def _openai_base(url: str) -> str:
     url = url.rstrip("/")
     return url if url.endswith("/v1") else f"{url}/v1"
+
+
+_IMAGE_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def image_media_type(data: bytes) -> str | None:
+    """Return an image's media type from its leading bytes, or None."""
+    for signature, mime in _IMAGE_SIGNATURES:
+        if data.startswith(signature):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _encode_image(path: str) -> tuple[str, str]:
+    """Return the media type and base64 payload of a local image file.
+
+    The extension decides when it names an image type; otherwise the leading
+    bytes do. A file that is neither is refused rather than mislabelled,
+    since servers may reject a data URI whose bytes contradict its type.
+    """
+    data = Path(path).read_bytes()
+    mime = mimetypes.guess_type(path)[0]
+    if not (mime and mime.startswith("image/")):
+        mime = image_media_type(data)
+    if mime is None:
+        raise ValueError(f"{path} is not a PNG, JPEG, GIF or WebP image")
+    return mime, base64.b64encode(data).decode("ascii")
+
+
+def image_data_uri(path: str) -> str:
+    """Return a local image file as a base64 data URI."""
+    mime, data = _encode_image(path)
+    return f"data:{mime};base64,{data}"
 
 
 def _positive_int(value: object) -> int | None:
@@ -547,9 +590,14 @@ class InferenceClient:
         router mode accepts the model as a query parameter, while llama-swap
         exposes the same endpoint below ``/upstream/<model>/``. Other server
         types stay at one request unless their model metadata contains an
-        explicit positive concurrency value.
+        explicit positive concurrency value. ``BENCHKIT_CONCURRENCY`` overrides
+        discovery, for hosted APIs that expose no slot endpoint.
         """
         if model in self._parallelism:
+            return self._parallelism[model]
+        forced = _positive_int(os.environ.get("BENCHKIT_CONCURRENCY"))
+        if forced is not None:
+            self._parallelism[model] = min(MAX_DISCOVERED_CONCURRENCY, forced)
             return self._parallelism[model]
 
         info = self._models_by_name.get(model, {})
@@ -683,12 +731,17 @@ class InferenceClient:
         prompt: str,
         on_progress: ProgressCallback | None = None,
         cancel_event: threading.Event | None = None,
+        images: list[str] | None = None,
     ) -> dict:
+        """Stream one completion. ``images`` are local files sent inline."""
         if self.provider is None:
             raise RuntimeError("Call list_models() before generate()")
+        encoded = [_encode_image(path) for path in images or ()]
         if self.provider == "openai":
-            return self._generate_openai(model, prompt, on_progress, cancel_event)
-        return self._generate_ollama(model, prompt, on_progress, cancel_event)
+            return self._generate_openai(
+                model, prompt, on_progress, cancel_event, encoded
+            )
+        return self._generate_ollama(model, prompt, on_progress, cancel_event, encoded)
 
     def is_decision_model(self, model: str) -> bool:
         """Return whether a discovered model answers through /v1/systemone."""
@@ -721,10 +774,25 @@ class InferenceClient:
         prompt: str,
         on_progress: ProgressCallback | None,
         cancel_event: threading.Event | None,
+        images: list[tuple[str, str]] | None = None,
     ) -> dict:
+        content: str | list[dict] = prompt
+        if images:
+            # Data URIs, not URLs: llama-swap and many local servers cannot
+            # fetch remote images, and inline bytes keep runs reproducible.
+            content = [
+                *(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{data}"},
+                    }
+                    for mime, data in images
+                ),
+                {"type": "text", "text": prompt},
+            ]
         body = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": content}],
             "stream": True,
             "temperature": 0.0,
             "stream_options": {"include_usage": True},
@@ -919,10 +987,16 @@ class InferenceClient:
         prompt: str,
         on_progress: ProgressCallback | None,
         cancel_event: threading.Event | None,
+        images: list[tuple[str, str]] | None = None,
     ) -> dict:
         return self._retry_stream(
             lambda state: self._stream_ollama(
-                model, prompt, on_progress, cancel_event, state
+                model,
+                prompt,
+                on_progress,
+                cancel_event,
+                state,
+                [data for _, data in images or ()],
             ),
             cancel_event,
         )
@@ -934,6 +1008,7 @@ class InferenceClient:
         on_progress: ProgressCallback | None,
         cancel_event: threading.Event | None,
         state: _StreamState | None = None,
+        images: list[str] | None = None,
     ) -> dict:
         state = state if state is not None else _StreamState()
         started = time.perf_counter()
@@ -954,6 +1029,7 @@ class InferenceClient:
                     "prompt": prompt,
                     "stream": True,
                     "options": {"temperature": 0.0},
+                    **({"images": images} if images else {}),
                 },
                 timeout=self._generation_timeout(),
             ) as response:

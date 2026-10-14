@@ -18,6 +18,7 @@ import time
 
 from benchkit.benchmarks import REGISTRY
 from benchkit.benchmarks.base import Task
+from benchkit.client import image_data_uri
 from benchkit.perturbations import VISIBLE_CHOICE_LIMITS
 
 QUESTION = "answer"
@@ -41,6 +42,9 @@ def request_for(bench: object, task: Task) -> dict:
     a label rather than a letter (an intent router) supplies its own keys
     through ``decision_criteria(task)``; the chosen key is then the label.
     Tasks without either are yes/no questions (``noul``).
+
+    Image tasks list their local files under ``images``; ``Decider`` swaps
+    them for data URIs at send time, so the recorded prompt stays small.
     """
     instructions = str(bench.decision_instructions)
     choices = task.metadata.get("choices")
@@ -66,7 +70,11 @@ def request_for(bench: object, task: Task) -> dict:
         question = {"type": "noul", "instructions": instructions}
     passage = task.metadata.get("passage")
     state = f"{passage}\n\nQuestion: {task.prompt}" if passage else task.prompt
-    return {"state": state, "questions": {QUESTION: question}}
+    request = {"state": state, "questions": {QUESTION: question}}
+    images = task.metadata.get("images")
+    if images:
+        request["images"] = [str(path) for path in images]
+    return request
 
 
 def render_request(bench: object, task: Task) -> str:
@@ -99,7 +107,10 @@ class Decider:
         cancel_event: threading.Event | None = None,
     ) -> dict:
         started = time.perf_counter()
-        payload = self.client.decide(model, json.loads(prompt), cancel_event)
+        request = json.loads(prompt)
+        if request.get("images"):
+            request["images"] = [image_data_uri(path) for path in request["images"]]
+        payload = self.client.decide(model, request, cancel_event)
         elapsed = time.perf_counter() - started
         probs = probabilities(payload["answers"][QUESTION])
         usage = payload.get("usage") or {}

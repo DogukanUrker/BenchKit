@@ -18,7 +18,7 @@ Not vibes. Actual scores.
 ## What it does
 
 BenchKit runs established coding, reasoning, knowledge, instruction-following,
-and long-context benchmarks against local models. It supports OpenAI-compatible
+vision, and long-context benchmarks against local models. It supports OpenAI-compatible
 servers such as llama.cpp, llama-swap, vLLM, and LM Studio, plus native Ollama.
 
 - Guided terminal UI for connecting, selecting models, running suites, and
@@ -117,6 +117,10 @@ uv run benchkit --help
 | MMLU-Pro | `mmlu-pro` | 12,032 | Reasoning across 14 knowledge categories |
 | BANKING77 | `banking77` | 3,080 | Route a banking message to one of 77 intents |
 | Code Verifier | `code-verifier` | 500 | Judge whether a model-written HumanEval+ solution passes its tests |
+| OCRBench | `ocrbench` | 1,000 | Text recognition and text-centric VQA over images |
+| ChartQA | `chartqa` | 2,500 | Questions about real charts, 5% relaxed numeric accuracy |
+| MMVP | `mmvp` | 300 | Look-alike image pairs that differ in one detail; also reports pair accuracy |
+| V* Bench | `vstar` | 191 | Small details in high-resolution images |
 | MMLU | `mmlu` | 14,042 | Academic and professional knowledge |
 | ARC | `arc` | 1,172 | Grade-school science reasoning |
 | OpenBookQA | `openbookqa` | 500 | Elementary science knowledge |
@@ -133,6 +137,12 @@ the browser extra first:
 uv sync --extra browser
 uv run playwright install chromium
 ```
+
+Vision suites (`ocrbench`, `chartqa`, `mmvp`, `vstar`) send images inline as
+base64, so they need a vision model (a llama.cpp server started with
+`--mmproj`, or an Ollama vision model). Each one downloads a pinned dataset
+revision on first use. `mmvp` and `vstar` are small enough to run in full on
+one consumer GPU and also run on decision models with an mmproj.
 
 The CLI registry is the canonical source for current counts, descriptions,
 and supported perturbations:
