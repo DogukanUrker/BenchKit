@@ -1,9 +1,13 @@
-"""Build `src/benchkit/datasets/mmlu_pro.jsonl` from the upstream release.
+"""Build `mmlu_pro.jsonl` from the upstream release.
 
 The MMLU-Pro test split is distributed on Hugging Face, so the dataset file is
 generated rather than hand-written:
 
-    uv run --with datasets python scripts/build_mmlu_pro.py
+    uv run --with datasets python scripts/build_mmlu_pro.py [OUTPUT]
+
+The file is not bundled; BenchKit downloads a pinned copy on first use. A
+rebuilt file is a new version: publish it, then update the URL, sha256 and
+size of `MMLU_PRO` in `src/benchkit/benchmarks/downloads.py` together.
 
 Only the schema changes: `question_id` becomes a namespaced `task_id`,
 `options` becomes `choices`, and the answer stays the upstream letter. Padding
@@ -14,15 +18,14 @@ makes some questions carry fewer than ten choices.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from datasets import load_dataset
 
 LETTERS = "ABCDEFGHIJ"
 PADDING = {"n/a", "na", ""}
-OUTPUT = (
-    Path(__file__).parent.parent / "src" / "benchkit" / "datasets" / "mmlu_pro.jsonl"
-)
+OUTPUT = Path(sys.argv[1] if len(sys.argv) > 1 else "mmlu_pro.jsonl")
 
 
 def _choices(options: list[str]) -> list[str]:

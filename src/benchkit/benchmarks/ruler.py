@@ -7,15 +7,20 @@ import threading
 from collections.abc import Callable
 
 from benchkit.benchmarks.base import Task
+from benchkit.benchmarks.downloads import Dataset
 from benchkit.benchmarks.ruler_generator import (
     CONTEXT_BUCKETS,
     DEFAULT_SAMPLES_PER_KIND,
+    ESSAY_FILE,
     PRACTICAL_SAMPLES_PER_KIND,
     TASK_KINDS,
     TASKS_PER_BUCKET,
+    cache_dir,
     context_label,
+    corpus_installed,
     fit_prompt,
     generate_tasks,
+    install_corpus,
 )
 from benchkit.benchmarks.utils import strip_think_tags
 
@@ -34,6 +39,17 @@ class RULER:
     include_in_overall = False
     list_note = "practical · 13 tasks × 3 samples · 4k–128k"
     evaluation_activity = "checking retrieved values"
+    data_source = Dataset(
+        summary="SQuAD 2.0 + HotpotQA haystacks and the Paul Graham essays",
+        size=None,
+        location=cache_dir,
+        is_installed=corpus_installed,
+        install=lambda _progress: install_corpus(),
+        hint=(
+            f"{ESSAY_FILE} is not downloadable; generate it with NVIDIA/RULER's "
+            "download_paulgraham_essay.py"
+        ),
+    )
 
     def __init__(self) -> None:
         self._unit_hints: dict[tuple[str, str, int], int] = {}

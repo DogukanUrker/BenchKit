@@ -27,6 +27,7 @@ import httpx
 import pyarrow.parquet as pq
 
 from benchkit.benchmarks.base import Task
+from benchkit.benchmarks.downloads import Dataset
 
 HUB = "https://huggingface.co/datasets"
 _ATTEMPTS = 4
@@ -131,6 +132,23 @@ def load_files(
     return _cached(name, revision, build)
 
 
+def _cache_dir(name: str, revision: str) -> Path:
+    return cache_root() / name / revision[:12]
+
+
+def vision_dataset(
+    name: str, revision: str, summary: str, rows: Callable[[], object]
+) -> Dataset:
+    """Describe a suite's cache for ``benchkit datasets`` and the TUI."""
+    return Dataset(
+        summary=summary,
+        size=None,
+        location=lambda: _cache_dir(name, revision),
+        is_installed=lambda: (_cache_dir(name, revision) / "rows.jsonl").exists(),
+        install=lambda _progress: rows(),
+    )
+
+
 def _url(dataset: str, revision: str, path: str) -> str:
     return f"{HUB}/{dataset}/resolve/{revision}/{quote(path)}"
 
@@ -138,7 +156,7 @@ def _url(dataset: str, revision: str, path: str) -> str:
 def _cached(
     name: str, revision: str, build: Callable[[Path], list[dict]]
 ) -> list[dict]:
-    root = cache_root() / name / revision[:12]
+    root = _cache_dir(name, revision)
     rows_file = root / "rows.jsonl"
     with _LOCK:
         if not rows_file.exists():

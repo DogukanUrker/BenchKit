@@ -13,6 +13,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import httpx
+import pytest
+
+from benchkit import catalog
+from benchkit.benchmarks import vision
 from benchkit.benchmarks.patcheval import (
     _GENERIC_REPAIR,
     PatchEval,
@@ -553,6 +558,81 @@ class PatchEvalTests(unittest.TestCase):
         self.assertIn(RUN_LABEL, create)
         self.assertIn("benchkit.owner=owner-123", create)
         self.assertIn("none", create)
+
+
+# Fetching the release ----------------------------------------------------
+
+
+@pytest.fixture
+def cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("BENCHKIT_DATASET_CACHE", str(tmp_path / "cache"))
+    return tmp_path / "cache"
+
+
+def test_patcheval_fetches_its_release_and_verifies_it(cache, tmp_path, monkeypatch):
+    release = tmp_path / "upstream"
+    release.mkdir()
+    _dataset(release)
+    monkeypatch.delenv("BENCHKIT_PATCHEVAL_DATASET", raising=False)
+
+    seen: list[str] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        prefix = "/datasets/DogukanUrker/PatchEval/resolve/main/"
+        name = request.url.path.removeprefix(prefix)
+        seen.append(name)
+        path = release / name
+        return httpx.Response(200, content=path.read_bytes())
+
+    monkeypatch.setattr(
+        vision,
+        "_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(serve)),
+    )
+
+    assert catalog.status("patcheval").installable
+    catalog.install("patcheval")
+    assert not catalog.status("patcheval").installable
+    # Only the release and what tasks.jsonl names, never the miner.
+    assert sorted(seen) == [
+        "dataset.json",
+        "hidden.patch",
+        "source.tar.gz",
+        "tasks.jsonl",
+    ]
+    tasks = PatchEval().load_tasks()
+    assert [task.id for task in tasks] == ["owner-repo-123"]
+
+    catalog.install("patcheval")
+    assert len(seen) == 4  # cached
+
+
+def test_patcheval_rejects_paths_outside_its_cache(cache, monkeypatch):
+    monkeypatch.delenv("BENCHKIT_PATCHEVAL_DATASET", raising=False)
+    files = {
+        "dataset.json": b"{}",
+        "tasks.jsonl": b'{"source_archive": "../../escape.tar.gz"}\n',
+    }
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=files[request.url.path.rsplit("/", 1)[1]])
+
+    monkeypatch.setattr(
+        vision,
+        "_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(serve)),
+    )
+    with pytest.raises(RuntimeError, match="unsafe path"):
+        PatchEval().load_tasks()
+    assert not (cache / "escape.tar.gz").exists()
+    assert not catalog.status("patcheval").installed
+
+
+def test_patcheval_env_override_still_wins(cache, tmp_path, monkeypatch):
+    _dataset(tmp_path)
+    monkeypatch.setenv("BENCHKIT_PATCHEVAL_DATASET", str(tmp_path))
+    entry = catalog.status("patcheval")
+    assert entry.installed and entry.location == str(tmp_path)
 
 
 if __name__ == "__main__":

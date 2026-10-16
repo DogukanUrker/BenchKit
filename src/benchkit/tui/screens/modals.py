@@ -1,8 +1,9 @@
-"""Modal dialogs: task limits, task inspection and confirmations."""
+"""Modal dialogs: task limits, task inspection, datasets and confirmations."""
 
 from __future__ import annotations
 
 from rich.text import Text
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -20,6 +21,8 @@ from textual.widgets import (
     TextArea,
 )
 
+from benchkit import catalog
+from benchkit.benchmarks.downloads import fmt_bytes
 from benchkit.engine import SliceError, parse_slice, slice_label
 from benchkit.template_check import TemplateReport
 from benchkit.tui.formatting import fmt_count, fmt_duration
@@ -342,6 +345,167 @@ class TemplateCheckScreen(ModalScreen[None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+
+class DatasetsScreen(ModalScreen[bool]):
+    """Installed and missing benchmark datasets, with one-click installs.
+
+    Dismisses with True when anything was installed, so the caller can
+    refresh whatever it shows about missing data.
+    """
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close", show=False),
+        Binding("a", "install_all", "Install all missing"),
+        Binding("enter", "install_selected", "Install selected"),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.installed_any = False
+        self.busy = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="datasets-dialog", classes="dialog"):
+            yield Static("Datasets", classes="card-title")
+            yield Static(
+                "Small suites ship with BenchKit. Large ones download once into "
+                "a local cache, and a run fetches what it needs automatically.",
+                classes="hint",
+            )
+            yield DataTable(id="datasets-table", cursor_type="row")
+            yield Static("", id="datasets-status", classes="hint")
+            with Horizontal(classes="dialog-actions"):
+                yield Button("Install all missing", id="install-all", variant="primary")
+                yield Button("Install selected", id="install-selected")
+                yield Button("Close", id="close")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one("#datasets-table", DataTable)
+        table.add_column("Benchmark", key="benchmark")
+        table.add_column("Status", key="status", width=12)
+        table.add_column("Size", key="size", width=10)
+        table.add_column("Source", key="source")
+        for entry in catalog.statuses():
+            table.add_row(
+                entry.benchmark,
+                self._status_cell(entry),
+                catalog.size_label(entry),
+                entry.hint
+                if entry.kind == "manual" and not entry.installed
+                else entry.summary,
+                key=entry.benchmark,
+            )
+        self._sync_actions()
+        table.focus()
+
+    @staticmethod
+    def _status_cell(entry: catalog.DatasetStatus) -> Text:
+        if entry.kind == "bundled":
+            return Text("bundled", style="dim")
+        if entry.installed:
+            return Text("✓ installed", style="green")
+        if entry.kind == "manual":
+            return Text("✗ manual", style="red")
+        return Text("✗ missing", style="yellow")
+
+    def _sync_actions(self) -> None:
+        missing = catalog.missing()
+        self.query_one("#install-all", Button).disabled = self.busy or not missing
+        self.query_one("#install-selected", Button).disabled = self.busy
+        if not self.busy:
+            self.query_one("#datasets-status", Static).update(
+                f"{len(missing)} missing: {', '.join(missing)}"
+                if missing
+                else "Every downloadable dataset is installed."
+            )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "install-all":
+            self.action_install_all()
+        elif event.button.id == "install-selected":
+            self.action_install_selected()
+        elif event.button.id == "close":
+            self.action_close()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        event.stop()
+        self.action_install_selected()
+
+    def action_install_all(self) -> None:
+        self._start(catalog.missing())
+
+    def action_install_selected(self) -> None:
+        table = self.query_one("#datasets-table", DataTable)
+        if table.row_count == 0:
+            return
+        key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+        entry = catalog.status(str(key))
+        if entry.kind == "bundled":
+            self.notify(f"{entry.benchmark} ships with BenchKit.", timeout=3)
+        elif entry.installed:
+            self.notify(f"{entry.benchmark} is already installed.", timeout=3)
+        elif entry.kind == "manual":
+            self.notify(entry.hint, severity="warning", timeout=8)
+        else:
+            self._start([entry.benchmark])
+
+    def _start(self, keys: list[str]) -> None:
+        if self.busy or not keys:
+            return
+        self.busy = True
+        self._sync_actions()
+        self._install(keys)
+
+    @work(thread=True, exclusive=True, group="datasets")
+    def _install(self, keys: list[str]) -> None:
+        failures = []
+        for key in keys:
+            self.app.call_from_thread(self._progress, key, 0, None)
+            try:
+                catalog.install(
+                    key,
+                    lambda done, total, key=key: self.app.call_from_thread(
+                        self._progress, key, done, total
+                    ),
+                )
+            except Exception as exc:
+                failures.append(key)
+                self.app.call_from_thread(self._failed, key, str(exc))
+            else:
+                self.installed_any = True
+            self.app.call_from_thread(self._refresh_row, key)
+        self.app.call_from_thread(self._finished, keys, failures)
+
+    def _progress(self, key: str, done: int, total: int | None) -> None:
+        detail = f" {fmt_bytes(done)}" if done else "…"
+        if done and total:
+            detail = f" {fmt_bytes(done)} / {fmt_bytes(total)}"
+        self.query_one("#datasets-status", Static).update(f"Installing {key}{detail}")
+
+    def _refresh_row(self, key: str) -> None:
+        table = self.query_one("#datasets-table", DataTable)
+        entry = catalog.status(key)
+        table.update_cell(key, "status", self._status_cell(entry))
+        table.update_cell(key, "size", catalog.size_label(entry))
+
+    def _failed(self, key: str, message: str) -> None:
+        self.notify(f"{key}: {message}", severity="error", timeout=10)
+
+    def _finished(self, keys: list[str], failures: list[str]) -> None:
+        self.busy = False
+        self._sync_actions()
+        done = len(keys) - len(failures)
+        if done:
+            self.notify(f"Installed {done} dataset(s).", timeout=4)
+
+    def action_close(self) -> None:
+        if self.busy:
+            self.notify("Wait for the install to finish.", timeout=3)
+            return
+        self.dismiss(self.installed_any)
 
 
 class ConfirmScreen(ModalScreen[bool]):

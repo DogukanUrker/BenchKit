@@ -144,6 +144,21 @@ base64, so they need a vision model (a llama.cpp server started with
 revision on first use. `mmvp` and `vstar` are small enough to run in full on
 one consumer GPU and also run on decision models with an mmproj.
 
+Small suites ship with BenchKit and work offline. Larger datasets (`mmlu`,
+`mmlu-pro`, the vision suites, EvalPlus, RULER's haystacks, Aider Polyglot,
+PatchEval) are
+downloaded once into `~/.cache/benchkit` the first time a run needs them. List
+what is installed and fetch everything that is missing ahead of time with:
+
+```bash
+uv run benchkit datasets
+uv run benchkit datasets install            # every missing dataset
+uv run benchkit datasets install mmlu       # or just the ones you name
+```
+
+In the terminal app, press `d` on the setup screen (or click **Datasets**) for
+the same list with an **Install all missing** button.
+
 The CLI registry is the canonical source for current counts, descriptions,
 and supported perturbations:
 

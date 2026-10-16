@@ -36,6 +36,7 @@ HELP = """
 | `l` | Task limit for the highlighted benchmark |
 | `p` | Toggle the paired choice-order run |
 | `v` | Check chat templates (selected models, or all) |
+| `d` | Datasets: see what is installed and install what is missing |
 | `/` | Jump to the filter box |
 | `s` / `F5` | Start the run |
 | `Esc` | Back to the connection screen |

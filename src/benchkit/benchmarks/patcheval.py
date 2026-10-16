@@ -12,12 +12,15 @@ import stat
 import subprocess
 import tarfile
 import tempfile
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from benchkit.benchmarks import vision
 from benchkit.benchmarks.base import Task
+from benchkit.benchmarks.downloads import Dataset, Progress, cache_root
 from benchkit.evaluation import EvaluationResult
 from benchkit.sandbox import (
     DockerTaskEnvironment,
@@ -32,6 +35,15 @@ from benchkit.sandbox import (
 _SCHEMA_VERSION = 1
 _TASKS_FILE = "tasks.jsonl"
 _RELEASE_FILE = "dataset.json"
+# The frozen release lives on Hugging Face. Only the release metadata and the
+# files tasks.jsonl names are fetched (not the miner that built it), and every
+# task pins its source archive and hidden tests by sha256, which load_tasks
+# verifies, so a bad or moved upstream file fails loudly instead of scoring.
+_HF_DATASET = "DogukanUrker/PatchEval"
+_HF_REVISION = "main"
+_RELEASE = "pilot-20"
+_COMPLETE = ".complete"
+_FETCH_LOCK = threading.Lock()
 _GENERIC_REPAIR = (
     "The issue is not fully resolved yet. Re-examine your changes and continue "
     "working on the fix. Use the repository and any tests you can run to validate "
@@ -103,6 +115,69 @@ def _safe_relative(root: Path, value: object, field: str) -> Path:
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise ValueError(f"{field} must stay inside the dataset root") from exc
     return resolved
+
+
+def _configured_root() -> Path | None:
+    """A local copy named by BENCHKIT_PATCHEVAL_DATASET, which wins."""
+    configured = os.environ.get("BENCHKIT_PATCHEVAL_DATASET")
+    return Path(configured).expanduser() if configured else None
+
+
+def _cache_dir() -> Path:
+    return cache_root() / "patcheval" / _RELEASE
+
+
+def _dataset_dir() -> Path:
+    return _configured_root() or _cache_dir()
+
+
+def _dataset_installed() -> bool:
+    configured = _configured_root()
+    if configured is not None:
+        return (configured / _RELEASE_FILE).is_file()
+    return (_cache_dir() / _COMPLETE).is_file()
+
+
+def _fetch_release(progress: Progress | None = None) -> Path:
+    """Return the dataset root, downloading the frozen release once."""
+    configured = _configured_root()
+    if configured is not None:
+        return configured
+    root = _cache_dir()
+    with _FETCH_LOCK:
+        if (root / _COMPLETE).is_file():
+            return root
+        root.mkdir(parents=True, exist_ok=True)
+        done = 0
+        with vision._http_client() as client:
+
+            def fetch(name: str) -> None:
+                nonlocal done
+                path = PurePosixPath(name)
+                if path.is_absolute() or ".." in path.parts or not path.parts:
+                    raise RuntimeError(
+                        f"PatchEval release names an unsafe path: {name}"
+                    )
+                target = root.joinpath(*path.parts)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                url = vision._url(_HF_DATASET, _HF_REVISION, name)
+                vision._download_file(client, url, target)
+                done += target.stat().st_size
+                if progress:
+                    progress(done, None)
+
+            fetch(_RELEASE_FILE)
+            fetch(_TASKS_FILE)
+            for line in (root / _TASKS_FILE).read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                for field in ("source_archive", "hidden_test_patch"):
+                    if isinstance(record.get(field), str):
+                        fetch(record[field])
+        # Written last, so an interrupted download is fetched again.
+        (root / _COMPLETE).write_text(_HF_REVISION + "\n", encoding="utf-8")
+    return root
 
 
 def _strings(record: dict, field: str, *, required: bool = True) -> tuple[str, ...]:
@@ -540,24 +615,20 @@ class PatchEval:
     workspace_task = True
     evaluation_activity = "running hidden PatchEval checks"
     list_note = "pilot-20 · requires Pi and Docker"
+    data_source = Dataset(
+        summary="frozen pilot-20 release from Hugging Face",
+        size=None,
+        location=_dataset_dir,
+        is_installed=_dataset_installed,
+        install=_fetch_release,
+    )
 
     def __init__(self, dataset_root: Path | None = None) -> None:
-        configured = dataset_root or (
-            Path(os.environ["BENCHKIT_PATCHEVAL_DATASET"]).expanduser()
-            if os.environ.get("BENCHKIT_PATCHEVAL_DATASET")
-            else None
-        )
-        self.dataset_root = configured
+        self.dataset_root = dataset_root
         self.release = "unloaded"
 
     def _root(self) -> Path:
-        if self.dataset_root is None:
-            raise RuntimeError(
-                "PatchEval's frozen dataset is not configured; download the "
-                "pilot-20 release from DogukanUrker/PatchEval and set "
-                "BENCHKIT_PATCHEVAL_DATASET to its local root"
-            )
-        return self.dataset_root.resolve()
+        return (self.dataset_root or _fetch_release()).resolve()
 
     @staticmethod
     def _spec(task: Task) -> PatchEvalSpec:

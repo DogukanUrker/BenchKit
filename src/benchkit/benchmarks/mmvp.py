@@ -17,7 +17,7 @@ from functools import cache
 from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.mcq import extract_choice
 from benchkit.benchmarks.utils import strip_think_tags
-from benchkit.benchmarks.vision import load_files
+from benchkit.benchmarks.vision import load_files, vision_dataset
 
 DATASET = "MMVP/MMVP"
 MANIFEST = "Questions.csv"
@@ -75,6 +75,9 @@ class MMVP:
     name = "mmvp"
     vision = True
     task_count = 300
+    data_source = vision_dataset(
+        "mmvp", REVISION, "MMVP image pairs from Hugging Face", _rows
+    )
     decision_instructions = (
         "Which option correctly answers the question about the image?"
     )

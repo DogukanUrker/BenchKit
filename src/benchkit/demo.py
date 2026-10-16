@@ -14,6 +14,7 @@ import random
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from benchkit.benchmarks.base import Task
 from benchkit.client import GenerationUpdate
@@ -30,9 +31,11 @@ DEMO_MODELS = [
 ]
 
 
-def _dataset_path(key: str):
+def _dataset_path(key: str) -> Path | None:
+    """The bundled dataset file, if any; downloaded ones carry no solutions."""
     module = importlib.import_module(type(benchmark(key)).__module__)
-    return getattr(module, "DATASET", None)
+    path = getattr(module, "DATASET", None)
+    return path if isinstance(path, Path) else None
 
 
 def _canonical_solutions(key: str) -> dict[str, str]:

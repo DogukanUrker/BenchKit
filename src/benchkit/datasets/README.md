@@ -43,7 +43,9 @@ split from Physical Interaction: Question Answering.
 ## MMLU
 
 `mmlu.jsonl` is a transformed copy of the 14,042-question test split covering
-all 57 MMLU subjects. BenchKit evaluates it zero-shot.
+all 57 MMLU subjects. BenchKit evaluates it zero-shot. It is not bundled: it is
+downloaded on first use from a pinned commit of this repository and verified
+against the sha256 in `benchmarks/downloads.py`.
 
 - Source: <https://github.com/hendrycks/test>
 - Dataset license: MIT; see `MMLU_LICENSE.txt`
@@ -56,7 +58,8 @@ reasoning. Only the schema changed - `question_id` became a namespaced
 `task_id` and `options` became `choices`, with the `N/A` padding left by the
 authors' pruning pass dropped, which is why some questions carry fewer than ten
 choices. Regenerate it with `uv run --with datasets python
-scripts/build_mmlu_pro.py`. BenchKit evaluates it zero-shot.
+scripts/build_mmlu_pro.py`. BenchKit evaluates it zero-shot. Like MMLU it is
+downloaded on first use and checksum-verified rather than bundled.
 
 - Source: <https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro>
 - Code: <https://github.com/TIGER-AI-Lab/MMLU-Pro>

@@ -14,7 +14,12 @@ from functools import cache
 from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.mcq import extract_choice
 from benchkit.benchmarks.utils import strip_think_tags
-from benchkit.benchmarks.vision import category_scores, load_files, spread
+from benchkit.benchmarks.vision import (
+    category_scores,
+    load_files,
+    spread,
+    vision_dataset,
+)
 
 DATASET = "craigwu/vstar_bench"
 MANIFEST = "test_questions.jsonl"
@@ -58,6 +63,9 @@ class VStar:
     name = "vstar"
     vision = True
     task_count = 191
+    data_source = vision_dataset(
+        "vstar", REVISION, "V* Bench high-resolution images from Hugging Face", _rows
+    )
     decision_instructions = (
         "Which option correctly answers the question about the image?"
     )
