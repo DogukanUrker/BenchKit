@@ -124,6 +124,12 @@ def combine_attempts(
     total_output = sum(int(gen.get("eval_count") or 0) for gen, _ in attempts)
     total_input = sum(int(gen.get("input_tokens") or 0) for gen, _ in attempts)
     generation_ns = sum(int(gen.get("eval_duration_ns") or 0) for gen, _ in attempts)
+    # Tokens recovered from an untimed stream have no decode time to divide by.
+    timed_output = sum(
+        int(gen.get("eval_count") or 0)
+        for gen, _ in attempts
+        if int(gen.get("eval_duration_ns") or 0) > 0
+    )
     response_time = sum(float(gen.get("response_time_s") or 0.0) for gen, _ in attempts)
     traces: list[dict] = []
     for number, (gen, _) in enumerate(attempts, start=1):
@@ -156,7 +162,7 @@ def combine_attempts(
 
     final.update(
         tok_s=(
-            total_output / (generation_ns / 1e9)
+            timed_output / (generation_ns / 1e9)
             if generation_ns > 0
             else total_output / response_time
             if response_time > 0
