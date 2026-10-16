@@ -56,7 +56,9 @@ class Dataset:
     """What a benchmark needs on disk, and how to get it.
 
     ``install`` is ``None`` for data BenchKit cannot fetch itself; ``hint``
-    then says how to provide it.
+    then says how to provide it. ``size`` is the download size in bytes when it
+    is known (``approximate`` when it can drift, like a git clone); once the
+    data is installed, listings measure what is actually on disk instead.
     """
 
     summary: str
@@ -65,6 +67,7 @@ class Dataset:
     is_installed: Callable[[], bool]
     install: Callable[[Progress | None], object] | None
     hint: str = ""
+    approximate: bool = False
 
 
 @dataclass(frozen=True)

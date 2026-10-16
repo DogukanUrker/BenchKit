@@ -17,7 +17,6 @@ from rich.text import Text
 
 from benchkit import catalog
 from benchkit.benchmarks import DESCRIPTIONS, REGISTRY
-from benchkit.benchmarks.downloads import fmt_bytes
 from benchkit.client import InferenceClient
 from benchkit.engine import (
     MAX_REPAIR_ATTEMPTS,
@@ -294,7 +293,7 @@ def _datasets_table() -> None:
         table.add_row(
             entry.benchmark,
             labels[state],
-            fmt_bytes(entry.size) if entry.size else "",
+            catalog.size_label(entry),
             source,
         )
     console.print(table)

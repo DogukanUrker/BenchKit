@@ -386,13 +386,13 @@ class DatasetsScreen(ModalScreen[bool]):
         table = self.query_one("#datasets-table", DataTable)
         table.add_column("Benchmark", key="benchmark")
         table.add_column("Status", key="status", width=12)
-        table.add_column("Size", key="size")
+        table.add_column("Size", key="size", width=10)
         table.add_column("Source", key="source")
         for entry in catalog.statuses():
             table.add_row(
                 entry.benchmark,
                 self._status_cell(entry),
-                fmt_bytes(entry.size) if entry.size else "",
+                catalog.size_label(entry),
                 entry.hint
                 if entry.kind == "manual" and not entry.installed
                 else entry.summary,
@@ -487,7 +487,9 @@ class DatasetsScreen(ModalScreen[bool]):
 
     def _refresh_row(self, key: str) -> None:
         table = self.query_one("#datasets-table", DataTable)
-        table.update_cell(key, "status", self._status_cell(catalog.status(key)))
+        entry = catalog.status(key)
+        table.update_cell(key, "status", self._status_cell(entry))
+        table.update_cell(key, "size", catalog.size_label(entry))
 
     def _failed(self, key: str, message: str) -> None:
         self.notify(f"{key}: {message}", severity="error", timeout=10)

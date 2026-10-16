@@ -7,12 +7,14 @@ installed. Nothing here loads tasks, so listing never triggers a download.
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from benchkit.benchmarks import REGISTRY
-from benchkit.benchmarks.downloads import Dataset, Progress
+from benchkit.benchmarks.downloads import Dataset, Progress, fmt_bytes
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,7 @@ class DatasetStatus:
     size: int | None
     location: str
     hint: str = ""
+    approximate: bool = False
 
     @property
     def installable(self) -> bool:
@@ -50,7 +53,43 @@ def status(key: str) -> DatasetStatus:
         size=data.size,
         location=str(data.location()),
         hint=data.hint,
+        approximate=data.approximate,
     )
+
+
+def size_label(entry: DatasetStatus) -> str:
+    """What the data costs on disk, or what installing it will download.
+
+    Installed data is measured, so the figure is right whatever upstream
+    shipped. Missing data shows its declared download size with a ``↓``, or
+    ``?`` when the suite declares none. Measuring walks the cache, so this is
+    kept out of ``status`` and only runs for listings.
+    """
+    if entry.kind == "bundled":
+        path = _bundled_file(entry.benchmark)
+        return fmt_bytes(path.stat().st_size) if path else "in code"
+    if entry.installed:
+        return fmt_bytes(_disk_usage(Path(entry.location)))
+    if entry.kind == "manual":
+        return ""
+    if entry.size is None:
+        return "?"
+    return f"↓ {'~' if entry.approximate else ''}{fmt_bytes(entry.size)}"
+
+
+def _bundled_file(key: str) -> Path | None:
+    module = importlib.import_module(REGISTRY[key].__module__)
+    dataset = getattr(module, "DATASET", None)
+    if dataset is None or isinstance(dataset, str):
+        return None
+    path = Path(str(dataset))
+    return path if path.is_file() else None
+
+
+def _disk_usage(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
 
 
 def statuses(keys: Iterable[str] | None = None) -> list[DatasetStatus]:

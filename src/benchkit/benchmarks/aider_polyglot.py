@@ -138,7 +138,9 @@ class AiderPolyglot:
     task_count = sum(_EXPECTED_COUNTS.values())
     data_source = Dataset(
         summary="pinned Aider polyglot-benchmark checkout (needs git)",
-        size=None,
+        # A full clone; git's packing makes the exact figure drift.
+        size=25_000_000,
+        approximate=True,
         location=_cache_root,
         is_installed=lambda: (_cache_root() / ".git").exists(),
         install=lambda _progress: _dataset_root(),

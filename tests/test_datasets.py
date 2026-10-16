@@ -139,3 +139,27 @@ def test_cli_rejects_unknown_benchmarks(cache):
 def test_sizes_use_the_progress_bars_units():
     assert downloads.fmt_bytes(512) == "512 B"
     assert downloads.fmt_bytes(downloads.MMLU_PRO.size) == "10.3 MB"
+
+
+def test_every_row_says_what_it_costs(cache, monkeypatch):
+    _serve(monkeypatch, lambda _r: httpx.Response(200, content=PAYLOAD))
+    monkeypatch.setattr(REGISTRY["mmlu"], "data_source", _remote().source("demo"))
+    labels = {e.benchmark: catalog.size_label(e) for e in catalog.statuses()}
+
+    assert labels["mmlu"] == f"↓ {downloads.fmt_bytes(len(PAYLOAD))}"
+    assert labels["mmlu-pro"] == "↓ 10.3 MB"
+    assert labels["gpqa"].endswith("KB")  # bundled: the shipped file's size
+    assert labels["sanity"] == "in code"
+    assert labels["patcheval"] == ""
+
+    catalog.install("mmlu")
+    entry = catalog.status("mmlu")
+    assert catalog.size_label(entry) == downloads.fmt_bytes(len(PAYLOAD))
+
+
+def test_installed_directories_are_measured(tmp_path):
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "a.png").write_bytes(b"x" * 1500)
+    (tmp_path / "rows.jsonl").write_bytes(b"y" * 500)
+    entry = catalog.DatasetStatus("vstar", "download", True, "", None, str(tmp_path))
+    assert catalog.size_label(entry) == "2.0 KB"

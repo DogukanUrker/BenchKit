@@ -210,10 +210,10 @@ def _evalplus_installed(dataset: str) -> bool:
         return False
 
 
-def _evalplus_source(dataset: str, summary: str) -> Dataset:
+def _evalplus_source(dataset: str, summary: str, size: int) -> Dataset:
     return Dataset(
         summary=summary,
-        size=None,
+        size=size,
         location=lambda: _evalplus_cache(dataset),
         is_installed=lambda: _evalplus_installed(dataset),
         install=lambda _progress: _quiet_problems(dataset),
@@ -275,7 +275,9 @@ class HumanEvalPlus(_EvalPlusBenchmark):
     dataset = "humaneval"
     task_count = 164
     system = HUMANEVAL_SYSTEM
-    data_source = _evalplus_source("humaneval", "HumanEval+ release from EvalPlus")
+    data_source = _evalplus_source(
+        "humaneval", "HumanEval+ release from EvalPlus", size=925_932
+    )
 
 
 class MBPPPlus(_EvalPlusBenchmark):
@@ -283,4 +285,4 @@ class MBPPPlus(_EvalPlusBenchmark):
     dataset = "mbpp"
     task_count = 378
     system = MBPP_SYSTEM
-    data_source = _evalplus_source("mbpp", "MBPP+ release from EvalPlus")
+    data_source = _evalplus_source("mbpp", "MBPP+ release from EvalPlus", size=336_032)
