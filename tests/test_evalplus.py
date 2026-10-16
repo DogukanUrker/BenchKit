@@ -1,6 +1,6 @@
 """Regression tests for EvalPlus response assembly."""
 
-from benchkit.benchmarks.evalplus import _human_solution
+from benchkit.benchmarks.evalplus import _extract_code, _human_solution
 
 
 def test_humaneval_body_recovers_first_line_only_indent_loss() -> None:
@@ -17,3 +17,12 @@ def test_humaneval_body_recovers_first_line_only_indent_loss() -> None:
     solution = _human_solution(problem, response)
 
     compile(solution, "<test-humaneval-body>", "exec")
+
+
+def test_orphan_think_close_grades_the_final_fence() -> None:
+    response = (
+        "Let me draft it.\n```python\nreturn 'draft'\n```\n"
+        "Done.</think>\n```python\nreturn 'final'\n```"
+    )
+
+    assert _extract_code(response) == "return 'final'"
