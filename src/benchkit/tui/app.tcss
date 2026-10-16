@@ -296,6 +296,16 @@ DataTable > .datatable--cursor {
     margin: 1 0;
 }
 
+#datasets-dialog {
+    width: 92%;
+    height: 80%;
+}
+
+#datasets-table {
+    height: 1fr;
+    margin: 1 0 0 0;
+}
+
 /* -------------------------------------------------------------------- Run */
 
 #run-root {

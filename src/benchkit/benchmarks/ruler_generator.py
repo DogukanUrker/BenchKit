@@ -215,10 +215,35 @@ _QA_URLS = {
 }
 
 
+def cache_dir() -> Path:
+    return Path.home() / ".cache" / "benchkit" / "ruler"
+
+
+ESSAY_FILE = "PaulGrahamEssays.json"
+QA_FILES = {"qa_1": "squad.json", "qa_2": "hotpotqa.json"}
+
+
+def corpus_installed() -> bool:
+    root = cache_dir()
+    return all((root / name).exists() for name in (ESSAY_FILE, *QA_FILES.values()))
+
+
+def install_corpus() -> None:
+    """Fetch the QA corpora; the essay corpus has no pinned download."""
+    for kind in QA_FILES:
+        _qa_path(kind)
+    if not (cache_dir() / ESSAY_FILE).exists():
+        raise RuntimeError(
+            f"SQuAD and HotpotQA are installed, but {ESSAY_FILE} must be "
+            f"generated into {cache_dir()} with NVIDIA/RULER's "
+            "download_paulgraham_essay.py"
+        )
+
+
 def _qa_path(kind: str) -> Path:
-    root = Path.home() / ".cache" / "benchkit" / "ruler"
+    root = cache_dir()
     root.mkdir(parents=True, exist_ok=True)
-    path = root / ("squad.json" if kind == "qa_1" else "hotpotqa.json")
+    path = root / QA_FILES[kind]
     if not path.exists():
         try:
             urllib.request.urlretrieve(_QA_URLS[kind], path)
@@ -230,11 +255,11 @@ def _qa_path(kind: str) -> Path:
 
 
 def _essay_words() -> list[str]:
-    root = Path.home() / ".cache" / "benchkit" / "ruler"
-    path = root / "PaulGrahamEssays.json"
+    root = cache_dir()
+    path = root / ESSAY_FILE
     if not path.exists():
         raise RuntimeError(
-            "essay-backed RULER tasks require PaulGrahamEssays.json in "
+            f"essay-backed RULER tasks require {ESSAY_FILE} in "
             f"{root}; generate it with NVIDIA/RULER's download_paulgraham_essay.py"
         )
     text = str(json.loads(path.read_text(encoding="utf-8"))["text"])

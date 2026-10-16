@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 
 from benchkit.benchmarks.base import Task
+from benchkit.benchmarks.downloads import Dataset
 from benchkit.evaluation import EvaluationResult
 from benchkit.sandbox import (
     AIDER_POLYGLOT_COMMIT,
@@ -135,6 +136,13 @@ class AiderPolyglot:
 
     name = "aider-polyglot"
     task_count = sum(_EXPECTED_COUNTS.values())
+    data_source = Dataset(
+        summary="pinned Aider polyglot-benchmark checkout (needs git)",
+        size=None,
+        location=_cache_root,
+        is_installed=lambda: (_cache_root() / ".git").exists(),
+        install=lambda _progress: _dataset_root(),
+    )
     variant_count = len(_LANGUAGES)
     workspace_task = True
     evaluation_activity = "running exercise tests in the Pi sandbox"

@@ -1,13 +1,11 @@
 """MMLU-Pro benchmark - reasoning-heavy academic QA with ten options."""
 
 import json
-from pathlib import Path
 
 from benchkit.benchmarks.base import Task
+from benchkit.benchmarks.downloads import MMLU_PRO as DATASET
 from benchkit.benchmarks.mcq import extract_choice
 from benchkit.benchmarks.utils import strip_think_tags
-
-DATASET = Path(__file__).parent.parent / "datasets" / "mmlu_pro.jsonl"
 
 # Ten options per question, so the guess floor is 10% rather than MMLU's 25%.
 # A handful of questions carry fewer after the authors pruned bad distractors,
@@ -29,16 +27,12 @@ def _format_choices(choices: list[str]) -> str:
 class MMLUPro:
     name = "mmlu-pro"
     decision_instructions = "Which option correctly answers the question?"
+    task_count = 12032
+    data_source = DATASET.source("MMLU-Pro test split, 14 categories")
 
     def load_tasks(self) -> list[Task]:
-        if not DATASET.exists():
-            raise FileNotFoundError(
-                f"{DATASET.name} is missing; build it with "
-                "`uv run --with datasets python scripts/build_mmlu_pro.py`"
-            )
-
         tasks = []
-        with open(DATASET, encoding="utf-8") as f:
+        with open(DATASET.ensure(), encoding="utf-8") as f:
             for line in f:
                 d = json.loads(line)
                 tasks.append(

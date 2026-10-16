@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from benchkit.benchmarks.base import Task
+from benchkit.benchmarks.downloads import Dataset
 from benchkit.evaluation import EvaluationResult
 from benchkit.sandbox import (
     DockerTaskEnvironment,
@@ -540,6 +541,20 @@ class PatchEval:
     workspace_task = True
     evaluation_activity = "running hidden PatchEval checks"
     list_note = "pilot-20 · requires Pi and Docker"
+    data_source = Dataset(
+        summary="frozen pilot-20 release of DogukanUrker/PatchEval",
+        size=None,
+        location=lambda: Path(os.environ.get("BENCHKIT_PATCHEVAL_DATASET", "unset")),
+        is_installed=lambda: (
+            bool(os.environ.get("BENCHKIT_PATCHEVAL_DATASET"))
+            and Path(os.environ["BENCHKIT_PATCHEVAL_DATASET"]).expanduser().is_dir()
+        ),
+        install=None,
+        hint=(
+            "download the pilot-20 release from DogukanUrker/PatchEval and set "
+            "BENCHKIT_PATCHEVAL_DATASET to its local root"
+        ),
+    )
 
     def __init__(self, dataset_root: Path | None = None) -> None:
         configured = dataset_root or (

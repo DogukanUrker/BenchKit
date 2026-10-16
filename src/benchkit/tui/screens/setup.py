@@ -22,6 +22,7 @@ from textual.widgets import (
 )
 from textual.widgets.selection_list import Selection
 
+from benchkit import catalog
 from benchkit.benchmarks import DESCRIPTIONS, REGISTRY
 from benchkit.demo import DemoClient
 from benchkit.engine import (
@@ -38,7 +39,11 @@ from benchkit.engine import (
 from benchkit.perturbations import CHOICE_ORDER, perturbations_for
 from benchkit.template_check import TemplateReport, check_template
 from benchkit.tui.formatting import fmt_count, fmt_size
-from benchkit.tui.screens.modals import LimitScreen, TemplateCheckScreen
+from benchkit.tui.screens.modals import (
+    DatasetsScreen,
+    LimitScreen,
+    TemplateCheckScreen,
+)
 from benchkit.tui.theme import score_palette
 from benchkit.tui.widgets import SectionTitle
 
@@ -59,6 +64,7 @@ class SetupScreen(Screen[None]):
         Binding("l", "set_limit", "Task limit"),
         Binding("p", "toggle_perturbation", "Choice order"),
         Binding("v", "check_templates", "Check templates"),
+        Binding("d", "datasets", "Datasets"),
         Binding("slash", "focus_filter", "Filter"),
         Binding("escape", "back", "Back"),
     ]
@@ -74,6 +80,7 @@ class SetupScreen(Screen[None]):
         self.limits: dict[str, str] = {}
         self.template_status: dict[str, str] = {}
         self.checking_templates = False
+        self.missing_data = _missing_data()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -154,6 +161,7 @@ class SetupScreen(Screen[None]):
             )
         with Horizontal(id="setup-footer"):
             yield Static("", id="plan-summary")
+            yield Button("Datasets", id="datasets")
             yield Button("Check templates", id="check-templates")
             yield Button("Start run ▸", id="start", variant="primary")
         yield Footer()
@@ -243,6 +251,8 @@ class SetupScreen(Screen[None]):
             accent = score_palette(self.app.current_theme.dark)["mid"]
             text.append(f"  {slice_label(limit)}", style=f"bold {accent}")
         else:
+            if key in self.missing_data:
+                text.append("  ↓ download", style="yellow")
             text.append(f"  {DESCRIPTIONS.get(key, '')}", style="dim")
         return text
 
@@ -349,6 +359,8 @@ class SetupScreen(Screen[None]):
             self.action_start()
         elif event.button.id == "check-templates":
             self.action_check_templates()
+        elif event.button.id == "datasets":
+            self.action_datasets()
 
     # Actions ----------------------------------------------------------
 
@@ -444,6 +456,14 @@ class SetupScreen(Screen[None]):
         self.query_one("#start", Button).disabled = False
         self.app.push_screen(TemplateCheckScreen(reports))
 
+    def action_datasets(self) -> None:
+        def refresh(installed: bool | None) -> None:
+            if installed:
+                self.missing_data = _missing_data()
+                self._rebuild_benchmarks()
+
+        self.app.push_screen(DatasetsScreen(), refresh)
+
     def action_back(self) -> None:
         if self.checking_templates:
             self.notify("Wait for the template check to finish.", timeout=3)
@@ -468,6 +488,12 @@ class SetupScreen(Screen[None]):
             self.app.client.prime(
                 sorted({job.benchmark for job in jobs}),
                 perturbations=perturbations,
+            )
+        fetching = sorted({job.benchmark for job in jobs} & self.missing_data)
+        if fetching:
+            self.notify(
+                f"Downloading {', '.join(fetching)} before the first task.",
+                timeout=6,
             )
         self.app.start_run(jobs, force_unload=self._force_unload_enabled())
 
@@ -718,3 +744,8 @@ def _model_is_loaded(model: dict) -> bool:
         return loaded
     status = str(model.get("status") or "").strip().lower()
     return status in {"loaded", "running"}
+
+
+def _missing_data() -> set[str]:
+    """Benchmarks whose data a run would have to download first."""
+    return {entry.benchmark for entry in catalog.statuses() if entry.installable}

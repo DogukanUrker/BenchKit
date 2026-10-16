@@ -1,13 +1,11 @@
 """MMLU benchmark - broad academic and professional multiple choice QA."""
 
 import json
-from pathlib import Path
 
 from benchkit.benchmarks.base import Task
+from benchkit.benchmarks.downloads import MMLU as DATASET
 from benchkit.benchmarks.mcq import extract_choice
 from benchkit.benchmarks.utils import strip_think_tags
-
-DATASET = Path(__file__).parent.parent / "datasets" / "mmlu.jsonl"
 
 SYSTEM = (
     "Answer the following multiple choice question about {subject}. "
@@ -24,10 +22,12 @@ def _format_choices(choices: list[str]) -> str:
 class MMLU:
     name = "mmlu"
     decision_instructions = "Which option correctly answers the question?"
+    task_count = 14042
+    data_source = DATASET.source("MMLU test split, 57 subjects")
 
     def load_tasks(self) -> list[Task]:
         tasks = []
-        with open(DATASET) as f:
+        with open(DATASET.ensure(), encoding="utf-8") as f:
             for line in f:
                 d = json.loads(line)
                 tasks.append(

@@ -10,6 +10,8 @@ BenchKit is a Python 3.11 package using a `src/` layout. `src/benchkit/cli.py` p
 - `OLLAMA_HOST=http://localhost:11434 uv run benchkit`: run against an explicit local or remote Ollama endpoint.
 - `uv run benchkit --headless --models MODEL --benchmarks sanity:5 --verbose`: scripted run that prints per-task prompts and responses.
 - `uv run benchkit --list`: print the benchmark registry with task counts.
+- `uv run benchkit datasets` / `uv run benchkit datasets install`: list
+  installed and missing datasets, and fetch the missing ones.
 - `uv sync --extra browser && uv run playwright install chromium`: install the
   headless browser used by the `treejs-arena` suite.
 - `uv run pre-commit install`: install the hooks (ruff on commit, pytest on push).
@@ -355,6 +357,28 @@ tables in the README.
 - Harness errors are excluded from scores and paired comparisons. Ordinary
   incorrect answers, timeouts, length limits, and loop kills remain scored
   failures when applicable.
+
+### Datasets
+- Small datasets are bundled in `src/benchkit/datasets/` so `--demo`, `sanity`
+  and the CI smoke run stay offline. Large ones are not: a benchmark class
+  declares a `data_source` (`benchmarks/downloads.Dataset`) saying where its
+  data lives, whether it is installed and how to install it. No `data_source`
+  means bundled. `install=None` means BenchKit cannot fetch it (PatchEval) and
+  `hint` says what to do.
+- `mmlu` and `mmlu-pro` are `RemoteFile`s: a URL pinned to a commit of this
+  repository plus a sha256 and size, cached under `~/.cache/benchkit/datasets`
+  (`BENCHKIT_DATASET_CACHE`). The file is verified before it is moved into
+  place. Never bundle them again; a new version means a new pin and checksum.
+  Downloaded suites must declare `task_count` so `--list` and the TUI never
+  trigger a download.
+- `catalog.py` is the shared view: `benchkit datasets [install [BENCHMARK...]]`
+  and the TUI's datasets dialog (`d` on Setup) both use it. Headless runs fetch
+  missing data for the selected benchmarks up front with a progress bar; the
+  TUI fetches inside the run. Loaders still fetch on first use, so a missing
+  dataset is never a hard error while online, and offline it raises
+  `DatasetUnavailable` with the install command and expected checksum.
+- `tests/test_datasets.py` guards the bundled directory's size; keep it under
+  the limit rather than raising it.
 
 ### Reports and Benchmarks
 - Every run writes `results.json`, `results.csv`, `results.md`, and a standalone

@@ -15,7 +15,12 @@ from functools import cache
 
 from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.utils import strip_think_tags
-from benchkit.benchmarks.vision import category_scores, load_rows, spread
+from benchkit.benchmarks.vision import (
+    category_scores,
+    load_rows,
+    spread,
+    vision_dataset,
+)
 from benchkit.evaluation import EvaluationResult
 
 DATASET = "HuggingFaceM4/ChartQA"
@@ -83,6 +88,9 @@ class ChartQA:
     name = "chartqa"
     vision = True
     task_count = 2500
+    data_source = vision_dataset(
+        "chartqa", REVISION, "ChartQA test charts from Hugging Face", _rows
+    )
 
     def load_tasks(self) -> list[Task]:
         tasks = [

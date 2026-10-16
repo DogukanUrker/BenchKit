@@ -15,7 +15,9 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
+from benchkit import catalog
 from benchkit.benchmarks import DESCRIPTIONS, REGISTRY
+from benchkit.benchmarks.downloads import fmt_bytes
 from benchkit.client import InferenceClient
 from benchkit.engine import (
     MAX_REPAIR_ATTEMPTS,
@@ -54,17 +56,27 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=("perf", "history", "render-check"),
+        choices=("perf", "history", "render-check", "datasets"),
         help=(
-            "Run a performance profile, browse historical results, or check "
-            "that headless rendering works on this machine"
+            "Run a performance profile, browse historical results, check "
+            "that headless rendering works on this machine, or list and "
+            "install benchmark datasets"
         ),
     )
     parser.add_argument(
         "perf_model",
         nargs="?",
         metavar="MODEL",
-        help="Model name for `benchkit perf MODEL`",
+        help=(
+            "Model name for `benchkit perf MODEL`; `install` for "
+            "`benchkit datasets install [BENCHMARK ...]`"
+        ),
+    )
+    parser.add_argument(
+        "targets",
+        nargs="*",
+        metavar="BENCHMARK",
+        help="Datasets: benchmarks to install (default: every missing one)",
     )
     parser.add_argument("--host", help="Inference host, overrides BENCHKIT_HOST")
     parser.add_argument(
@@ -255,6 +267,109 @@ def _list_benchmarks() -> None:
             f"[yellow]{note}[/yellow]" if note else "",
         )
     console.print(table)
+
+
+def _datasets_table() -> None:
+    table = Table(box=box.MINIMAL, border_style="dim", header_style="bold")
+    table.add_column("Benchmark")
+    table.add_column("Status")
+    table.add_column("Size", justify="right")
+    table.add_column("Source")
+    labels = {
+        "bundled": "[dim]bundled[/dim]",
+        "installed": "[green]✓ installed[/green]",
+        "download": "[yellow]✗ missing[/yellow]",
+        "manual": "[red]✗ manual setup[/red]",
+    }
+    entries = catalog.statuses()
+    for entry in entries:
+        state = (
+            entry.kind
+            if entry.kind == "bundled" or not entry.installed
+            else "installed"
+        )
+        source = entry.summary
+        if entry.kind == "manual" and not entry.installed and entry.hint:
+            source += f"\n[dim]{entry.hint}[/dim]"
+        table.add_row(
+            entry.benchmark,
+            labels[state],
+            fmt_bytes(entry.size) if entry.size else "",
+            source,
+        )
+    console.print(table)
+    missing = catalog.missing()
+    if missing:
+        console.print(
+            f"[yellow]{len(missing)} missing:[/yellow] {', '.join(missing)} "
+            "[dim]· run 'benchkit datasets install' to fetch them all[/dim]"
+        )
+    else:
+        console.print("[green]Every downloadable dataset is installed.[/green]")
+
+
+def _install_datasets(keys: list[str]) -> bool:
+    """Install each benchmark's data with a progress line. True if all worked."""
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+    )
+
+    ok = True
+    for key in keys:
+        entry = catalog.status(key)
+        if entry.installed:
+            note = "bundled" if entry.kind == "bundled" else "already installed"
+            console.print(f"[dim]{key}: {note}[/dim]")
+            continue
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}"),
+            BarColumn(),
+            DownloadColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task(f"Installing {key}", total=entry.size)
+            try:
+                catalog.install(
+                    key,
+                    lambda done, total, task=task: progress.update(
+                        task, completed=done, total=total
+                    ),
+                )
+            except Exception as exc:
+                ok = False
+                progress.stop()
+                console.print(f"[red]✗ {key}:[/red] {exc}")
+                continue
+        console.print(f"[green]✓ {key}[/green] [dim]{entry.location}[/dim]")
+    return ok
+
+
+def _datasets(args: argparse.Namespace) -> None:
+    if args.perf_model is None:
+        _datasets_table()
+        return
+    if args.perf_model != "install":
+        console.print(
+            f"[red]Unknown datasets action:[/red] {args.perf_model} "
+            "[dim]· use 'benchkit datasets' or 'benchkit datasets install'[/dim]"
+        )
+        sys.exit(1)
+    unknown = [key for key in args.targets if key not in REGISTRY]
+    if unknown:
+        console.print(f"[red]Unknown benchmark(s):[/red] {', '.join(unknown)}")
+        sys.exit(1)
+    keys = args.targets or catalog.missing()
+    if not keys:
+        console.print("[green]Every downloadable dataset is already installed.[/green]")
+        return
+    if not _install_datasets(keys):
+        sys.exit(1)
 
 
 def _render_check() -> None:
@@ -474,6 +589,18 @@ def _headless(args: argparse.Namespace) -> None:
             "[red]No supported RULER context bucket fits the selected model(s).[/red]"
         )
         sys.exit(1)
+    # Fetch what the run needs up front, with a progress bar, rather than
+    # stalling silently inside the first job's task loader.
+    missing = catalog.missing(dict.fromkeys(job.benchmark for job in jobs))
+    if missing:
+        console.print(f"[dim]Fetching datasets:[/dim] {', '.join(missing)}")
+        # A partial install (RULER without its essay corpus) can still serve
+        # some slices, so leave the verdict to the task loader.
+        if not _install_datasets(missing):
+            console.print(
+                "[yellow]Continuing; tasks that need the missing data will "
+                "fail when they load.[/yellow]"
+            )
     if args.demo:
         perturbations = sorted(
             {
@@ -858,6 +985,10 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "render-check":
         _render_check()
+        return
+
+    if args.command == "datasets":
+        _datasets(args)
         return
 
     if args.command == "perf":

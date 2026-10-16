@@ -8,9 +8,11 @@ import os
 import platform
 import textwrap
 from functools import cache, lru_cache
+from pathlib import Path
 from typing import Any
 
 from benchkit.benchmarks.base import Task
+from benchkit.benchmarks.downloads import Dataset
 from benchkit.benchmarks.utils import strip_think_tags
 
 HUMANEVAL_SYSTEM = (
@@ -189,6 +191,35 @@ def _human_solution(problem: dict[str, Any], response: str) -> str:
     return f"{import_block}\n\n{code}" if imports else code
 
 
+def _evalplus_cache(dataset: str) -> Path:
+    from evalplus.data.humaneval import HUMANEVAL_PLUS_VERSION
+    from evalplus.data.mbpp import MBPP_PLUS_VERSION
+    from evalplus.data.utils import get_dataset_metadata
+
+    if dataset == "humaneval":
+        name, version = "HumanEvalPlus", HUMANEVAL_PLUS_VERSION
+    else:
+        name, version = "MbppPlus", MBPP_PLUS_VERSION
+    return Path(get_dataset_metadata(name, version, mini=False)[1])
+
+
+def _evalplus_installed(dataset: str) -> bool:
+    try:
+        return _evalplus_cache(dataset).exists()
+    except ImportError:
+        return False
+
+
+def _evalplus_source(dataset: str, summary: str) -> Dataset:
+    return Dataset(
+        summary=summary,
+        size=None,
+        location=lambda: _evalplus_cache(dataset),
+        is_installed=lambda: _evalplus_installed(dataset),
+        install=lambda _progress: _problems(dataset),
+    )
+
+
 class _EvalPlusBenchmark:
     dataset: str
     name: str
@@ -237,6 +268,7 @@ class HumanEvalPlus(_EvalPlusBenchmark):
     dataset = "humaneval"
     task_count = 164
     system = HUMANEVAL_SYSTEM
+    data_source = _evalplus_source("humaneval", "HumanEval+ release from EvalPlus")
 
 
 class MBPPPlus(_EvalPlusBenchmark):
@@ -244,3 +276,4 @@ class MBPPPlus(_EvalPlusBenchmark):
     dataset = "mbpp"
     task_count = 378
     system = MBPP_SYSTEM
+    data_source = _evalplus_source("mbpp", "MBPP+ release from EvalPlus")

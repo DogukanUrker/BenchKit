@@ -11,7 +11,12 @@ from functools import cache
 
 from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.utils import strip_think_tags
-from benchkit.benchmarks.vision import category_scores, load_rows, spread
+from benchkit.benchmarks.vision import (
+    category_scores,
+    load_rows,
+    spread,
+    vision_dataset,
+)
 from benchkit.evaluation import EvaluationResult
 
 DATASET = "echo840/OCRBench"
@@ -49,6 +54,9 @@ class OCRBench:
     name = "ocrbench"
     vision = True
     task_count = 1000
+    data_source = vision_dataset(
+        "ocrbench", REVISION, "OCRBench images from Hugging Face", _rows
+    )
 
     def load_tasks(self) -> list[Task]:
         tasks = [
