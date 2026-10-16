@@ -29,6 +29,7 @@ from benchkit.engine import (
     task_count,
 )
 from benchkit.history import serve_history
+from benchkit.jobs import job_matrix
 from benchkit.metrics import (
     aggregate_tok_s,
     decision_speed,
@@ -39,7 +40,11 @@ from benchkit.metrics import (
 )
 from benchkit.perf import DEFAULT_DEPTHS, PerfConfig, parse_depths, run_profile
 from benchkit.perf_report import save_profile
-from benchkit.perturbations import PERTURBATIONS, perturbations_for
+from benchkit.perturbations import (
+    PERTURBATIONS,
+    perturbations_for,
+    unsupported_benchmarks,
+)
 from benchkit.report import save
 from benchkit.runner import run
 from benchkit.tui import run_tui
@@ -499,16 +504,13 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
         sys.exit(1)
 
     if args.perturbation:
-        unsupported = [
-            key
-            for key, _, _ in specs
-            if args.perturbation not in perturbations_for(key)
-        ]
+        unsupported = unsupported_benchmarks(
+            args.perturbation, [key for key, _, _ in specs]
+        )
         if unsupported:
-            unique = list(dict.fromkeys(unsupported))
             console.print(
                 f"[red]{args.perturbation} is unsupported for:[/red] "
-                + ", ".join(unique)
+                + ", ".join(unsupported)
             )
             supported = [
                 key for key in REGISTRY if args.perturbation in perturbations_for(key)
@@ -517,34 +519,14 @@ def _headless_jobs(args: argparse.Namespace, available: list[str]) -> list[JobSp
             sys.exit(1)
 
     harnesses = ("direct", "pi") if args.harness == "both" else (args.harness,)
-    jobs: list[JobSpec] = []
-    for model in models:
-        for key, spec, variant in specs:
-            for harness in harnesses:
-                jobs.append(
-                    JobSpec(
-                        model,
-                        key,
-                        spec,
-                        variant=variant,
-                        harness=harness,
-                        repair_attempts=args.repair_attempts,
-                    )
-                )
-                if args.perturbation:
-                    jobs.append(
-                        JobSpec(
-                            model,
-                            key,
-                            spec,
-                            variant=variant,
-                            perturbation=args.perturbation,
-                            perturbation_seed=args.perturbation_seed,
-                            harness=harness,
-                            repair_attempts=args.repair_attempts,
-                        )
-                    )
-    return jobs
+    return job_matrix(
+        models,
+        specs,
+        harnesses,
+        repair_attempts=args.repair_attempts,
+        perturbation=args.perturbation,
+        perturbation_seed=args.perturbation_seed,
+    )
 
 
 def _headless(args: argparse.Namespace) -> None:

@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-BenchKit is a Python 3.11 package using a `src/` layout. `src/benchkit/cli.py` parses flags and either launches the TUI or runs headless. `engine.py` owns benchmark execution (jobs, slices, pause/skip/stop controls, events) and is shared by both front-ends; `client.py` talks to inference servers, `executor.py` sandboxes generated code, `report.py` writes artifacts, and `runner.py` renders headless progress. The terminal UI lives in `src/benchkit/tui/` (`app.py`, `app.tcss`, `theme.py`, `widgets.py`, `screens/`), and `demo.py` provides the offline client behind `--demo`. Benchmark implementations belong in `src/benchkit/benchmarks/`, and bundled benchmark data lives in `src/benchkit/datasets/` as JSONL files. Runtime outputs are written to `results/<timestamp>/` and should not be committed.
+BenchKit is a Python 3.11 package using a `src/` layout. `src/benchkit/cli.py` parses flags and either launches the TUI or runs headless. `engine.py` owns benchmark execution (the job loop, generation, verifier repairs and per-task finalization) and is shared by both front-ends. Its pure parts sit beside it: `jobs.py` (slices, the cached registry, `JobSpec`, and `job_matrix`, which both front-ends build their runs with), `events.py` (the events it emits), `controls.py` (pause/skip/stop) and `results.py` (task records and job result shaping); `engine.py` re-exports their public names. `client.py` talks to inference servers, `executor.py` sandboxes generated code, `sandbox.py` builds and runs the Docker images whose Dockerfiles live in `dockerfiles.py`, `report.py` writes artifacts with `report_markdown.py` rendering `results.md`, and `runner.py` renders headless progress. The terminal UI lives in `src/benchkit/tui/` (`app.py`, `app.tcss`, `theme.py`, `widgets.py`, `screens/`), and `demo.py` provides the offline client behind `--demo`. Benchmark implementations belong in `src/benchkit/benchmarks/`, and bundled benchmark data lives in `src/benchkit/datasets/` as JSONL files. Runtime outputs are written to `results/<timestamp>/` and should not be committed.
 
 ## Build, Test, and Development Commands
 - `uv sync`: install and lock project dependencies from `pyproject.toml` and `uv.lock`.
@@ -90,7 +90,7 @@ tables in the README.
 - `--repair-attempts 1` gives an incorrect answer one sanitized verifier
   message and one full replacement attempt. Feedback must never expose the
   expected answer or hidden test bodies.
-- Multiple choice is repaired differently (`engine.option_count`,
+- Multiple choice is repaired differently (`jobs.option_count`,
   `repair_budget`). A task with at most two options (`metadata["choices"]` of
   length 2, or a yes/no suite declaring `answer_options = 2`) is never
   repaired: telling a model its pick of two was wrong hands it the answer.
@@ -391,6 +391,10 @@ tables in the README.
   `results.html`. Performance runs write matching `perf.*` artifacts. Keep old
   reports readable when adding fields; missing historical fields mean “not
   captured,” not zero.
+- `results.md` is assembled by `report_markdown.render_markdown`. A suite that
+  reports its own summary fields gets one section function in `_SECTIONS`,
+  written only when some result carries those fields; `report.save` only
+  writes files.
 - Benchmark metadata, counts, perturbation support, and descriptions are
   canonical in `src/benchkit/benchmarks/__init__.py`; inspect it or run
   `uv run benchkit --list` instead of maintaining a second table.
