@@ -381,6 +381,109 @@ class TokenizerRoutingTests(unittest.TestCase):
         self.assertEqual(request.call_args.args[1], "http://generic/tokenize")
 
 
+class _LlamaSwapTerminalStream:
+    """Real llama-swap client whose only tokenizer is the model's upstream."""
+
+    def __init__(self, generations: list[dict]) -> None:
+        from benchkit.client import InferenceClient
+
+        generations = list(generations)
+
+        class Client(InferenceClient):
+            def generate(self, model, prompt, on_progress=None, **kwargs):
+                gen = generations.pop(0)
+                if on_progress is not None:
+                    for thinking, response in gen.pop("stream", []):
+                        on_progress(
+                            GenerationUpdate(
+                                thinking=thinking, response=response, elapsed_s=1.0
+                            )
+                        )
+                return {**_generation(), **gen}
+
+        self.client = Client("http://swap/v1", "openai", timeout=30.0)
+        self.client.provider = "openai"
+        self.client._models_by_name = {
+            "gemma": {"owned_by": "llama-swap", "meta": {"llamaswap": {}}}
+        }
+        self.urls: list[str] = []
+
+    def request(self, method: str, url: str, **kwargs: object) -> Mock:
+        self.urls.append(url)
+        if url != "http://swap/upstream/gemma/tokenize":
+            raise _http_error(404, url)
+        response = Mock()
+        response.json.return_value = {
+            "tokens": list(range(len(kwargs["json"]["content"].split())))
+        }
+        return response
+
+
+_TIMED_OUT = {
+    "stream": [("one two three", ""), ("", "four five")],
+    "thinking": "one two three",
+    "response": "four five",
+    "eval_count": 0,
+    "eval_duration_ns": 0,
+    "tok_s": 0.0,
+    "response_time_s": 30.0,
+    "done_reason": "timeout",
+    "timed_out": True,
+}
+
+
+class StreamedTokenRecoveryTests(unittest.TestCase):
+    def test_timed_out_llama_swap_stream_recovers_tokens_from_upstream(
+        self,
+    ) -> None:
+        swap = _LlamaSwapTerminalStream([dict(_TIMED_OUT)])
+        engine = Engine(client=swap.client, jobs=[JobSpec("gemma", "sanity", "1")])
+
+        with patch.object(swap.client, "_request", side_effect=swap.request):
+            result = engine.run()[0]
+
+        task = result["tasks"][0]
+        self.assertIn("http://swap/tokenize", swap.urls)
+        self.assertIn("http://swap/upstream/gemma/tokenize", swap.urls)
+        self.assertTrue(task["tokens_recovered"])
+        self.assertEqual(task["output_tokens"], 5)
+        self.assertEqual(task["response_time_s"], 30.0)
+        self.assertEqual(task["thinking"], "one two three")
+        self.assertEqual(task["response"], "four five")
+        self.assertTrue(task["timed_out"])
+        self.assertFalse(task["passed"])
+        self.assertEqual(result["throughput_items"], 0)
+        self.assertEqual(result["throughput_coverage"], 0.0)
+
+    def test_terminal_repair_attempt_recovers_its_own_tokens(self) -> None:
+        first = {
+            "response": "wrong",
+            "eval_count": 10,
+            "eval_duration_ns": 1_000_000_000,
+            "response_time_s": 2.0,
+        }
+        swap = _LlamaSwapTerminalStream([first, dict(_TIMED_OUT)])
+        engine = Engine(
+            client=swap.client,
+            jobs=[JobSpec("gemma", "sanity", "1", repair_attempts=1)],
+        )
+        failed = Mock(score=0.0, passed=False, error="", details={}, feedback="no")
+
+        with (
+            patch.object(swap.client, "_request", side_effect=swap.request),
+            patch.object(engine, "_verify_response", return_value=failed),
+        ):
+            result = engine.run()[0]
+
+        task = result["tasks"][0]
+        self.assertTrue(task["tokens_recovered"])
+        self.assertEqual(task["output_tokens"], 15)
+        self.assertEqual(task["tok_s"], 10.0)
+        self.assertFalse(task["passed"])
+        self.assertEqual(result["throughput_items"], 0)
+        self.assertEqual(result["throughput_coverage"], 0.0)
+
+
 class ThroughputMetricTests(unittest.TestCase):
     def test_parallel_metrics_separate_stream_speed_from_total_throughput(
         self,

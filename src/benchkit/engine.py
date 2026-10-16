@@ -1214,6 +1214,7 @@ class Engine:
                             outcome.eval_count > 0
                             and outcome.eval_duration_ns > 0
                             and outcome.response_time_s > 0
+                            and not record.tokens_recovered
                         )
                         if (
                             not (record.loop_killed or record.harness_error)
@@ -1634,13 +1635,19 @@ class Engine:
 
         repairs = job.repair_attempts if repairs is None else repairs
         for attempt in range(repairs + 1):
+            thinking_parts: list[str] = []
+            response_parts: list[str] = []
 
             def forward(
                 update: GenerationUpdate,
                 *,
                 number: int = attempt,
                 offset: float = elapsed_offset,
+                thinking_parts: list[str] = thinking_parts,
+                response_parts: list[str] = response_parts,
             ) -> None:
+                thinking_parts.append(update.thinking)
+                response_parts.append(update.response)
                 on_progress(
                     replace(
                         update,
@@ -1658,6 +1665,11 @@ class Engine:
             )
             terminal = bool(
                 gen.get("cancelled") or gen.get("timed_out") or gen.get("loop_killed")
+            )
+            # Recover per attempt: once attempts are combined, an earlier
+            # attempt's count would hide this one's missing usage.
+            self._recover_streamed_tokens(
+                job.model, gen, thinking_parts, response_parts
             )
             evaluation = (
                 EvaluationResult(score=0.0)
@@ -1997,23 +2009,9 @@ class Engine:
             if pi_image is not None:
                 self._release_pi_image(pi_image)
 
-        if (
-            gen.get("loop_killed") or gen.get("timed_out") or gen.get("length_exceeded")
-        ) and not int(gen.get("eval_count") or 0):
-            token_count = self._count_streamed_tokens(
-                job.model,
-                streamed_thinking_parts,
-                streamed_response_parts,
-            )
-            if token_count is not None:
-                response_time_s = float(gen.get("response_time_s") or 0.0)
-                gen.update(
-                    eval_count=token_count,
-                    tokens_recovered=True,
-                    tok_s=(
-                        token_count / response_time_s if response_time_s > 0 else 0.0
-                    ),
-                )
+        self._recover_streamed_tokens(
+            job.model, gen, streamed_thinking_parts, streamed_response_parts
+        )
 
         return _GeneratedTask(
             position=position,
@@ -2026,6 +2024,32 @@ class Engine:
             analyzer=analyzer,
             first_answer_at=first_answer_at,
             loop_detected_at=loop_detected_at,
+        )
+
+    def _recover_streamed_tokens(
+        self,
+        model: str,
+        gen: dict,
+        thinking_parts: list[str],
+        response_parts: list[str],
+    ) -> None:
+        """Fill in output tokens for a terminal stream that reported no usage.
+
+        Only the token count is recovered. Decode timing stays zero, so the
+        item remains outside throughput coverage.
+        """
+        if not (
+            gen.get("loop_killed") or gen.get("timed_out") or gen.get("length_exceeded")
+        ) or int(gen.get("eval_count") or 0):
+            return
+        token_count = self._count_streamed_tokens(model, thinking_parts, response_parts)
+        if token_count is None:
+            return
+        response_time_s = float(gen.get("response_time_s") or 0.0)
+        gen.update(
+            eval_count=token_count,
+            tokens_recovered=True,
+            tok_s=token_count / response_time_s if response_time_s > 0 else 0.0,
         )
 
     def _count_streamed_tokens(
