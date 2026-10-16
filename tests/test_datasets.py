@@ -106,7 +106,7 @@ def test_catalog_separates_bundled_and_downloaded(cache):
     assert statuses.keys() == REGISTRY.keys()
     assert statuses["sanity"].kind == "bundled" and statuses["sanity"].installed
     assert statuses["mmlu"].kind == "download" and statuses["mmlu"].installable
-    assert statuses["patcheval"].kind == "manual"
+    assert statuses["patcheval"].kind == "download"
     assert "mmlu" in catalog.missing()
 
 
@@ -150,7 +150,7 @@ def test_every_row_says_what_it_costs(cache, monkeypatch):
     assert labels["mmlu-pro"] == "↓ 10.3 MB"
     assert labels["gpqa"].endswith("KB")  # bundled: the shipped file's size
     assert labels["sanity"] == "in code"
-    assert labels["patcheval"] == ""
+    assert labels["patcheval"] == "?"
 
     catalog.install("mmlu")
     entry = catalog.status("mmlu")

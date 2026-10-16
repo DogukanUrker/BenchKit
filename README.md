@@ -145,7 +145,8 @@ revision on first use. `mmvp` and `vstar` are small enough to run in full on
 one consumer GPU and also run on decision models with an mmproj.
 
 Small suites ship with BenchKit and work offline. Larger datasets (`mmlu`,
-`mmlu-pro`, the vision suites, EvalPlus, RULER's haystacks, Aider Polyglot) are
+`mmlu-pro`, the vision suites, EvalPlus, RULER's haystacks, Aider Polyglot,
+PatchEval) are
 downloaded once into `~/.cache/benchkit` the first time a run needs them. List
 what is installed and fetch everything that is missing ahead of time with:
 

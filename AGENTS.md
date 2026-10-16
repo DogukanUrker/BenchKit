@@ -363,8 +363,14 @@ tables in the README.
   and the CI smoke run stay offline. Large ones are not: a benchmark class
   declares a `data_source` (`benchmarks/downloads.Dataset`) saying where its
   data lives, whether it is installed and how to install it. No `data_source`
-  means bundled. `install=None` means BenchKit cannot fetch it (PatchEval) and
-  `hint` says what to do.
+  means bundled. `install=None` means BenchKit cannot fetch it and `hint` says
+  what to do; every current suite can fetch its own data, so keep it that way.
+- `patcheval` fetches its frozen release from the `DogukanUrker/PatchEval`
+  Hugging Face dataset into `~/.cache/benchkit/datasets/patcheval/pilot-20`:
+  `dataset.json`, `tasks.jsonl` and only the files `tasks.jsonl` names (never
+  the miner). Paths are checked before anything is written, a `.complete`
+  marker goes last, and the loader still verifies every archive's sha256.
+  `BENCHKIT_PATCHEVAL_DATASET` still overrides it with a local copy.
 - `mmlu` and `mmlu-pro` are `RemoteFile`s: a URL pinned to a commit of this
   repository plus a sha256 and size, cached under `~/.cache/benchkit/datasets`
   (`BENCHKIT_DATASET_CACHE`). The file is verified before it is moved into
