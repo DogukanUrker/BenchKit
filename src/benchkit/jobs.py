@@ -8,7 +8,7 @@ gets). Nothing here talks to a model.
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -170,6 +170,52 @@ class JobSpec:
             return selected
         variants = getattr(benchmark(self.benchmark), "variant_count", 1)
         return selected * variants if isinstance(variants, int) else selected
+
+
+def job_matrix(
+    models: Sequence[str],
+    benchmarks: Sequence[tuple[str, str | None, str | None]],
+    harnesses: Sequence[str],
+    *,
+    repair_attempts: int = 0,
+    perturbation: str | None = None,
+    perturbation_seed: int = 42,
+) -> list[JobSpec]:
+    """Build every model x benchmark x harness job for a run.
+
+    ``benchmarks`` holds ``(key, slice_spec, variant)``. Jobs come out in run
+    order: one model at a time, and with a perturbation each perturbed job
+    right after its clean baseline. The headless runner and the TUI both build
+    their runs here.
+    """
+    jobs: list[JobSpec] = []
+    for model in models:
+        for key, slice_spec, variant in benchmarks:
+            for harness in harnesses:
+                jobs.append(
+                    JobSpec(
+                        model,
+                        key,
+                        slice_spec,
+                        variant=variant,
+                        harness=harness,
+                        repair_attempts=repair_attempts,
+                    )
+                )
+                if perturbation:
+                    jobs.append(
+                        JobSpec(
+                            model,
+                            key,
+                            slice_spec,
+                            variant=variant,
+                            perturbation=perturbation,
+                            perturbation_seed=perturbation_seed,
+                            harness=harness,
+                            repair_attempts=repair_attempts,
+                        )
+                    )
+    return jobs
 
 
 def expand_jobs(jobs: list[JobSpec], client: object) -> list[JobSpec]:

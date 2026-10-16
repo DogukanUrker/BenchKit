@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
 from benchkit.benchmarks.base import Task
@@ -52,6 +53,13 @@ def perturbations_for(benchmark_key: str) -> tuple[str, ...]:
 def supports_perturbation(benchmark_key: str, name: str) -> bool:
     """Return whether a benchmark opts into a named perturbation."""
     return name in perturbations_for(benchmark_key)
+
+
+def unsupported_benchmarks(name: str, keys: Iterable[str]) -> list[str]:
+    """Return the benchmarks in ``keys`` that cannot run a perturbation, once each."""
+    return list(
+        dict.fromkeys(key for key in keys if not supports_perturbation(key, name))
+    )
 
 
 def _task_rng(benchmark_key: str, task_id: str, name: str, seed: int) -> random.Random:

@@ -36,7 +36,8 @@ from benchkit.engine import (
     slice_task_count,
     task_count,
 )
-from benchkit.perturbations import CHOICE_ORDER, perturbations_for
+from benchkit.jobs import job_matrix
+from benchkit.perturbations import CHOICE_ORDER, unsupported_benchmarks
 from benchkit.template_check import TemplateReport, check_template
 from benchkit.tui.formatting import fmt_count, fmt_size
 from benchkit.tui.screens.modals import (
@@ -571,9 +572,7 @@ class SetupScreen(Screen[None]):
             self.query_one("#perturbation-seed", Input).focus()
             return None
         if choice_order:
-            unsupported = [
-                key for key in benches if CHOICE_ORDER not in perturbations_for(key)
-            ]
+            unsupported = unsupported_benchmarks(CHOICE_ORDER, benches)
             if unsupported:
                 self.notify(
                     "Choice-order is unsupported for: " + ", ".join(unsupported),
@@ -605,32 +604,17 @@ class SetupScreen(Screen[None]):
                 )
                 return None
 
-        jobs: list[JobSpec] = []
-        for model in models:
-            for key in benches:
-                for harness in self._harnesses():
-                    jobs.append(
-                        JobSpec(
-                            model,
-                            key,
-                            self._limit_for(key),
-                            harness=harness,
-                            repair_attempts=repair_attempts,
-                        )
-                    )
-                    if choice_order:
-                        assert seed is not None
-                        jobs.append(
-                            JobSpec(
-                                model,
-                                key,
-                                self._limit_for(key),
-                                perturbation=CHOICE_ORDER,
-                                perturbation_seed=seed,
-                                harness=harness,
-                                repair_attempts=repair_attempts,
-                            )
-                        )
+        jobs = job_matrix(
+            models,
+            [(key, self._limit_for(key), None) for key in benches],
+            self._harnesses(),
+            repair_attempts=repair_attempts,
+            **(
+                {"perturbation": CHOICE_ORDER, "perturbation_seed": seed}
+                if choice_order and seed is not None
+                else {}
+            ),
+        )
         try:
             jobs = route_decision_jobs(jobs, self.app.client)
         except ValueError as exc:
@@ -672,9 +656,7 @@ class SetupScreen(Screen[None]):
         benches = [key for key in self.bench_order if key in self.selected_benchmarks]
         choice_order = self._choice_order_enabled()
         unsupported = (
-            [key for key in benches if CHOICE_ORDER not in perturbations_for(key)]
-            if choice_order
-            else []
+            unsupported_benchmarks(CHOICE_ORDER, benches) if choice_order else []
         )
         multiplier = (2 if choice_order else 1) * len(self._harnesses())
         runs = (
