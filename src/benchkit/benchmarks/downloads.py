@@ -42,11 +42,12 @@ def cache_root() -> Path:
     return Path.home() / ".cache" / "benchkit" / "datasets"
 
 
-def fmt_bytes(size: int) -> str:
+def fmt_bytes(size: float) -> str:
+    """Decimal units, matching rich's download progress column."""
     for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
+        if size < 1000 or unit == "GB":
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
-        size /= 1024
+        size /= 1000
     raise AssertionError("unreachable")
 
 

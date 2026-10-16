@@ -216,8 +216,15 @@ def _evalplus_source(dataset: str, summary: str) -> Dataset:
         size=None,
         location=lambda: _evalplus_cache(dataset),
         is_installed=lambda: _evalplus_installed(dataset),
-        install=lambda _progress: _problems(dataset),
+        install=lambda _progress: _quiet_problems(dataset),
     )
+
+
+def _quiet_problems(dataset: str) -> None:
+    # EvalPlus downloads through wget, which draws its own progress bar on
+    # stdout and tears up the CLI's live progress line and the TUI.
+    with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink):
+        _problems(dataset)
 
 
 class _EvalPlusBenchmark:

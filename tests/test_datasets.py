@@ -134,3 +134,8 @@ def test_cli_rejects_unknown_benchmarks(cache):
     with pytest.raises(SystemExit) as exc:
         cli.main(["datasets", "install", "nope"])
     assert exc.value.code == 1
+
+
+def test_sizes_use_the_progress_bars_units():
+    assert downloads.fmt_bytes(512) == "512 B"
+    assert downloads.fmt_bytes(downloads.MMLU_PRO.size) == "10.3 MB"
