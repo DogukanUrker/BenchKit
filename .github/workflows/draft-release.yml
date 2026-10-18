@@ -25,6 +25,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   draft:
@@ -39,6 +40,19 @@ jobs:
         run: |
           if [ -z "$TOKEN" ]; then
             echo "::error::Add a fine-grained token as the RELEASE_PR_TOKEN secret."
+            exit 1
+          fi
+
+      # One release in flight at a time: merge or close the open one first.
+      - name: Check for an open release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+            --json headRefName,url \
+            --jq '.[] | select(.headRefName | startswith("release/v")) | .url')
+          if [ -n "$open" ]; then
+            echo "::error::A release PR is already open: $open"
             exit 1
           fi
 
@@ -91,10 +105,6 @@ jobs:
           git switch -c "$branch"
           git commit -am "Release v$VERSION"
           git push --force origin "$branch"
-          if gh pr view "$branch" --json state --jq .state 2>/dev/null | grep -qx OPEN; then
-            gh pr edit "$branch" --title "Release v$VERSION" --body-file body.md
-          else
-            gh pr create --base main --head "$branch" \
-              --title "Release v$VERSION" --body-file body.md
-          fi
+          gh pr create --base main --head "$branch" \
+            --title "Release v$VERSION" --body-file body.md
           gh pr view "$branch" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
