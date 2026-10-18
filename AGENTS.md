@@ -10,6 +10,8 @@ BenchKit is a Python 3.11 package using a `src/` layout. `src/benchkit/cli.py` p
 - `OLLAMA_HOST=http://localhost:11434 uv run benchkit`: run against an explicit local or remote Ollama endpoint.
 - `uv run benchkit --headless --models MODEL --benchmarks sanity:5 --verbose`: scripted run that prints per-task prompts and responses.
 - `uv run benchkit --list`: print the benchmark registry with task counts.
+- `uv run benchkit config` / `uv run benchkit config path`: show every setting
+  with its origin, and the config files considered.
 - `uv run benchkit datasets` / `uv run benchkit datasets install`: list
   installed and missing datasets, and fetch the missing ones.
 - `uv sync --extra browser && uv run playwright install chromium`: install the
@@ -30,7 +32,9 @@ Streaming, parser, and loop-detection behavior is covered by `tests/`; run it wi
 See `CONTRIBUTING.md` for the tooling walkthrough. Recent commits use short, imperative subjects such as `Add per-task details and prompt/response to report` and `Format code and improve CLI selection`. Follow that pattern and keep each commit focused on one change. PRs should describe user-visible behavior, list touched benchmark or dataset files, include the command used for validation, and attach a terminal or report snippet when CLI output changes.
 
 ## Configuration & Data
-Copy `.env.example` to `.env` and set `OLLAMA_HOST` before local runs. Only the working directory's `.env` is read; never walk up to parent directories, where a file in a shared directory such as `/tmp` could redirect the host and API key. Do not commit `.env`, local caches, or generated `results/` artifacts. Treat bundled dataset files as source data: update benchmark logic and dataset contents together when schema or evaluation behavior changes.
+Copy `.env.example` to `.env` and set `OLLAMA_HOST` before local runs. `config.py` layers the sources, highest first: CLI flags, real environment variables, `--env-file PATH` (mirrored as `BENCHKIT_ENV_FILE`, and replacing `./.env` rather than stacking on it), the working directory's `.env`, the user config `$XDG_CONFIG_HOME/benchkit/.env` (`~/.config` on macOS too), then defaults. Never walk up to parent directories, where a file in a shared directory such as `/tmp` could redirect the host and API key. Files only fill keys nothing above set, and only BenchKit's keys (`BENCHKIT_*`, `EVALPLUS_*`, `OLLAMA_HOST`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`) are applied, so running inside another project never imports its secrets. `benchkit config` lists each setting with its origin and masks `*_API_KEY`-style secrets; `benchkit config path` lists the files considered. Connect's "Save as default" writes host, provider and key to the user config with mode 0600. Add new settings to `config.SETTINGS` so `benchkit config` lists them.
+
+Model-written code never sees BenchKit's environment: `executor.execute_with_feedback` and the forked EvalPlus child run with `executor.sandbox_env` (`PATH`, `LANG`, `HOME` and `TMPDIR` in a temp dir, plus `EVALPLUS_*` for EvalPlus). The import guard is easy to bypass, so do not rely on it to keep API keys away. Do not commit `.env`, local caches, or generated `results/` artifacts. Treat bundled dataset files as source data: update benchmark logic and dataset contents together when schema or evaluation behavior changes.
 
 ## Product & Feature Map
 Keep the public README short and human-oriented. Put implementation guidance,

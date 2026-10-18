@@ -11,6 +11,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, Label, Select, Static
 
+from benchkit import config
 from benchkit.client import DEFAULT_HOST, InferenceClient
 from benchkit.demo import DemoClient
 from benchkit.tui.widgets import Banner
@@ -34,6 +35,7 @@ class ConnectScreen(Screen[None]):
         Binding("ctrl+r", "connect", "Connect"),
         Binding("f5", "connect", "Connect", show=False),
         Binding("f3", "demo", "Demo mode"),
+        Binding("ctrl+s", "save_default", "Save as default"),
         Binding("escape", "app.quit", "Quit", show=False),
     ]
 
@@ -72,6 +74,7 @@ class ConnectScreen(Screen[None]):
                         yield Input(placeholder="300", id="timeout", compact=True)
                 with Horizontal(id="connect-actions"):
                     yield Button("Connect", id="connect", variant="primary")
+                    yield Button("Save as default", id="save-default")
                     yield Button("Quit", id="quit", variant="error")
                 yield Static(HINT, id="connect-status")
         yield Footer()
@@ -111,6 +114,29 @@ class ConnectScreen(Screen[None]):
         self._status(f"Connecting to {host} …", "working")
         self._connect(host.rstrip("/"), str(provider), api_key, timeout)
 
+    def action_save_default(self) -> None:
+        """Write host, provider and key to the user config (~/.config/benchkit)."""
+        values = {
+            "BENCHKIT_HOST": self.query_one("#host", Input).value.strip().rstrip("/"),
+            "BENCHKIT_PROVIDER": str(self.query_one("#provider", Select).value),
+            "BENCHKIT_API_KEY": self.query_one("#api-key", Input).value.strip(),
+        }
+        try:
+            path = config.save_user(values)
+        except OSError as exc:
+            self._status(f"Could not save defaults: {exc}", "error")
+            return
+        message = f"Saved host, provider and key to {path}"
+        if shadowed := config.overridden(list(values)):
+            sources = ", ".join(sorted(set(shadowed.values())))
+            message += (
+                f"\n{', '.join(sorted(shadowed))} still come from {sources}, "
+                "which take precedence here."
+            )
+            self._status(message, "working")
+        else:
+            self._status(message, "ok")
+
     def action_demo(self) -> None:
         client = DemoClient()
         self._status("Demo mode — offline models, no server required.", "ok")
@@ -119,6 +145,8 @@ class ConnectScreen(Screen[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "connect":
             self.action_connect()
+        elif event.button.id == "save-default":
+            self.action_save_default()
         elif event.button.id == "quit":
             self.app.exit()
 

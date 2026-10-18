@@ -6,6 +6,8 @@ import contextlib
 import multiprocessing
 import os
 import platform
+import shutil
+import tempfile
 import textwrap
 from functools import cache, lru_cache
 from pathlib import Path
@@ -14,6 +16,7 @@ from typing import Any
 from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.downloads import Dataset
 from benchkit.benchmarks.utils import strip_think_tags
+from benchkit.executor import sandbox_env
 
 HUMANEVAL_SYSTEM = (
     "Complete the following Python function. "
@@ -43,10 +46,29 @@ def _fork_multiprocessing():
 
     EvalPlus's ``evalplus.eval`` does ``from multiprocessing import Array, Value``
     so those names are bound on that module and must be patched there as well.
+
+    The forked child runs model-written code, so it swaps its inherited
+    environment for a minimal one before running: API keys stay with the
+    parent. ``EVALPLUS_*`` is kept because the child reads its memory limit.
     """
     import evalplus.eval as _ev
 
     fork_ctx = multiprocessing.get_context("fork")
+
+    class _ScrubbedProcess(fork_ctx.Process):
+        def run(self) -> None:
+            # EvalPlus's reliability guard disables shutil.rmtree in the child.
+            rmtree = shutil.rmtree
+            home = tempfile.mkdtemp(prefix="benchkit-evalplus-")
+            env = sandbox_env(home, keep_prefixes=("EVALPLUS_",))
+            os.environ.clear()
+            os.environ.update(env)
+            tempfile.tempdir = None
+            try:
+                super().run()
+            finally:
+                rmtree(home, ignore_errors=True)
+
     mp_originals = (
         multiprocessing.Process,
         multiprocessing.Value,
@@ -54,7 +76,7 @@ def _fork_multiprocessing():
     )
     ev_originals = (_ev.Value, _ev.Array)
     try:
-        multiprocessing.Process = fork_ctx.Process
+        multiprocessing.Process = _ScrubbedProcess
         multiprocessing.Value = fork_ctx.Value
         multiprocessing.Array = fork_ctx.Array
         _ev.Value = fork_ctx.Value

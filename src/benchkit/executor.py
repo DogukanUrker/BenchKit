@@ -1,5 +1,6 @@
 """Sandboxed code execution via subprocess."""
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,33 @@ def _safe(name, *a, **kw):
 
 _b.__import__ = _safe
 """
+
+
+def sandbox_env(home: str, *, keep_prefixes: tuple[str, ...] = ()) -> dict[str, str]:
+    """A minimal environment for running model-written code.
+
+    The import guard is easy to bypass, so the child must not inherit API keys
+    or anything else from BenchKit's own environment. ``HOME`` and the temp dir
+    point at ``home``; ``keep_prefixes`` keeps evaluator knobs such as
+    ``EVALPLUS_``.
+    """
+    env = {
+        "PATH": os.environ.get("PATH") or os.defpath,
+        "HOME": home,
+        "TMPDIR": home,
+        "LANG": os.environ.get("LANG") or "C.UTF-8",
+    }
+    # Windows Python cannot start without these.
+    for name in ("SYSTEMROOT", "COMSPEC"):
+        if name in os.environ:
+            env[name] = os.environ[name]
+    if keep_prefixes:
+        env.update(
+            (key, value)
+            for key, value in os.environ.items()
+            if key.startswith(keep_prefixes)
+        )
+    return env
 
 
 @dataclass(frozen=True)
@@ -68,27 +96,26 @@ def execute_with_feedback(code: str, timeout: int = 10) -> ExecutionResult:
     """Run code and retain only a sanitized failure category."""
     full = SANDBOX_HEADER + "\n" + code
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write(full)
-        path = Path(f.name)
-
-    try:
-        result = subprocess.run(
-            [sys.executable, str(path)],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        if result.returncode == 0:
-            return ExecutionResult(True)
-        return ExecutionResult(False, _failure_feedback(result.stderr or ""))
-    except subprocess.TimeoutExpired:
-        return ExecutionResult(
-            False,
-            f"The submitted Python exceeded the {timeout}s verifier timeout.",
-        )
-    finally:
-        path.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory(prefix="benchkit-exec-") as home:
+        path = Path(home) / "solution.py"
+        path.write_text(full)
+        try:
+            result = subprocess.run(
+                [sys.executable, str(path)],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=home,
+                env=sandbox_env(home),
+            )
+        except subprocess.TimeoutExpired:
+            return ExecutionResult(
+                False,
+                f"The submitted Python exceeded the {timeout}s verifier timeout.",
+            )
+    if result.returncode == 0:
+        return ExecutionResult(True)
+    return ExecutionResult(False, _failure_feedback(result.stderr or ""))
 
 
 def execute(code: str, timeout: int = 10) -> bool:
