@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -86,6 +87,17 @@ def _dataset(root: Path, *, validated: bool = True) -> dict:
     )
     (root / "tasks.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
     return record
+
+
+class FailingDownloadEnvironment:
+    def __init__(self, message: str) -> None:
+        self.message = message
+        self.workdir = "/workspace/repo"
+        self.image = SimpleNamespace()
+        self.owner_id = "owner"
+
+    def download(self, _source: str, _destination: Path) -> None:
+        raise SandboxError(self.message)
 
 
 class DownloadEnvironment:
@@ -314,6 +326,132 @@ class PatchEvalTests(unittest.TestCase):
         )
         self.assertEqual(result.details["f2p_exit_code"], 1)
         self.assertEqual(result.details["regression_exit_code"], 0)
+
+    def test_deleted_workspace_is_a_scored_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            benchmark = PatchEval(root)
+            task = benchmark.load_tasks()[0]
+            messages = (
+                "Docker cp failed: Could not find the file /workspace/repo/. "
+                "in container benchkit-pi-agent",
+                "Docker cp failed: Error response from daemon: Could not find "
+                "the file /workspace/repo/. in container benchkit-pi-agent",
+            )
+            for message in messages:
+                with self.subTest(message=message):
+                    result = benchmark.verify_workspace(
+                        task, FailingDownloadEnvironment(message)
+                    )
+                    self.assertEqual(result.error, "")
+                    self.assertEqual(result.score, 0.0)
+                    self.assertIn("missing", result.feedback)
+                    self.assertEqual(
+                        result.details["submission_rejected"],
+                        "workspace missing at grading time",
+                    )
+
+    def test_emptied_workspace_is_a_scored_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            benchmark = PatchEval(root)
+            task = benchmark.load_tasks()[0]
+            candidate = root / "candidate"
+            candidate.mkdir()
+            environment = DownloadEnvironment(candidate)
+            environment.image = SimpleNamespace()
+            environment.owner_id = "owner"
+
+            result = benchmark.verify_workspace(task, environment)
+
+        self.assertEqual(result.error, "")
+        self.assertEqual(result.score, 0.0)
+        self.assertEqual(
+            result.details["submission_rejected"], "workspace empty at grading time"
+        )
+
+    def test_disk_full_download_stays_a_harness_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            benchmark = PatchEval(root)
+            task = benchmark.load_tasks()[0]
+            environment = FailingDownloadEnvironment(
+                "Docker cp failed: Error setting up pivot dir: mkdir "
+                "/var/lib/docker/tmp: no space left on device"
+            )
+
+            result = benchmark.verify_workspace(task, environment)
+
+        self.assertIn("grader infrastructure failed", result.error)
+        self.assertIn("no space left on device", result.error)
+
+    def _grade_with_setup(self, setup: SimpleNamespace):
+        """Verify a submission whose grader setup step answers with ``setup``."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            benchmark = PatchEval(root)
+            task = benchmark.load_tasks()[0]
+            spec = replace(
+                task.metadata["spec"], setup_command=("uv", "pip", "install", "-e", ".")
+            )
+            task.metadata["spec"] = spec
+            image = LatestPiImage(
+                docker="docker", image="benchkit-pi-patcheval:test", version="0.84.2"
+            )
+            environment = SimpleNamespace(
+                image=image, owner_id="owner", workdir="/workspace/repo"
+            )
+
+            def run(args, **_kwargs):
+                if args[-5:] == list(spec.setup_command):
+                    return setup
+                return _docker_result()
+
+            with (
+                patch(
+                    "benchkit.benchmarks.patcheval._trusted_patch",
+                    return_value=("diff", ["module.py"], []),
+                ),
+                patch("benchkit.benchmarks.patcheval._run", side_effect=run),
+            ):
+                return benchmark.verify_workspace(task, environment)
+
+    def test_unbuildable_submission_is_a_scored_failure(self) -> None:
+        result = self._grade_with_setup(
+            SimpleNamespace(
+                stdout="",
+                stderr="Failed to build pygments @ file:///workspace/repo",
+                returncode=1,
+            )
+        )
+
+        self.assertEqual(result.error, "")
+        self.assertEqual(result.score, 0.0)
+        self.assertEqual(
+            result.details["submission_rejected"],
+            "submitted tree fails to build or install",
+        )
+        self.assertIn("Failed to build", result.details["submission_rejected_output"])
+        self.assertNotIn("Failed to build", result.feedback)
+
+    def test_daemon_failure_during_setup_stays_a_harness_error(self) -> None:
+        for answer in (
+            SimpleNamespace(
+                stdout="",
+                stderr="Error response from daemon: container is not running",
+                returncode=1,
+            ),
+            SimpleNamespace(
+                stdout="", stderr="OCI runtime exec failed", returncode=126
+            ),
+        ):
+            with self.subTest(answer=answer.stderr):
+                result = self._grade_with_setup(answer)
+                self.assertIn("grader infrastructure failed", result.error)
 
     def test_workspace_setup_exposes_source_but_not_hidden_patch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
