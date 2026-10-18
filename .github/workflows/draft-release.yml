@@ -13,12 +13,8 @@ name: Draft release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Exact version, e.g. 0.2.0 (leave empty to bump)"
-        required: false
-        default: ""
       bump:
-        description: "Bump used when no version is given"
+        description: "Version bump"
         type: choice
         options: [patch, minor, major]
         default: patch
@@ -57,21 +53,10 @@ jobs:
       - name: Set the version
         id: version
         env:
-          REQUESTED: ${{ inputs.version }}
           BUMP: ${{ inputs.bump }}
         run: |
-          current=$(uv version --short)
-          if [ -n "$REQUESTED" ]; then
-            uv version "${REQUESTED#v}" --frozen
-          else
-            uv version --bump "$BUMP" --frozen
-          fi
+          uv version --bump "$BUMP" --frozen
           version=$(uv version --short)
-          newest=$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)
-          if [ "$version" = "$current" ] || [ "$newest" != "$version" ]; then
-            echo "::error::$version is not newer than $current."
-            exit 1
-          fi
           if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
             echo "::error::v$version is already tagged."
             exit 1
