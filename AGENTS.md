@@ -99,6 +99,13 @@ tables in the README.
   (`headline: "first_attempt"`), and the repaired numbers move to
   `repaired_score` / `repaired_passed` beside `repair_delta_pp`. Code and
   open-answer suites keep the repaired score as their headline.
+- PatchEval blames the submission, not the grader, when the agent's own work
+  makes grading impossible: a workspace missing or empty at collection time, an
+  unusable or oversized candidate, a patch that does not apply, or a tree whose
+  setup step fails once the patch is applied. Those are scored failures
+  (`details["submission_rejected"]`). Only host and daemon faults (no space
+  left, daemon unreachable, `docker exec` exits 125-127, grader timeouts) stay
+  harness errors, so deleting the repo can never shrink the denominator.
 - `aider-polyglot` is Pi-only and uses pinned task content and toolchains. It
   measures the stock Pi protocol on Aider tasks, not Aider's edit formats.
 - `--perturbation choice-order` runs supported MCQ tasks clean and with a

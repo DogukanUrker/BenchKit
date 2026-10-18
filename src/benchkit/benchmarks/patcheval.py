@@ -49,6 +49,34 @@ _GENERIC_REPAIR = (
     "working on the fix. Use the repository and any tests you can run to validate "
     "your next attempt."
 )
+_MISSING_WORKSPACE = (
+    "The repository at the working directory was missing or empty when your "
+    "changes were collected. Restore the repository and continue working on the fix."
+)
+_UNUSABLE_WORKSPACE = (
+    "Your changes could not be collected from the repository. Keep the "
+    "repository a reasonable size, made of ordinary files, and continue working "
+    "on the fix."
+)
+_UNBUILDABLE_SUBMISSION = (
+    "With your changes applied the project no longer builds or installs. Make "
+    "sure it installs cleanly, then continue working on the fix."
+)
+# Docker reports trouble with the host or the daemon in these words. Only a
+# failure that matches none of them may be blamed on the agent's submission.
+_INFRASTRUCTURE_MARKERS = (
+    "no space left on device",
+    "cannot connect to the docker daemon",
+    "is the docker daemon running",
+    "error response from daemon",
+    "oci runtime",
+    "disk quota exceeded",
+    "too many open files",
+    "cannot allocate memory",
+)
+# docker exec exits 125-127 when the daemon or the runtime, not the command,
+# failed, and the grader image is the task's, never the agent's.
+_DOCKER_EXIT_CODES = frozenset({125, 126, 127})
 _MAX_PATCH_BYTES = 5 * 1024 * 1024
 _MAX_CANDIDATE_FILES = 50_000
 _MAX_CANDIDATE_BYTES = 512 * 1024 * 1024
@@ -87,6 +115,25 @@ class PatchEvalSpec:
     protected_globs: tuple[str, ...]
     ignored_globs: tuple[str, ...]
     timeout_s: int
+
+
+class SubmissionRejected(Exception):
+    """The agent's workspace or patch, not the grader, made grading impossible.
+
+    It is scored as an ordinary failure, unlike the grader's own errors, which
+    are harness errors and leave the score's denominator.
+    """
+
+    def __init__(self, reason: str, feedback: str, detail: str = "") -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.feedback = feedback
+        self.detail = detail
+
+
+def _is_infrastructure(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in _INFRASTRUCTURE_MARKERS)
 
 
 def _sha256(path: Path) -> str:
@@ -419,7 +466,26 @@ def _trusted_patch(
         worktree.mkdir()
         candidate.mkdir()
         _safe_extract(spec.source_archive, worktree)
-        environment.download(f"{environment.workdir}/.", candidate)
+        try:
+            environment.download(f"{environment.workdir}/.", candidate)
+        except SandboxError as exc:
+            # docker cp names a missing source path this way (older clients
+            # say "No such container:path"), often behind "Error response from
+            # daemon:". A missing container or a full disk reads differently
+            # and stays a grader fault.
+            message = str(exc).lower()
+            if (
+                "could not find the file" in message
+                or "no such container:path" in message
+            ) and "no space left on device" not in message:
+                raise SubmissionRejected(
+                    "workspace missing at grading time", _MISSING_WORKSPACE, str(exc)
+                ) from exc
+            raise
+        if not any(candidate.iterdir()):
+            raise SubmissionRejected(
+                "workspace empty at grading time", _MISSING_WORKSPACE
+            )
 
         _git(worktree, ["init", "-q"])
         _git(worktree, ["add", "-A"])
@@ -440,7 +506,10 @@ def _trusted_patch(
         for child in worktree.iterdir():
             if child.name != ".git":
                 _remove_entry(child)
-        _copy_candidate(candidate, worktree)
+        try:
+            _copy_candidate(candidate, worktree)
+        except ValueError as exc:
+            raise SubmissionRejected(str(exc), _UNUSABLE_WORKSPACE) from exc
         _git(worktree, ["add", "--intent-to-add", "--", "."])
         # -z keeps paths verbatim. Git otherwise quotes non-ASCII, quote,
         # backslash, and control characters, and a quoted path matches neither
@@ -467,7 +536,9 @@ def _trusted_patch(
             ["diff", "--binary", "--no-renames", "HEAD", "--", *included],
         ).stdout
         if len(patch.encode()) > _MAX_PATCH_BYTES:
-            raise ValueError("candidate patch exceeds the 5 MiB limit")
+            raise SubmissionRejected(
+                "candidate patch exceeds the 5 MiB limit", _UNUSABLE_WORKSPACE
+            )
         return patch, changed, excluded
 
 
@@ -491,6 +562,31 @@ def _docker_exec(
         timeout=timeout,
         check=check,
     )
+
+
+def _submission_step(
+    docker: str,
+    container: str,
+    command: list[str],
+    *,
+    reason: str,
+    timeout: float = 60,
+) -> None:
+    """Run a step whose failure is the submission's unless Docker says otherwise."""
+    completed = _docker_exec(
+        docker,
+        container,
+        command,
+        workdir="/workspace/repo",
+        timeout=timeout,
+        check=False,
+    )
+    if not completed.returncode:
+        return
+    detail = (completed.stderr or completed.stdout or "").strip()[-4000:]
+    if completed.returncode in _DOCKER_EXIT_CODES or _is_infrastructure(detail):
+        raise SandboxError(f"Docker exec failed: {detail or 'unknown Docker error'}")
+    raise SubmissionRejected(reason, _UNBUILDABLE_SUBMISSION, detail)
 
 
 def _grade_once(
@@ -568,11 +664,11 @@ def _grade_once(
                 ],
             )
             if patch:
-                _docker_exec(
+                _submission_step(
                     docker,
                     container,
                     ["git", "apply", "--binary", "/tmp/submission.patch"],
-                    workdir="/workspace/repo",
+                    reason="submitted patch does not apply to the pristine source",
                 )
             if hidden_tests:
                 _docker_exec(
@@ -582,11 +678,13 @@ def _grade_once(
                     workdir="/workspace/repo",
                 )
             if spec.setup_command:
-                _docker_exec(
+                # The miner validated this step on the pristine tree, so once the
+                # submission is applied a failure here is the submission's.
+                _submission_step(
                     docker,
                     container,
                     list(spec.setup_command),
-                    workdir="/workspace/repo",
+                    reason="submitted tree fails to build or install",
                     timeout=spec.timeout_s + 30,
                 )
             completed = _docker_exec(
@@ -784,8 +882,28 @@ class PatchEval:
                     hidden_tests=False,
                     owner_id=environment.owner_id,
                 )
-                f2p = f2p_grade.result()
-                regression = regression_grade.result()
+                # A grader fault on either side wins over a rejected
+                # submission, so both are collected before blaming the agent.
+                grades: list[dict] = []
+                rejected: SubmissionRejected | None = None
+                for future in (f2p_grade, regression_grade):
+                    try:
+                        grades.append(future.result())
+                    except SubmissionRejected as exc:
+                        rejected = rejected or exc
+                if rejected is not None:
+                    raise rejected
+                f2p, regression = grades
+        except SubmissionRejected as exc:
+            return EvaluationResult(
+                0.0,
+                feedback=exc.feedback,
+                details={
+                    "repository": spec.repository,
+                    "submission_rejected": exc.reason,
+                    "submission_rejected_output": exc.detail[-8000:],
+                },
+            )
         except (OSError, RuntimeError, ValueError, SandboxError) as exc:
             return EvaluationResult(
                 0.0,
