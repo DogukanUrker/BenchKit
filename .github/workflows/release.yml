@@ -101,19 +101,32 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read
     steps:
       - uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
 
+      # A release PR from draft-release.yml carries the notes between markers in
+      # its body, possibly edited by hand; anything else gets generated notes.
       - name: Tag and release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
+          body=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '.[0].body // ""' || true)
+          printf '%s\n' "$body" \
+            | sed -n '/<!-- release-notes:start -->/,/<!-- release-notes:end -->/{//!p}' \
+            > notes.md
+          if [ -s notes.md ]; then
+            notes=(--notes-file notes.md)
+          else
+            notes=(--generate-notes)
+          fi
           gh release create "v$VERSION" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "v$VERSION" \
-            --generate-notes
+            "${notes[@]}"
