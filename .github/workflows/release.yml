@@ -1,0 +1,119 @@
+name: Release
+
+# Publishes to PyPI and cuts a GitHub release whenever main carries a version
+# that has no tag yet. Merges that leave `version` in pyproject.toml alone are
+# no-ops, so several PRs can land before one deliberate bump ships them all.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check for a new version
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.version.outputs.name }}
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Compare pyproject version with existing tags
+        id: version
+        run: |
+          read -r name version <<< "$(uv version)"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already tagged, nothing to release"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$version is new, releasing"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build package
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Check that the wheel imports
+        run: |
+          uv run --no-project --isolated --with dist/*.whl \
+            python -c "import benchkit, benchkit.cli"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  pypi:
+    name: Publish to PyPI
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    # Trusted publishing: PyPI accepts the OIDC token from this job, so no API
+    # token is stored in the repository. Configure the publisher on PyPI with
+    # workflow `release.yml` and environment `pypi`.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/${{ needs.check.outputs.name }}/${{ needs.check.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      # --check-url skips files PyPI already has, so a re-run after a failed
+      # GitHub release step does not trip over the upload that succeeded.
+      - name: Publish
+        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple/
+
+  github-release:
+    name: Create GitHub release
+    needs: [check, pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          gh release create "v$VERSION" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --generate-notes

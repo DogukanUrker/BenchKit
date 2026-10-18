@@ -957,7 +957,9 @@ def _perf(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    load_dotenv()
+    # Only the working directory's .env: walking up to parent directories would
+    # let a file in a shared parent such as /tmp redirect the host and API key.
+    load_dotenv(".env")
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     if args.list:

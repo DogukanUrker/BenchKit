@@ -39,12 +39,20 @@ servers such as llama.cpp, llama-swap, vLLM, and LM Studio, plus native Ollama.
 BenchKit requires Python 3.11 or newer and [uv](https://docs.astral.sh/uv/).
 
 ```bash
+uvx benchkit-cli                # try it without installing
+uv tool install benchkit-cli    # or install the `benchkit` command
+```
+
+From a clone of this repository:
+
+```bash
 uv sync
 cp .env.example .env
 uv run benchkit
 ```
 
-Set your server in `.env`, or enter it on the Connect screen:
+Set your server in a `.env` in the directory you run `benchkit` from (parent
+directories are not searched), or enter it on the Connect screen:
 
 ```env
 BENCHKIT_PROVIDER=openai
