@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from rich import box
 from rich.console import Console
 from rich.table import Table
@@ -957,7 +957,9 @@ def _perf(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    load_dotenv()
+    # Search from the working directory: the default starts beside this file,
+    # which for an installed copy is site-packages, not the user's project.
+    load_dotenv(find_dotenv(usecwd=True))
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     if args.list:

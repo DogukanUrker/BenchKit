@@ -1,5 +1,5 @@
 [project]
-name = "benchkit"
+name = "benchkit-cli"
 version = "0.1.0"
 description = "Benchmark your local LLMs with real eval suites"
 readme = "README.md"
@@ -21,6 +21,8 @@ browser = ["playwright>=1.63.0"]
 
 [project.scripts]
 benchkit = "benchkit.cli:main"
+# Same entry point under the distribution name, so `uvx benchkit-cli` works.
+benchkit-cli = "benchkit.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=9.1.1", "pre-commit>=4.6.2", "ruff>=0.16.9"]
