@@ -30,7 +30,7 @@ Streaming, parser, and loop-detection behavior is covered by `tests/`; run it wi
 See `CONTRIBUTING.md` for the tooling walkthrough. Recent commits use short, imperative subjects such as `Add per-task details and prompt/response to report` and `Format code and improve CLI selection`. Follow that pattern and keep each commit focused on one change. PRs should describe user-visible behavior, list touched benchmark or dataset files, include the command used for validation, and attach a terminal or report snippet when CLI output changes.
 
 ## Configuration & Data
-Copy `.env.example` to `.env` and set `OLLAMA_HOST` before local runs. Do not commit `.env`, local caches, or generated `results/` artifacts. Treat bundled dataset files as source data: update benchmark logic and dataset contents together when schema or evaluation behavior changes.
+Copy `.env.example` to `.env` and set `OLLAMA_HOST` before local runs. Only the working directory's `.env` is read; never walk up to parent directories, where a file in a shared directory such as `/tmp` could redirect the host and API key. Do not commit `.env`, local caches, or generated `results/` artifacts. Treat bundled dataset files as source data: update benchmark logic and dataset contents together when schema or evaluation behavior changes.
 
 ## Product & Feature Map
 Keep the public README short and human-oriented. Put implementation guidance,

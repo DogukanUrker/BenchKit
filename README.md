@@ -51,7 +51,8 @@ cp .env.example .env
 uv run benchkit
 ```
 
-Set your server in `.env`, or enter it on the Connect screen:
+Set your server in a `.env` in the directory you run `benchkit` from (parent
+directories are not searched), or enter it on the Connect screen:
 
 ```env
 BENCHKIT_PROVIDER=openai
