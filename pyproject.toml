@@ -1,6 +1,6 @@
 [project]
 name = "benchkit-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "Benchmark your local LLMs with real eval suites"
 readme = "README.md"
 requires-python = ">=3.11"
