@@ -51,8 +51,10 @@ cp .env.example .env
 uv run benchkit
 ```
 
-Set your server in a `.env` in the directory you run `benchkit` from (parent
-directories are not searched), or enter it on the Connect screen:
+Set your server in `~/.config/benchkit/.env` to use it from any folder, in a
+`.env` in the directory you run `benchkit` from (parent directories are not
+searched), or on the Connect screen, where "Save as default" writes the user
+config for you:
 
 ```env
 BENCHKIT_PROVIDER=openai
@@ -66,6 +68,8 @@ For Ollama:
 BENCHKIT_PROVIDER=ollama
 OLLAMA_HOST=http://localhost:11434
 ```
+
+`benchkit config` shows every setting and where it came from.
 
 No inference server available? Explore the complete UI offline:
 

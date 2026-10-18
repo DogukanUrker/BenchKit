@@ -9,13 +9,13 @@ from __future__ import annotations
 import argparse
 import sys
 
-from dotenv import load_dotenv
 from rich import box
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from benchkit import catalog
+from benchkit import catalog, config
 from benchkit.benchmarks import DESCRIPTIONS, REGISTRY
 from benchkit.client import InferenceClient
 from benchkit.engine import (
@@ -60,11 +60,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=("perf", "history", "render-check", "datasets"),
+        choices=("perf", "history", "render-check", "datasets", "config"),
         help=(
             "Run a performance profile, browse historical results, check "
-            "that headless rendering works on this machine, or list and "
-            "install benchmark datasets"
+            "that headless rendering works on this machine, list and "
+            "install benchmark datasets, or show the effective configuration"
         ),
     )
     parser.add_argument(
@@ -73,7 +73,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="MODEL",
         help=(
             "Model name for `benchkit perf MODEL`; `install` for "
-            "`benchkit datasets install [BENCHMARK ...]`"
+            "`benchkit datasets install [BENCHMARK ...]`; `path` for "
+            "`benchkit config path`"
         ),
     )
     parser.add_argument(
@@ -83,6 +84,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Datasets: benchmarks to install (default: every missing one)",
     )
     parser.add_argument("--host", help="Inference host, overrides BENCHKIT_HOST")
+    parser.add_argument(
+        "--env-file",
+        metavar="PATH",
+        help=(
+            "Read settings from PATH instead of ./.env (also BENCHKIT_ENV_FILE). "
+            "Precedence: flags > environment > --env-file or ./.env > "
+            "~/.config/benchkit/.env ($XDG_CONFIG_HOME) > defaults"
+        ),
+    )
     parser.add_argument(
         "--demo",
         action="store_true",
@@ -956,11 +966,40 @@ def _perf(args: argparse.Namespace) -> None:
     )
 
 
+def _config(args: argparse.Namespace) -> None:
+    if args.perf_model == "path":
+        for entry in config.loaded().files:
+            if entry.skipped:
+                state = f"[dim]{entry.skipped}[/dim]"
+            elif entry.exists:
+                state = "[green]found[/green]"
+            else:
+                state = "[dim]missing[/dim]"
+            console.print(f"{entry.role:<18} {escape(str(entry.path))}  {state}")
+        return
+    if args.perf_model is not None:
+        console.print(
+            f"[red]Unknown config action {escape(repr(args.perf_model))}.[/red]"
+        )
+        sys.exit(1)
+
+    table = Table(box=box.SIMPLE_HEAD, header_style="bold")
+    table.add_column("Setting")
+    table.add_column("Value")
+    table.add_column("Origin", style="dim")
+    for key, value, origin in config.resolve({"BENCHKIT_HOST": args.host}):
+        shown = Text(value) if value else Text("-", style="dim")
+        table.add_row(key, shown, Text(origin))
+    console.print(table)
+
+
 def main(argv: list[str] | None = None) -> None:
-    # Only the working directory's .env: walking up to parent directories would
-    # let a file in a shared parent such as /tmp redirect the host and API key.
-    load_dotenv(".env")
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        config.load(args.env_file)
+    except config.ConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(2)
 
     if args.list:
         _list_benchmarks()
@@ -972,6 +1011,10 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "datasets":
         _datasets(args)
+        return
+
+    if args.command == "config":
+        _config(args)
         return
 
     if args.command == "perf":
