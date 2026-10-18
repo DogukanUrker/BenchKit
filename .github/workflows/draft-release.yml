@@ -1,0 +1,115 @@
+name: Draft release
+
+# Run from the Actions tab. Bumps `version` in pyproject.toml on a
+# `release/v<version>` branch and opens a PR whose body carries the release
+# notes. Merging that PR is what ships: release.yml sees the untagged version,
+# publishes it and uses the notes from the PR body.
+#
+# Needs a fine-grained token in the RELEASE_PR_TOKEN secret (this repository
+# only; Contents and Pull requests read/write). The PR is opened as the token's
+# owner, and unlike GITHUB_TOKEN it triggers the PR's CI, which the ruleset's
+# required checks wait for.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact version, e.g. 0.2.0 (leave empty to bump)"
+        required: false
+        default: ""
+      bump:
+        description: "Bump used when no version is given"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+concurrency:
+  group: draft-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  draft:
+    name: Open release PR
+    # Only the repository owner may cut a release, whoever else has write access.
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the token
+        env:
+          TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Add a fine-grained token as the RELEASE_PR_TOKEN secret."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          token: ${{ secrets.RELEASE_PR_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set the version
+        id: version
+        env:
+          REQUESTED: ${{ inputs.version }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          current=$(uv version --short)
+          if [ -n "$REQUESTED" ]; then
+            uv version "${REQUESTED#v}" --frozen
+          else
+            uv version --bump "$BUMP" --frozen
+          fi
+          version=$(uv version --short)
+          newest=$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)
+          if [ "$version" = "$current" ] || [ "$newest" != "$version" ]; then
+            echo "::error::$version is not newer than $current."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            echo "::error::v$version is already tagged."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="v$VERSION" -f target_commitish=main \
+            --jq .body > notes.md
+          {
+            echo "Merging this releases **v$VERSION** to PyPI and GitHub."
+            echo "Edit the notes between the markers before merging; the release uses them as written."
+            echo
+            echo "<!-- release-notes:start -->"
+            cat notes.md
+            echo "<!-- release-notes:end -->"
+          } > body.md
+
+      - name: Push the branch and open the PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          branch="release/v$VERSION"
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "${GITHUB_ACTOR_ID}+${GITHUB_ACTOR}@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -am "Release v$VERSION"
+          git push --force origin "$branch"
+          if gh pr view "$branch" --json state --jq .state 2>/dev/null | grep -qx OPEN; then
+            gh pr edit "$branch" --title "Release v$VERSION" --body-file body.md
+          else
+            gh pr create --base main --head "$branch" \
+              --title "Release v$VERSION" --body-file body.md
+          fi
+          gh pr view "$branch" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
