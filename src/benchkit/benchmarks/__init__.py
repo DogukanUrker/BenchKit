@@ -6,7 +6,7 @@ from benchkit.benchmarks.banking77 import Banking77
 from benchkit.benchmarks.boolq import BoolQ
 from benchkit.benchmarks.chartqa import ChartQA
 from benchkit.benchmarks.code_verifier import CodeVerifier
-from benchkit.benchmarks.evalplus import HumanEvalPlus, MBPPPlus
+from benchkit.benchmarks.evalplus import HumanEvalPlus, HumanEvalPlusTR, MBPPPlus
 from benchkit.benchmarks.git_surgery import GitSurgery
 from benchkit.benchmarks.gpqa import GPQA
 from benchkit.benchmarks.gsm8k import GSM8K
@@ -41,6 +41,7 @@ REGISTRY: dict[str, type] = {
     "treejs-arena": TreeJSArena,
     "humaneval": HumanEval,
     "humaneval-plus": HumanEvalPlus,
+    "humaneval-plus-tr": HumanEvalPlusTR,
     "mbpp": MBPP,
     "mbpp-plus": MBPPPlus,
     "gsm8k": GSM8K,
@@ -78,6 +79,7 @@ DESCRIPTIONS: dict[str, str] = {
     "sanity": "25 curated checks across code, math, instructions, science, and commonsense",
     "humaneval": "Python function completions with the original unit tests",
     "humaneval-plus": "HumanEval with 122k+ tougher EvalPlus test inputs",
+    "humaneval-plus-tr": "HumanEval+ fully translated to Turkish, names included",
     "mbpp": "short Python functions from natural-language specifications",
     "mbpp-plus": "sanitized MBPP tasks with 39k+ EvalPlus test inputs",
     "gsm8k": "multi-step grade-school math problems with exact numeric answers",
