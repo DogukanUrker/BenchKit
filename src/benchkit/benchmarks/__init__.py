@@ -6,6 +6,12 @@ from benchkit.benchmarks.banking77 import Banking77
 from benchkit.benchmarks.boolq import BoolQ
 from benchkit.benchmarks.chartqa import ChartQA
 from benchkit.benchmarks.code_verifier import CodeVerifier
+from benchkit.benchmarks.cruxeval import (
+    CRUXEvalInput,
+    CRUXEvalInputCoT,
+    CRUXEvalOutput,
+    CRUXEvalOutputCoT,
+)
 from benchkit.benchmarks.evalplus import HumanEvalPlus, HumanEvalPlusTR, MBPPPlus
 from benchkit.benchmarks.git_surgery import GitSurgery
 from benchkit.benchmarks.gpqa import GPQA
@@ -44,6 +50,10 @@ REGISTRY: dict[str, type] = {
     "humaneval-plus-tr": HumanEvalPlusTR,
     "mbpp": MBPP,
     "mbpp-plus": MBPPPlus,
+    "cruxeval-o": CRUXEvalOutput,
+    "cruxeval-i": CRUXEvalInput,
+    "cruxeval-o-cot": CRUXEvalOutputCoT,
+    "cruxeval-i-cot": CRUXEvalInputCoT,
     "gsm8k": GSM8K,
     "ifeval": IFEval,
     "ruler": RULER,
@@ -82,6 +92,10 @@ DESCRIPTIONS: dict[str, str] = {
     "humaneval-plus-tr": "HumanEval+ fully translated to Turkish, names included",
     "mbpp": "short Python functions from natural-language specifications",
     "mbpp-plus": "sanitized MBPP tasks with 39k+ EvalPlus test inputs",
+    "cruxeval-o": "predict what a short Python function returns for a given input",
+    "cruxeval-i": "find an input that makes a short Python function return a given output",
+    "cruxeval-o-cot": "CRUXEval output prediction with the step-by-step prompt",
+    "cruxeval-i-cot": "CRUXEval input prediction with the step-by-step prompt",
     "gsm8k": "multi-step grade-school math problems with exact numeric answers",
     "ifeval": "prompts with code-checkable instruction-following constraints",
     "ruler": "practical long-context retrieval across all 13 RULER task families",

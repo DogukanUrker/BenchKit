@@ -92,8 +92,14 @@ def _failure_feedback(stderr: str) -> str:
     return "The submitted Python exited unsuccessfully during verification."
 
 
-def execute_with_feedback(code: str, timeout: int = 10) -> ExecutionResult:
-    """Run code and retain only a sanitized failure category."""
+def execute_with_feedback(
+    code: str, timeout: int = 10, *, sentinel: str | None = None
+) -> ExecutionResult:
+    """Run code and retain only a sanitized failure category.
+
+    With ``sentinel``, a clean exit passes only if stdout carries it, so code
+    that exits early with status 0 (``os._exit(0)``) cannot fake a pass.
+    """
     full = SANDBOX_HEADER + "\n" + code
 
     with tempfile.TemporaryDirectory(prefix="benchkit-exec-") as home:
@@ -114,6 +120,10 @@ def execute_with_feedback(code: str, timeout: int = 10) -> ExecutionResult:
                 f"The submitted Python exceeded the {timeout}s verifier timeout.",
             )
     if result.returncode == 0:
+        if sentinel is not None and sentinel not in result.stdout:
+            return ExecutionResult(
+                False, "The submitted Python exited before verification finished."
+            )
         return ExecutionResult(True)
     return ExecutionResult(False, _failure_feedback(result.stderr or ""))
 
