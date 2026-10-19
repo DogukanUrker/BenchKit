@@ -79,6 +79,20 @@ them evenly. Regenerate both with `uv run python scripts/build_banking77.py`.
   Encoders" (2020), <https://arxiv.org/abs/2003.04807>
 - Dataset license: [Creative Commons Attribution 4.0 International][cc-by-4.0]
 
+## CRUXEval
+
+`cruxeval.jsonl` is a transformed copy of the 800 functions in CRUXEval, each
+with one input and the output running the function produces. Only the schema
+changed - `id` became a namespaced `task_id` and `code` became `function`.
+Regenerate it with `uv run python scripts/build_cruxeval.py`, which pins the
+upstream commit. The prompts in `benchmarks/cruxeval.py` are the upstream
+direct and chain-of-thought prompts.
+
+- Source: <https://github.com/facebookresearch/cruxeval>
+- Paper: Gu et al., "CRUXEval: A Benchmark for Code Reasoning, Understanding
+  and Execution" (2024), <https://arxiv.org/abs/2401.03065>
+- Dataset license: MIT
+
 ## OpenBookQA
 
 `openbookqa.jsonl` is a transformed copy of the 500-question OpenBookQA test

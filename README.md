@@ -121,6 +121,8 @@ uv run benchkit --help
 | HumanEval+ TR | `humaneval-plus-tr` | 164 | HumanEval+ fully translated to Turkish, function and variable names included |
 | MBPP | `mbpp` | 500 | Short Python programming tasks |
 | MBPP+ | `mbpp-plus` | 378 | MBPP with expanded EvalPlus tests |
+| CRUXEval-O | `cruxeval-o` | 800 | Predict what a short Python function returns (`-cot` for the step-by-step prompt) |
+| CRUXEval-I | `cruxeval-i` | 800 | Find an input that produces a given output, checked by running it (`-cot` too) |
 | GSM8K | `gsm8k` | 1,319 | Multi-step grade-school math |
 | IFEval | `ifeval` | 541 | Verifiable instruction following |
 | RULER | `ruler` | 39 × 6 | Practical long-context retrieval from 4K to 128K |
