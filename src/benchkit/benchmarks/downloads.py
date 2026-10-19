@@ -164,3 +164,14 @@ MMLU_PRO = RemoteFile(
     sha256="92ec532d9e2bae342ec7256005c20b6e5defbed76504280df775fb77068f077e",
     size=10_260_787,
 )
+
+# Pinned to a dataset commit on the Hub; the sha256 covers the exact bytes.
+HUMANEVAL_PLUS_TR = RemoteFile(
+    name="humanevalplus_tr.jsonl",
+    url=(
+        "https://huggingface.co/datasets/DogukanUrker/HumanEvalPlus-TR/resolve/"
+        "e424171b8934581819fcdeddace2af28a664966f/humanevalplus_tr.jsonl"
+    ),
+    sha256="072172a4d7934b8ce27d8ad0c83b139b80296876bd2f8a8afad1476bdaa97955",
+    size=7_635_249,
+)

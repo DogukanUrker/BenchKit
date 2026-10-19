@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import multiprocessing
 import os
 import platform
@@ -12,13 +13,19 @@ from pathlib import Path
 from typing import Any
 
 from benchkit.benchmarks.base import Task
-from benchkit.benchmarks.downloads import Dataset
+from benchkit.benchmarks.downloads import HUMANEVAL_PLUS_TR, Dataset
 from benchkit.benchmarks.utils import strip_think_tags
 
 HUMANEVAL_SYSTEM = (
     "Complete the following Python function. "
     "Output ONLY the function body. "
     "No markdown fences, no explanation, no examples."
+)
+# Full Turkish translation, ASCII only like the dataset itself.
+HUMANEVAL_TR_SYSTEM = (
+    "Asagidaki Python fonksiyonunu tamamla. "
+    "YALNIZCA fonksiyon govdesini yaz. "
+    "Markdown blogu, aciklama veya ornek ekleme."
 )
 MBPP_SYSTEM = (
     "Write a Python function to solve the following task. "
@@ -96,9 +103,14 @@ def _evalplus_api():
     )
 
 
-@lru_cache(maxsize=2)
+@lru_cache(maxsize=3)
 def _problems(dataset: str) -> dict[str, dict[str, Any]]:
     get_human_eval_plus, get_mbpp_plus, *_ = _evalplus_api()
+    if dataset == "humaneval-tr":
+        # Same schema as HumanEvalPlus.jsonl: translated prompt, entry point,
+        # canonical solution and contract, original inputs and tolerances.
+        rows = HUMANEVAL_PLUS_TR.ensure().read_text(encoding="utf-8").splitlines()
+        return {row["task_id"]: row for row in map(json.loads, filter(None, rows))}
     if dataset == "humaneval":
         return get_human_eval_plus()
     if dataset == "mbpp":
@@ -253,14 +265,14 @@ class _EvalPlusBenchmark:
     def evaluate(self, task: Task, response: str) -> bool:
         *_, pass_status, _, check_correctness, _ = _evalplus_api()
         problem = _problems(self.dataset)[task.id]
-        if self.dataset == "humaneval":
+        if self.dataset.startswith("humaneval"):
             solution = _human_solution(problem, response)
         else:
             solution = _extract_code(response)
 
         with _fork_multiprocessing():
             result = check_correctness(
-                self.dataset,
+                "mbpp" if self.dataset == "mbpp" else "humaneval",
                 completion_id=0,
                 problem=problem,
                 solution=solution,
@@ -277,6 +289,16 @@ class HumanEvalPlus(_EvalPlusBenchmark):
     system = HUMANEVAL_SYSTEM
     data_source = _evalplus_source(
         "humaneval", "HumanEval+ release from EvalPlus", size=925_932
+    )
+
+
+class HumanEvalPlusTR(_EvalPlusBenchmark):
+    name = "humaneval-plus-tr"
+    dataset = "humaneval-tr"
+    task_count = 164
+    system = HUMANEVAL_TR_SYSTEM
+    data_source = HUMANEVAL_PLUS_TR.source(
+        "HumanEval+ fully translated to Turkish (docstrings and identifiers)"
     )
 
 

@@ -106,6 +106,7 @@ uv run benchkit --help
 | Aider Polyglot | `aider-polyglot` | 225 | Repository editing across six languages with Pi |
 | HumanEval | `humaneval` | 164 | Python function completion |
 | HumanEval+ | `humaneval-plus` | 164 | HumanEval with expanded EvalPlus tests |
+| HumanEval+ TR | `humaneval-plus-tr` | 164 | HumanEval+ fully translated to Turkish, function and variable names included |
 | MBPP | `mbpp` | 500 | Short Python programming tasks |
 | MBPP+ | `mbpp-plus` | 378 | MBPP with expanded EvalPlus tests |
 | GSM8K | `gsm8k` | 1,319 | Multi-step grade-school math |
