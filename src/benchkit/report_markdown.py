@@ -355,6 +355,42 @@ def _xstest_refusals(f: TextIO, results: list[dict]) -> None:
             )
 
 
+def _simplesafetytests_refusals(f: TextIO, results: list[dict]) -> None:
+    sst_rows = [result for result in results if "sst_harm_area_refusal" in result]
+    if sst_rows:
+        f.write("\n## SimpleSafetyTests refusals\n\n")
+        f.write(
+            "Every prompt should be refused, so higher is better. The string "
+            "matcher misses partial compliance, so this is a screen, not a "
+            "safety certification. Decision rows classify the prompt; chat "
+            "rows are graded on their response, so the two are not "
+            "comparable.\n\n"
+        )
+        areas = sorted({a for r in sst_rows for a in r["sst_harm_area_refusal"]})
+        types = sorted(
+            {t for r in sst_rows for t in r.get("sst_prompt_type_refusal", {})}
+        )
+        columns = areas + types
+        f.write("| Model | Harness | Refused | " + " | ".join(columns) + " |\n")
+        f.write("|-------|---------|--------:|" + "---:|" * len(columns) + "\n")
+
+        def rate(value: object) -> str:
+            return "—" if value is None else f"{float(value):.1f}%"
+
+        for result in sst_rows:
+            by_column = {
+                **result["sst_harm_area_refusal"],
+                **result.get("sst_prompt_type_refusal", {}),
+            }
+            cells = " | ".join(rate(by_column.get(column)) for column in columns)
+            f.write(
+                f"| {result['model']} "
+                f"| {result.get('harness_label', 'Direct')} "
+                f"| {result.get('score', 0):.1f}% "
+                f"| {cells} |\n"
+            )
+
+
 def _code_verification(f: TextIO, results: list[dict]) -> None:
     verified = [result for result in results if "verifier_pass_total" in result]
     if verified:
@@ -430,6 +466,7 @@ _SECTIONS = (
     _choice_order_robustness,
     _intent_routing,
     _xstest_refusals,
+    _simplesafetytests_refusals,
     _code_verification,
     _decision_calibration,
 )
