@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import random
 import unittest
 from collections import Counter
 from unittest.mock import Mock, patch
 
+from benchkit.benchmarks import ruler_generator
 from benchkit.benchmarks.ruler import RULER, RULERFull
 from benchkit.benchmarks.ruler_generator import (
     CONTEXT_BUCKETS,
+    FALLBACK_CHARS_PER_TOKEN,
     OUTPUT_RESERVE_TOKENS,
     TASK_KINDS,
     TASKS_PER_BUCKET,
@@ -137,6 +140,37 @@ class RulerGenerationTests(unittest.TestCase):
         self.assertGreaterEqual(measured, target * 0.99)
         self.assertIn(str(task.metadata["query"][0]), first)
         self.assertIn(str(task.metadata["answers"][0]), first)
+
+    def test_fallback_prompt_fits_every_kind_and_bucket(self) -> None:
+        # Synthetic corpora stand in for the essay and QA downloads.
+        rng = random.Random(7)
+        words = ["".join(rng.choices("abcdefghij", k=rng.randint(2, 9)))]
+        words += [
+            "".join(rng.choices("abcdefghij", k=rng.randint(2, 9))) for _ in range(5000)
+        ]
+        docs = [
+            f"Title {i}\n" + " ".join(rng.choices(words, k=rng.randint(40, 150)))
+            for i in range(4000)
+        ]
+
+        def qa_records(kind: str) -> tuple[list[dict], list[str]]:
+            gold = 10 if kind == "qa_2" else 1
+            return [{"query": "q?", "answers": ["a"], "docs": list(range(gold))}], docs
+
+        with (
+            patch.object(ruler_generator, "_essay_words", return_value=words),
+            patch.object(ruler_generator, "_qa_records", qa_records),
+        ):
+            for task in generate_tasks(samples_per_kind=1):
+                bucket = int(task.metadata["context_tokens"])
+                target = (bucket - OUTPUT_RESERVE_TOKENS) * FALLBACK_CHARS_PER_TOKEN
+                prompt, _, measured = fit_prompt(task)
+                with self.subTest(task=task.id):
+                    self.assertIsNone(measured)
+                    self.assertLessEqual(len(prompt), target)
+                    self.assertGreaterEqual(len(prompt), target * 0.9)
+                    if task.metadata.get("haystack") == "essay":
+                        self.assertLess(prompt.count("\n"), 40)
 
     def test_variable_tracking_uses_fractional_ruler_scoring(self) -> None:
         task = next(
