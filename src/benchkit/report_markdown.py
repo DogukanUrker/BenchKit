@@ -318,6 +318,42 @@ def _intent_routing(f: TextIO, results: list[dict]) -> None:
             )
 
 
+def _poker_decisions(f: TextIO, results: list[dict]) -> None:
+    played = [result for result in results if "poker_action_accuracy" in result]
+    if played:
+        f.write("\n## Poker decisions\n\n")
+        f.write(
+            "Exact match needs the solver's action and bet size; action "
+            "accuracy ignores the size. Streets are exact match.\n\n"
+        )
+        f.write(
+            "| Model | Harness | Exact match | Action | Preflop | Flop | Turn "
+            "| River | Speed |\n"
+        )
+        f.write(
+            "|-------|---------|------------:|-------:|--------:|-----:|-----:"
+            "|------:|------:|\n"
+        )
+        for result in played:
+            streets = result.get("poker_street_scores") or {}
+            cells = " | ".join(
+                f"{streets[street]:.1f}%" if street in streets else "—"
+                for street in ("Preflop", "Flop", "Turn", "River")
+            )
+            speed = (
+                decision_speed(result)[0]
+                if is_decision(result)
+                else f"{aggregate_tok_s(result):.1f} tok/s"
+            )
+            f.write(
+                f"| {result['model']} "
+                f"| {result.get('harness_label', 'Direct')} "
+                f"| {result.get('score', 0):.1f}% "
+                f"| {result['poker_action_accuracy']:.1f}% "
+                f"| {cells} | {speed} |\n"
+            )
+
+
 def _xstest_refusals(f: TextIO, results: list[dict]) -> None:
     xstest_rows = [
         result
@@ -429,6 +465,7 @@ _SECTIONS = (
     _repair_effect,
     _choice_order_robustness,
     _intent_routing,
+    _poker_decisions,
     _xstest_refusals,
     _code_verification,
     _decision_calibration,

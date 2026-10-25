@@ -185,6 +185,26 @@ tables in the README.
   accuracy on passing and on failing solutions, because the overall score
   hides a verifier that leans one way.
 
+### Poker Decisions (pokerbench)
+- `pokerbench` is the PokerBench test set (Zhuang et al., AAAI 2025): 1k
+  pre-flop and 10k post-flop No Limit Hold'em spots, each scored against a GTO
+  solver's action. The prompt is upstream's verbatim and does not list the
+  legal moves; keep it that way so scores stay comparable with the paper.
+- The headline is exact match: action and bet size. `summary_fields` adds
+  `poker_action_accuracy` (size ignored) and exact match per street.
+- Data is read straight from the authors' Hugging Face release at a pinned
+  revision (`downloads.POKERBENCH`), never bundled. Each split joins the prompt
+  JSON with the scenario CSV row by row; the CSV supplies the legal moves.
+  `build_split` checks every label against the CSV's decision and its legal
+  moves and raises on any mismatch, so a misaligned file can never score.
+  `scripts/pin_pokerbench.py` downloads a revision, runs that validation and
+  prints the block to paste into `downloads.py`.
+- Legal moves sit in `metadata["choices"]`, so decision models choose among
+  them, two-move spots are never repaired, and with repairs the headline is
+  the first attempt. Repair feedback never names the solver's move.
+- Rows are ordered with `vision.spread` by street, so any slice keeps the
+  pre-flop share.
+
 ### Code Execution Reasoning (cruxeval)
 - `cruxeval-o` shows a function and an input and asks for the output;
   `cruxeval-i` shows the output and asks for any input that produces it. The

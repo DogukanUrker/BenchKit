@@ -29,6 +29,7 @@ from benchkit.benchmarks.ocrbench import OCRBench
 from benchkit.benchmarks.openbookqa import OpenBookQA
 from benchkit.benchmarks.patcheval import PatchEval
 from benchkit.benchmarks.piqa import PIQA
+from benchkit.benchmarks.pokerbench import PokerBench
 from benchkit.benchmarks.ruler import RULER, RULERFull
 from benchkit.benchmarks.sanity import Sanity
 from benchkit.benchmarks.treejs_arena import TreeJSArena
@@ -64,6 +65,7 @@ REGISTRY: dict[str, type] = {
     "mmlu-pro": MMLUPro,
     "banking77": Banking77,
     "code-verifier": CodeVerifier,
+    "pokerbench": PokerBench,
     # Vision suites send images and run on the direct harness only.
     "ocrbench": OCRBench,
     "chartqa": ChartQA,
@@ -107,6 +109,7 @@ DESCRIPTIONS: dict[str, str] = {
     "mmlu-pro": "harder MMLU successor: ten options and reasoning-heavy questions",
     "banking77": "route a banking customer message to one of 77 intents",
     "code-verifier": "judge whether a model-written HumanEval+ solution passes its tests",
+    "pokerbench": "pick the solver's play in a No Limit Hold'em spot, bet size included",
     "ocrbench": "text recognition and text-centric VQA across ten image categories",
     "chartqa": "questions about real charts, scored with 5% relaxed numeric accuracy",
     "mmvp": "pairs of look-alike images that differ in one detail, two options",

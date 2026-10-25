@@ -175,3 +175,37 @@ HUMANEVAL_PLUS_TR = RemoteFile(
     sha256="072172a4d7934b8ce27d8ad0c83b139b80296876bd2f8a8afad1476bdaa97955",
     size=7_635_249,
 )
+
+# PokerBench test splits, read straight from the authors' Hub release. The
+# prompts and labels live in the JSON files and the legal moves in the CSVs;
+# `scripts/pin_pokerbench.py` prints this block for a new revision.
+POKERBENCH_REVISION = "591f646fcb5d822f1e234fe09ad2526f50635d93"
+_POKERBENCH = (
+    f"https://huggingface.co/datasets/RZ412/PokerBench/resolve/{POKERBENCH_REVISION}"
+)
+POKERBENCH = {
+    "preflop_json": RemoteFile(
+        name="pokerbench/preflop_1k_test_set_prompt_and_label.json",
+        url=f"{_POKERBENCH}/preflop_1k_test_set_prompt_and_label.json",
+        sha256="0" * 64,
+        size=1,
+    ),
+    "preflop_csv": RemoteFile(
+        name="pokerbench/preflop_1k_test_set_game_scenario_information.csv",
+        url=f"{_POKERBENCH}/preflop_1k_test_set_game_scenario_information.csv",
+        sha256="0" * 64,
+        size=1,
+    ),
+    "postflop_json": RemoteFile(
+        name="pokerbench/postflop_10k_test_set_prompt_and_label.json",
+        url=f"{_POKERBENCH}/postflop_10k_test_set_prompt_and_label.json",
+        sha256="0" * 64,
+        size=1,
+    ),
+    "postflop_csv": RemoteFile(
+        name="pokerbench/postflop_10k_test_set_game_scenario_information.csv",
+        url=f"{_POKERBENCH}/postflop_10k_test_set_game_scenario_information.csv",
+        sha256="0" * 64,
+        size=1,
+    ),
+}
