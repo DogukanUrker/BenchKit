@@ -9,6 +9,7 @@ import string
 import urllib.request
 import uuid
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import Path
 
 from benchkit.benchmarks.base import Task
@@ -45,6 +46,14 @@ TASKS_PER_BUCKET = DEFAULT_SAMPLES_PER_KIND * len(TASK_KINDS)
 OUTPUT_RESERVE_TOKENS = 256
 FALLBACK_CHARS_PER_TOKEN = 4
 FIT_TOLERANCE = 0.01
+# cwe and fwe share a 2,000-word vocabulary. cwe draws one new uncommon word
+# per unit (~40 chars), so its vocabulary grows with the bucket; 2,000 words
+# stop at about 18k tokens.
+VOCABULARY_SIZE = 2000
+# Every renderer has a floor below which extra units change nothing (cwe and
+# qa at one, fwe at ten, qa_2's ten gold documents), so the fallback sizes a
+# unit between two counts above all of them.
+_PROBE_UNITS = (16, 80)
 
 _VARIABLE_NOISE = (
     "The grass is green. The sky is blue. The sun is yellow. "
@@ -195,8 +204,9 @@ def _aggregation_task(bucket: int, sample: int, kind: str) -> Task:
     }
     if kind in {"cwe", "fwe"}:
         rng = random.Random(seed)
+        size = max(VOCABULARY_SIZE, bucket // 8) if kind == "cwe" else VOCABULARY_SIZE
         vocabulary = [
-            "".join(rng.choices(string.ascii_lowercase, k=6)) for _ in range(2000)
+            "".join(rng.choices(string.ascii_lowercase, k=6)) for _ in range(size)
         ]
         metadata["vocabulary"] = list(dict.fromkeys(vocabulary))
         metadata["answers"] = metadata["vocabulary"][: 10 if kind == "cwe" else 3]
@@ -266,6 +276,7 @@ def _essay_words() -> list[str]:
     return text.split()
 
 
+@lru_cache(maxsize=len(QA_FILES))
 def _qa_records(kind: str) -> tuple[list[dict], list[str]]:
     raw = json.loads(_qa_path(kind).read_text(encoding="utf-8"))
     if kind == "qa_1":
@@ -410,7 +421,19 @@ def _render_niah(task: Task, filler_units: int) -> str:
         target_values=list(metadata["answers"]),
         distractor_values=[p[1] for p in pairs],
     )
-    context = "\n".join(_insert_at_positions(filler, needles, seed ^ 0xA51CE))
+    lines = _insert_at_positions(filler, needles, seed ^ 0xA51CE)
+    if metadata["haystack"] == "essay":
+        # Running prose, not one word per line: a newline per word costs far
+        # more tokens than the character estimate assumes.
+        needle_set = set(needles)
+        chunks: list[list[str]] = [[]]
+        for line in lines:
+            if line in needle_set:
+                chunks.extend([[line], []])
+            else:
+                chunks[-1].append(line)
+        lines = [" ".join(chunk) for chunk in chunks if chunk]
+    context = "\n".join(lines)
     return (
         "Some special magic numbers are hidden within the following text. "
         "Memorize the records because you will be asked for one key afterward.\n\n"
@@ -463,11 +486,17 @@ def render_prompt(task: Task, filler_units: int) -> str:
 
 
 def _fallback_units(task: Task, target_tokens: int) -> int:
-    base = render_prompt(task, 0)
-    one = render_prompt(task, 1)
-    chars_per_unit = max(1, len(one) - len(base))
+    low, high = _PROBE_UNITS
+    low_chars = len(render_prompt(task, low))
+    chars_per_unit = max(
+        1.0, (len(render_prompt(task, high)) - low_chars) / (high - low)
+    )
     target_chars = target_tokens * FALLBACK_CHARS_PER_TOKEN
-    return max(0, (target_chars - len(base)) // chars_per_unit)
+    return max(0, low + math.floor((target_chars - low_chars) / chars_per_unit))
+
+
+def _estimate_tokens(prompt: str) -> int:
+    return math.ceil(len(prompt) / FALLBACK_CHARS_PER_TOKEN)
 
 
 def fit_prompt(
@@ -479,9 +508,12 @@ def fit_prompt(
     """Fit a generated prompt just below its context bucket.
 
     When the server exposes a tokenizer, a short secant-style calibration keeps
-    the prompt within one percent of the target. Generic servers fall back to a
-    conservative character-to-token estimate.
+    the prompt within one percent of the target. Generic servers run the same
+    calibration against a conservative character-to-token estimate, and the
+    measured count comes back as ``None``.
     """
+    estimated = token_count is None
+    count = _estimate_tokens if token_count is None else token_count
     bucket = int(task.metadata["context_tokens"])
     target = max(1, bucket - OUTPUT_RESERVE_TOKENS)
     units = (
@@ -490,10 +522,7 @@ def fit_prompt(
         else _fallback_units(task, target)
     )
     prompt = render_prompt(task, units)
-    if token_count is None:
-        return prompt, units, None
-
-    measured = token_count(prompt)
+    measured = count(prompt)
     if not isinstance(measured, int) or measured <= 0:
         return prompt, units, None
 
@@ -502,7 +531,7 @@ def fit_prompt(
         if measured <= target and measured >= target * (1 - FIT_TOLERANCE):
             break
         if base_tokens is None:
-            base_tokens = token_count(render_prompt(task, 0))
+            base_tokens = count(render_prompt(task, 0))
             if not isinstance(base_tokens, int) or base_tokens < 0:
                 base_tokens = 0
 
@@ -513,23 +542,24 @@ def fit_prompt(
             next_units = max(0, units - 1) if measured > target else units + 1
         units = next_units
         prompt = render_prompt(task, units)
-        next_measured = token_count(prompt)
+        next_measured = count(prompt)
         if not isinstance(next_measured, int) or next_measured <= 0:
             return prompt, units, None
         measured = next_measured
 
     # Never knowingly send a prompt above the bucket. The linear adjustment is
     # normally exact; this final correction handles unusual tokenizer merges.
-    for _ in range(2):
+    # Without a tokenizer it is cheap, so keep going until the estimate fits.
+    for _ in range(16 if estimated else 2):
         if measured <= target or units == 0:
             break
         excess = measured - target
         tokens_per_unit = max(1.0, measured / max(units, 1))
         units = max(0, units - math.ceil(excess / tokens_per_unit) - 1)
         prompt = render_prompt(task, units)
-        next_measured = token_count(prompt)
+        next_measured = count(prompt)
         if not isinstance(next_measured, int) or next_measured <= 0:
             return prompt, units, None
         measured = next_measured
 
-    return prompt, units, measured
+    return prompt, units, None if estimated else measured
