@@ -97,9 +97,9 @@ direct and chain-of-thought prompts.
 
 `pokerbench` reads the PokerBench test splits - 1,000 pre-flop and 10,000
 post-flop No Limit Texas Hold'em spots with GTO solver decisions - from the
-authors' Hugging Face release at a pinned revision. Nothing is bundled: the
-four files are downloaded on first use and verified against the sha256s in
-`benchmarks/downloads.py` (`scripts/pin_pokerbench.py` prints them).
+authors' Hugging Face release at the revision pinned in
+`benchmarks/pokerbench.py`. Nothing is bundled: the four test files are
+downloaded on first use or with `benchkit datasets install pokerbench`.
 
 - Source: <https://huggingface.co/datasets/RZ412/PokerBench>
 - Code: <https://github.com/pokerllm/pokerbench>

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from benchkit import decision
-from benchkit.benchmarks import downloads, pokerbench
+from benchkit.benchmarks import pokerbench
 from benchkit.benchmarks.base import Task
 from benchkit.benchmarks.pokerbench import (
     PokerBench,
@@ -105,17 +105,18 @@ def _postflop(directory: Path, rows=POSTFLOP):
 def installed(tmp_path, monkeypatch):
     """Upstream-shaped files in the dataset cache, as an install leaves them."""
     monkeypatch.setenv("BENCHKIT_DATASET_CACHE", str(tmp_path))
-    monkeypatch.setattr(pokerbench, "_install", lambda progress=None: None)
     pokerbench._streets.cache_clear()
     staging = tmp_path / "staging"
     staging.mkdir()
     files = dict(
         zip(("preflop_json", "preflop_csv"), _preflop(staging), strict=True)
     ) | dict(zip(("postflop_json", "postflop_csv"), _postflop(staging), strict=True))
+    root = pokerbench.data_dir()
+    root.mkdir(parents=True)
     for key, source in files.items():
-        target = downloads.POKERBENCH[key].path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        source.replace(target)
+        split, kind = key.split("_")
+        source.replace(root / pokerbench.FILES[split][kind == "csv"])
+    (root / ".complete").touch()
     yield
     pokerbench._streets.cache_clear()
 
@@ -189,7 +190,7 @@ def test_misaligned_files_fail_loudly(tmp_path):
 
 def test_counting_never_downloads(monkeypatch):
     monkeypatch.setattr(
-        pokerbench, "_install", lambda progress=None: pytest.fail("downloaded")
+        pokerbench, "_download_file", lambda *_a: pytest.fail("downloaded")
     )
     assert task_count("pokerbench") == 11000
 

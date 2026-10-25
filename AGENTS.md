@@ -192,13 +192,14 @@ tables in the README.
   legal moves; keep it that way so scores stay comparable with the paper.
 - The headline is exact match: action and bet size. `summary_fields` adds
   `poker_action_accuracy` (size ignored) and exact match per street.
-- Data is read straight from the authors' Hugging Face release at a pinned
-  revision (`downloads.POKERBENCH`), never bundled. Each split joins the prompt
-  JSON with the scenario CSV row by row; the CSV supplies the legal moves.
-  `build_split` checks every label against the CSV's decision and its legal
-  moves and raises on any mismatch, so a misaligned file can never score.
-  `scripts/pin_pokerbench.py` downloads a revision, runs that validation and
-  prints the block to paste into `downloads.py`.
+- Data is never bundled: the four test files are fetched from the authors'
+  Hugging Face release at a pinned `REVISION` into
+  `~/.cache/benchkit/datasets/pokerbench/<revision>/`, with a `.complete`
+  marker written last. A new revision is a deliberate suite update. Each split
+  joins the prompt JSON with the scenario CSV row by row; the CSV supplies the
+  legal moves. `build_split` checks every label against the CSV's decision and
+  its legal moves and raises on any mismatch, so a misaligned file can never
+  score.
 - Legal moves sit in `metadata["choices"]`, so decision models choose among
   them, two-move spots are never repaired, and with repairs the headline is
   the first attempt. Repair feedback never names the solver's move.

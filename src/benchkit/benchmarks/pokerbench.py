@@ -7,7 +7,10 @@ verbatim and does not list the legal moves, so a bet or raise only counts with
 the solver's exact size - upstream's exact-match metric. Getting the action
 right with the wrong size is reported separately as action accuracy.
 
-The legal moves come from the structured CSV that sits beside each prompt file.
+Data is fetched from the authors' Hugging Face release at a pinned revision
+on first use (or with ``benchkit datasets install pokerbench``) into
+``~/.cache/benchkit/datasets/pokerbench/``. The legal moves come from the
+structured CSV that sits beside each prompt file.
 They give decision models their options and the repair policy its option
 count; every row's label is checked against them when the data loads, so a
 misaligned file fails loudly instead of scoring against the wrong spot.
@@ -23,12 +26,31 @@ from functools import cache
 from pathlib import Path
 
 from benchkit.benchmarks.base import Task
-from benchkit.benchmarks.downloads import POKERBENCH, Dataset, Progress, cache_root
+from benchkit.benchmarks.downloads import Dataset, Progress, cache_root
 from benchkit.benchmarks.utils import strip_think_tags
-from benchkit.benchmarks.vision import category_scores, spread
+from benchkit.benchmarks.vision import (
+    _download_file,
+    _http_client,
+    _url,
+    category_scores,
+    spread,
+)
 from benchkit.evaluation import EvaluationResult
 
-SPLITS = ("preflop", "postflop")
+# The authors' Hub release, pinned; a new revision is a deliberate suite update.
+DATASET = "RZ412/PokerBench"
+REVISION = "591f646fcb5d822f1e234fe09ad2526f50635d93"
+FILES = {
+    "preflop": (
+        "preflop_1k_test_set_prompt_and_label.json",
+        "preflop_1k_test_set_game_scenario_information.csv",
+    ),
+    "postflop": (
+        "postflop_10k_test_set_prompt_and_label.json",
+        "postflop_10k_test_set_game_scenario_information.csv",
+    ),
+}
+SPLITS = tuple(FILES)
 STREETS = ("Preflop", "Flop", "Turn", "River")
 
 _VERBS = {
@@ -150,24 +172,25 @@ def build_split(split: str, prompts: Path, scenarios: Path) -> list[Task]:
     return tasks
 
 
-def _files() -> list:
-    return list(POKERBENCH.values())
+def data_dir() -> Path:
+    return cache_root() / "pokerbench" / REVISION[:12]
 
 
 def _installed() -> bool:
-    return all(remote.installed() for remote in _files())
+    return (data_dir() / ".complete").exists()
 
 
-def _install(progress: Progress | None = None) -> None:
-    total = sum(remote.size for remote in _files())
-    done = 0
-    for remote in _files():
-        remote.ensure(
-            None
-            if progress is None
-            else lambda part, _size, before=done: progress(before + part, total)
-        )
-        done += remote.size
+def _install(_progress: Progress | None = None) -> None:
+    """Fetch the four test files once; the marker is written last."""
+    root = data_dir()
+    if _installed():
+        return
+    root.mkdir(parents=True, exist_ok=True)
+    with _http_client() as client:
+        for name in (name for pair in FILES.values() for name in pair):
+            if not (root / name).exists():
+                _download_file(client, _url(DATASET, REVISION, name), root / name)
+    (root / ".complete").touch()
 
 
 @cache
@@ -182,8 +205,8 @@ class PokerBench:
     task_count = 11000
     data_source = Dataset(
         summary="PokerBench test splits: 1k pre-flop and 10k post-flop spots",
-        size=sum(remote.size for remote in POKERBENCH.values()),
-        location=lambda: cache_root() / "pokerbench",
+        size=None,
+        location=data_dir,
         is_installed=_installed,
         install=_install,
     )
@@ -194,9 +217,7 @@ class PokerBench:
             task
             for split in SPLITS
             for task in build_split(
-                split,
-                POKERBENCH[f"{split}_json"].path,
-                POKERBENCH[f"{split}_csv"].path,
+                split, data_dir() / FILES[split][0], data_dir() / FILES[split][1]
             )
         ]
         # Pre-flop spots are a tenth of the set; keep that share in any slice.
