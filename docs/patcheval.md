@@ -108,7 +108,7 @@ Download and verify the immutable release, then point BenchKit at its root:
 ```console
 hf download DogukanUrker/PatchEval \
   --repo-type dataset \
-  --revision pilot-20 \
+  --revision pilot-20-r2 \
   --local-dir /path/to/PatchEval
 cd /path/to/PatchEval
 sha256sum --check SHA256SUMS
@@ -116,6 +116,9 @@ export BENCHKIT_PATCHEVAL_DATASET=/path/to/PatchEval
 ```
 
 The release is published at
-<https://huggingface.co/datasets/DogukanUrker/PatchEval> and the `pilot-20` tag
-is the immutable 20-task snapshot. Do not run against a moving branch when
-recording benchmark results.
+<https://huggingface.co/datasets/DogukanUrker/PatchEval>. Each revision of the
+20-task release has an immutable tag: `pilot-20-r2` is current, and `pilot-20`
+and `pilot-20-r1` are the original snapshot, whose `pygments-2816` hidden test
+graded one exact token layout the issue never asks for. A revision fixes
+grading only, never the task set, and results record it as `dataset_revision`.
+Do not run against a moving branch when recording benchmark results.

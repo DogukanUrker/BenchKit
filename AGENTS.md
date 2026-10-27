@@ -397,7 +397,11 @@ tables in the README.
   Hugging Face dataset into `~/.cache/benchkit/datasets/patcheval/pilot-20`:
   `dataset.json`, `tasks.jsonl` and only the files `tasks.jsonl` names (never
   the miner). Paths are checked before anything is written, a `.complete`
-  marker goes last, and the loader still verifies every archive's sha256.
+  marker naming the pinned `_HF_REVISION` commit goes last, and the loader
+  still verifies every archive's sha256. A cache whose marker names another
+  commit is fetched again, so bumping the pin is how a dataset errata reaches
+  existing installs. Results record the release's `revision` as
+  `dataset_revision`.
   `BENCHKIT_PATCHEVAL_DATASET` still overrides it with a local copy.
 - `mmlu` and `mmlu-pro` are `RemoteFile`s: a URL pinned to a commit of this
   repository plus a sha256 and size, cached under `~/.cache/benchkit/datasets`
