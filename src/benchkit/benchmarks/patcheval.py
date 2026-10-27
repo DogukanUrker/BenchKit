@@ -39,8 +39,10 @@ _RELEASE_FILE = "dataset.json"
 # files tasks.jsonl names are fetched (not the miner that built it), and every
 # task pins its source archive and hidden tests by sha256, which load_tasks
 # verifies, so a bad or moved upstream file fails loudly instead of scoring.
+# The revision is a pinned commit: a cache fetched from any other revision is
+# fetched again, so an errata release never grades with stale hidden tests.
 _HF_DATASET = "DogukanUrker/PatchEval"
-_HF_REVISION = "main"
+_HF_REVISION = "13c6964b497f6f118bf5af51a2b1b39cc2d612e6"
 _RELEASE = "pilot-20"
 _COMPLETE = ".complete"
 _FETCH_LOCK = threading.Lock()
@@ -178,11 +180,19 @@ def _dataset_dir() -> Path:
     return _configured_root() or _cache_dir()
 
 
+def _cached_revision_matches(root: Path) -> bool:
+    try:
+        marker = (root / _COMPLETE).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return marker.strip() == _HF_REVISION
+
+
 def _dataset_installed() -> bool:
     configured = _configured_root()
     if configured is not None:
         return (configured / _RELEASE_FILE).is_file()
-    return (_cache_dir() / _COMPLETE).is_file()
+    return _cached_revision_matches(_cache_dir())
 
 
 def _fetch_release(progress: Progress | None = None) -> Path:
@@ -192,8 +202,9 @@ def _fetch_release(progress: Progress | None = None) -> Path:
         return configured
     root = _cache_dir()
     with _FETCH_LOCK:
-        if (root / _COMPLETE).is_file():
+        if _cached_revision_matches(root):
             return root
+        (root / _COMPLETE).unlink(missing_ok=True)
         root.mkdir(parents=True, exist_ok=True)
         done = 0
         with vision._http_client() as client:
@@ -724,6 +735,7 @@ class PatchEval:
     def __init__(self, dataset_root: Path | None = None) -> None:
         self.dataset_root = dataset_root
         self.release = "unloaded"
+        self.revision: int | None = None
 
     def _root(self) -> Path:
         return (self.dataset_root or _fetch_release()).resolve()
@@ -753,6 +765,8 @@ class PatchEval:
                 f"PatchEval dataset must use schema_version {_SCHEMA_VERSION}"
             )
         self.release = str(release.get("release") or "unknown")
+        revision = release.get("revision")
+        self.revision = revision if isinstance(revision, int) else None
         try:
             records = [
                 json.loads(line)
@@ -774,7 +788,10 @@ class PatchEval:
         return [Task(spec.id, "", {"spec": spec}) for spec in specs]
 
     def result_metadata(self, _variant: str | None) -> dict:
-        return {"dataset_release": self.release}
+        metadata: dict = {"dataset_release": self.release}
+        if self.revision is not None:
+            metadata["dataset_revision"] = self.revision
+        return metadata
 
     def build_prompt(self, task: Task) -> str:
         spec = self._spec(task)
