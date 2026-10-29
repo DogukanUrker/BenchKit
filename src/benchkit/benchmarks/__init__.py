@@ -19,6 +19,7 @@ from benchkit.benchmarks.gsm8k import GSM8K
 from benchkit.benchmarks.hellaswag import HellaSwag
 from benchkit.benchmarks.humaneval import HumanEval
 from benchkit.benchmarks.ifeval import IFEval
+from benchkit.benchmarks.math500 import MATH500
 from benchkit.benchmarks.mbpp import MBPP
 from benchkit.benchmarks.mc_arena import MCArena
 from benchkit.benchmarks.medfailbench import MedFailBench
@@ -57,6 +58,7 @@ REGISTRY: dict[str, type] = {
     "cruxeval-o-cot": CRUXEvalOutputCoT,
     "cruxeval-i-cot": CRUXEvalInputCoT,
     "gsm8k": GSM8K,
+    "math-500": MATH500,
     "ifeval": IFEval,
     "ruler": RULER,
     "ruler-full": RULERFull,
@@ -101,6 +103,7 @@ DESCRIPTIONS: dict[str, str] = {
     "cruxeval-o-cot": "CRUXEval output prediction with the step-by-step prompt",
     "cruxeval-i-cot": "CRUXEval input prediction with the step-by-step prompt",
     "gsm8k": "multi-step grade-school math problems with exact numeric answers",
+    "math-500": "competition math with LaTeX answers, reported by difficulty level",
     "ifeval": "prompts with code-checkable instruction-following constraints",
     "ruler": "practical long-context retrieval across all 13 RULER task families",
     "ruler-full": "research-scale RULER with 500 samples per task and context",

@@ -427,6 +427,40 @@ def _simplesafetytests_refusals(f: TextIO, results: list[dict]) -> None:
             )
 
 
+def _math_levels(f: TextIO, results: list[dict]) -> None:
+    solved = [result for result in results if "math_level_scores" in result]
+    if solved:
+        f.write("\n## MATH-500 by level and subject\n\n")
+        f.write(
+            "Accuracy per difficulty level (1 easiest, 5 hardest) and per "
+            "subject. Answers are matched as normalized LaTeX, then with "
+            "SymPy; other harnesses grade differently, so compare across "
+            "tools with care.\n\n"
+        )
+        levels = sorted({k for r in solved for k in r["math_level_scores"]})
+        subjects = sorted({k for r in solved for k in r.get("math_subject_scores", {})})
+
+        def rate(value: object) -> str:
+            return "—" if value is None else f"{float(value):.1f}%"
+
+        for columns, field in (
+            (levels, "math_level_scores"),
+            (subjects, "math_subject_scores"),
+        ):
+            f.write("| Model | Harness | Score | " + " | ".join(columns) + " |\n")
+            f.write("|-------|---------|------:|" + "---:|" * len(columns) + "\n")
+            for result in solved:
+                scores = result.get(field, {})
+                cells = " | ".join(rate(scores.get(column)) for column in columns)
+                f.write(
+                    f"| {result['model']} "
+                    f"| {result.get('harness_label', 'Direct')} "
+                    f"| {result.get('score', 0):.1f}% "
+                    f"| {cells} |\n"
+                )
+            f.write("\n")
+
+
 def _code_verification(f: TextIO, results: list[dict]) -> None:
     verified = [result for result in results if "verifier_pass_total" in result]
     if verified:
@@ -504,6 +538,7 @@ _SECTIONS = (
     _poker_decisions,
     _xstest_refusals,
     _simplesafetytests_refusals,
+    _math_levels,
     _code_verification,
     _decision_calibration,
 )
