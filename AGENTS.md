@@ -195,11 +195,12 @@ tables in the README.
 - Data is never bundled: the four test files are fetched from the authors'
   Hugging Face release at a pinned `REVISION` into
   `~/.cache/benchkit/datasets/pokerbench/<revision>/`, with a `.complete`
-  marker written last. A new revision is a deliberate suite update. Each split
-  joins the prompt JSON with the scenario CSV row by row; the CSV supplies the
-  legal moves. `build_split` checks every label against the CSV's decision and
-  its legal moves and raises on any mismatch, so a misaligned file can never
-  score.
+  marker written last. A new revision is a deliberate suite update. The prompt
+  JSON and the scenario CSV (which supplies the legal moves) were shuffled
+  independently upstream, so `build_split` matches them on content: street,
+  hole cards, board or hero position, and the solver's action, with the pot
+  breaking ties. Each scenario is used once; a prompt with no match, ambiguous
+  matches, or a label that is not a legal move raises rather than scoring.
 - Legal moves sit in `metadata["choices"]`, so decision models choose among
   them, two-move spots are never repaired, and with repairs the headline is
   the first attempt. Repair feedback never names the solver's move.

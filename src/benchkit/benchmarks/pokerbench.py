@@ -10,10 +10,10 @@ right with the wrong size is reported separately as action accuracy.
 Data is fetched from the authors' Hugging Face release at a pinned revision
 on first use (or with ``benchkit datasets install pokerbench``) into
 ``~/.cache/benchkit/datasets/pokerbench/``. The legal moves come from the
-structured CSV that sits beside each prompt file.
-They give decision models their options and the repair policy its option
-count; every row's label is checked against them when the data loads, so a
-misaligned file fails loudly instead of scoring against the wrong spot.
+structured CSV that sits beside each prompt file, matched to each prompt by
+its cards and action (``build_split``). They give decision models their
+options and the repair policy its option count; a prompt that matches no
+scenario, or whose label is not a legal move, fails loudly instead of scoring.
 """
 
 from __future__ import annotations
@@ -116,57 +116,115 @@ def verb(action: str | None) -> str | None:
     return action.rsplit(" ", 1)[0] if action and action[-1].isdigit() else action
 
 
-def _compatible(left: str, right: str) -> bool:
-    """Same action, and the same size whenever both name one."""
-    if verb(left) != verb(right):
-        return False
-    return left == right or left in ("bet", "raise") or right in ("bet", "raise")
+_RANKS = {
+    "ace": "A",
+    "king": "K",
+    "queen": "Q",
+    "jack": "J",
+    "ten": "T",
+    "nine": "9",
+    "eight": "8",
+    "seven": "7",
+    "six": "6",
+    "five": "5",
+    "four": "4",
+    "three": "3",
+    "two": "2",
+}
+_CARD = re.compile(r"(\w+) of (\w+)", re.IGNORECASE)
+_HOLDING = re.compile(r"your holding is \[([^\]]+)\]")
+_POSITION = re.compile(r"your position is (\w+)")
+_POT = re.compile(r"current pot size is ([\d.]+) chips")
 
 
-def _json_rows(path: Path) -> list[dict]:
-    """Rows of a prompt file, written either as one JSON array or as JSONL."""
-    text = path.read_text(encoding="utf-8")
-    try:
-        rows = json.loads(text)
-    except json.JSONDecodeError:
-        rows = [json.loads(line) for line in text.splitlines() if line.strip()]
-    return rows if isinstance(rows, list) else [rows]
+def _cards(text: str) -> frozenset[str]:
+    """``King of Heart and Two Of Club`` -> ``{"Kh", "2c"}``."""
+    return frozenset(
+        _RANKS[rank.lower()] + suit[0].lower() for rank, suit in _CARD.findall(text)
+    )
+
+
+def _short_cards(text: str) -> frozenset[str]:
+    """``Ks7h2d`` -> ``{"Ks", "7h", "2d"}``."""
+    return frozenset(re.findall(r"..", text))
+
+
+def _prompt_spot(split: str, row: dict) -> tuple[tuple, float]:
+    """Join key and pot for one prompt, read from its scenario text."""
+    text = row["instruction"]
+    holding = _cards(_HOLDING.search(text).group(1))
+    label = parse_action(row["output"])
+    pot = float(_POT.search(text).group(1))
+    if split == "preflop":
+        return ("Preflop", _POSITION.search(text).group(1), holding, label), pot
+    street, board = "Flop", frozenset()
+    for name in ("flop", "turn", "river"):
+        dealt = re.search(rf"The {name} comes (.*?)(?:, then|\.|\n)", text, re.I)
+        if dealt:
+            street, board = name.title(), board | _cards(dealt.group(1))
+    return (street, board, holding, label), pot
+
+
+def _scenario_spot(split: str, game: dict) -> tuple[tuple, float]:
+    """Join key and pot for one scenario row, in ``_prompt_spot``'s shape."""
+    label = parse_action(game["correct_decision"])
+    pot = float(game["pot_size"])
+    if split == "preflop":
+        holding = _short_cards(game["hero_holding"])
+        return ("Preflop", game["hero_pos"], holding, label), pot
+    street = game["evaluation_at"].title()
+    dealt = ["board_flop"] + ["board_turn"] * (street != "Flop")
+    dealt += ["board_river"] * (street == "River")
+    board = frozenset().union(*(_short_cards(game[key]) for key in dealt))
+    return (street, board, _short_cards(game["holding"]), label), pot
 
 
 def build_split(split: str, prompts: Path, scenarios: Path) -> list[Task]:
-    """Join one split's prompt file with its scenario CSV, row by row."""
-    rows = _json_rows(prompts)
+    """Join one split's prompts with the scenario rows that give their moves.
+
+    Upstream shuffled the two files independently, so rows are matched on
+    content: street, hole cards, the board (post-flop) or hero position
+    (pre-flop) and the solver's action, with the pot breaking ties. Every
+    scenario is used once, and a prompt with no match, or with candidates
+    whose legal moves disagree, raises.
+    """
+    rows = json.loads(prompts.read_text(encoding="utf-8"))
     with open(scenarios, encoding="utf-8", newline="") as f:
         games = list(csv.DictReader(f))
     if len(rows) != len(games):
         raise ValueError(
             f"PokerBench {split}: {len(rows)} prompts but {len(games)} scenarios"
         )
-    tasks = []
-    for index, (row, game) in enumerate(zip(rows, games, strict=True)):
-        where = f"PokerBench {split} row {index}"
-        label = parse_action(row["output"])
-        solver = parse_action(game["correct_decision"])
-        if label is None or solver is None or not _compatible(label, solver):
-            raise ValueError(
-                f"{where}: prompt label {row['output']!r} does not match "
-                f"scenario decision {game['correct_decision']!r}"
-            )
+    index: dict[tuple, list[tuple[float, list]]] = {}
+    for game in games:
+        key, pot = _scenario_spot(split, game)
         moves = [
             parse_action(str(m)) for m in ast.literal_eval(game["available_moves"])
         ]
-        matches = [move for move in moves if move and _compatible(move, label)]
-        if None in moves or len(matches) != 1:
+        index.setdefault(key, []).append((pot, moves))
+
+    tasks = []
+    for number, row in enumerate(rows):
+        where = f"PokerBench {split} prompt {number}"
+        key, pot = _prompt_spot(split, row)
+        candidates = index.get(key, [])
+        if len({tuple(moves) for _, moves in candidates}) > 1:
+            candidates = [c for c in candidates if abs(c[0] - pot) < 0.05]
+        if not candidates or len({tuple(moves) for _, moves in candidates}) > 1:
             raise ValueError(
-                f"{where}: {row['output']!r} is not exactly one of the legal "
-                f"moves {game['available_moves']}"
+                f"{where}: {len(candidates)} scenarios match {row['output']!r} "
+                "with this hand and board"
             )
-        street = "Preflop" if split == "preflop" else game["evaluation_at"].title()
+        match = candidates[0]
+        index[key].remove(match)
+        moves = match[1]
+        if None in moves or key[-1] not in moves:
+            raise ValueError(f"{where}: {row['output']!r} is not a legal move {moves}")
         tasks.append(
             Task(
-                id=f"PokerBench/{split}/{index}",
+                id=f"PokerBench/{split}/{number}",
                 prompt=row["instruction"],
-                metadata={"answer": matches[0], "choices": moves, "street": street},
+                metadata={"answer": key[-1], "choices": moves, "street": key[0]},
             )
         )
     return tasks

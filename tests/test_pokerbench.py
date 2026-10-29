@@ -22,81 +22,108 @@ from benchkit.benchmarks.pokerbench import (
 from benchkit.engine import Engine, JobSpec, route_decision_jobs, task_count
 from benchkit.report_markdown import render_markdown
 
+RANK_NAMES = {short: name.title() for name, short in pokerbench._RANKS.items()}
+SUIT_NAMES = {"h": "Heart", "c": "Club", "d": "Diamond", "s": "Spade"}
+BOARD = {"flop": "Ks7h2d", "turn": "Jc", "river": "7c"}
+
+# (hero_pos, hero_holding, correct_decision, prompt label, available_moves, pot)
 PREFLOP = [
-    ("SB", "call", "['call', 'fold']", "Preflop spot one. Your optimal action is:"),
-    ("BTN", "13.0bb", "['fold', '13.0bb', 'allin']", "Preflop spot two."),
+    ("SB", "KdKc", "call", "call", "['call', 'fold']", 117.0),
+    ("BTN", "AhQd", "13.0bb", "raise 13.0", "['fold', '13.0bb', 'allin']", 5.5),
 ]
-PREFLOP_LABELS = ["call", "raise 13.0"]
-# (evaluation_at, correct_decision, available_moves, label)
+# (evaluation_at, holding, correct_decision, prompt label, available_moves, pot)
 POSTFLOP = [
-    ("Flop", "Check", "['Check', 'Bet 24']", "check"),
-    ("Turn", "Bet", "['Check', 'Bet 10', 'Bet 24']", "bet 24"),
-    ("River", "Fold", "['Fold', 'Call', 'Raise 60']", "fold"),
-    ("River", "Call", "['Fold', 'Call']", "call"),
-    ("Flop", "Bet", "['Check', 'Bet 4.5']", "bet 4.5"),
-    ("Turn", "Check", "['Check', 'Bet 30']", "check"),
-    ("River", "Raise", "['Fold', 'Call', 'Raise 60']", "raise 60"),
-    ("Flop", "Check", "['Check', 'Bet 12']", "check"),
-    ("Turn", "Call", "['Fold', 'Call']", "call"),
-    ("River", "Check", "['Check', 'Bet 20']", "check"),
+    ("Flop", "8h8c", "Check", "check", "['Check', 'Bet 24']", 32),
+    ("Turn", "AhQd", "Bet 24", "bet 24", "['Check', 'Bet 10', 'Bet 24']", 40),
+    ("River", "Kc5c", "Fold", "fold", "['Fold', 'Call', 'Raise 60']", 20),
+    ("River", "9s9d", "Call", "call", "['Fold', 'Call']", 50),
+    ("Flop", "AsKd", "Bet 4.5", "bet 4.5", "['Check', 'Bet 4.5']", 9),
+    ("Turn", "QhJh", "Check", "check", "['Check', 'Bet 30']", 30),
+    ("River", "AcAd", "Raise 60", "raise 60", "['Fold', 'Call', 'Raise 60']", 30),
+    # Same hand, board and action: only the pot tells these two apart.
+    ("Flop", "6h5h", "Check", "check", "['Check', 'Bet 12']", 12),
+    ("Flop", "6h5h", "Check", "check", "['Check', 'Bet 6']", 6),
+    ("River", "Tc9c", "Check", "check", "['Check', 'Bet 20']", 20),
 ]
+
+
+def _long(card: str, of: str = "of") -> str:
+    return f"{RANK_NAMES[card[0]]} {of} {SUIT_NAMES[card[1]]}"
+
+
+def _prompt(position: str, holding: str, pot: float, street: str = "") -> str:
+    """A scenario in upstream's wording, up to the street being decided."""
+    hand = f"[{_long(holding[:2])} and {_long(holding[2:])}]"
+    board = ""
+    if street:
+        flop = [_long(BOARD["flop"][i : i + 2], "Of") for i in (0, 2, 4)]
+        board = f"The flop comes {flop[0]}, {flop[1]}, and {flop[2]}, then BB check.\n"
+        for name in ("turn", "river")[: ("Flop", "Turn", "River").index(street)]:
+            board += f"The {name} comes {_long(BOARD[name], 'Of')}, then BB check.\n"
+    return (
+        "\n\nYou are a specialist in playing 6-handed No Limit Texas Holdem.\n"
+        f"In this hand, your position is {position}, and your holding is {hand}.\n"
+        "Before the flop, HJ raise 2.0, and BB call.\n"
+        f"{board}\nNow it is your turn to make a move.\n"
+        f"To remind you, the current pot size is {pot} chips, and your holding is "
+        f"{hand}.\n\nDo not explain your answer.\nYour optimal action is:"
+    )
 
 
 def _write(directory: Path, split: str, prompts: list[dict], games: list[dict]):
+    """Write both files, the scenarios reversed as upstream's are reshuffled."""
     json_path = directory / f"{split}.json"
     csv_path = directory / f"{split}.csv"
     json_path.write_text(json.dumps(prompts), encoding="utf-8")
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(games[0]))
+        writer = csv.DictWriter(f, fieldnames=["", *games[0]])
         writer.writeheader()
-        writer.writerows(games)
+        writer.writerows({"": i, **game} for i, game in enumerate(reversed(games)))
     return json_path, csv_path
 
 
-def _preflop(directory: Path):
+def _preflop(directory: Path, spots=PREFLOP):
     prompts = [
-        {"instruction": prompt, "output": label}
-        for (_pos, _dec, _moves, prompt), label in zip(
-            PREFLOP, PREFLOP_LABELS, strict=True
-        )
+        {"instruction": _prompt(pos, holding, pot), "output": label}
+        for pos, holding, _dec, label, _moves, pot in spots
     ]
     games = [
         {
-            "prev_line": "UTG/2.0bb/BTN/call",
+            "prev_line": "HJ/2.0bb/BB/call",
             "hero_pos": pos,
-            "hero_holding": "KdKc",
+            "hero_holding": holding,
             "correct_decision": dec,
-            "num_players": 3,
-            "num_bets": 2,
+            "num_players": 2,
+            "num_bets": 1,
             "available_moves": moves,
-            "pot_size": 5.5,
+            "pot_size": pot,
         }
-        for pos, dec, moves, _prompt in PREFLOP
+        for pos, holding, dec, _label, moves, pot in spots
     ]
     return _write(directory, "preflop", prompts, games)
 
 
-def _postflop(directory: Path, rows=POSTFLOP):
+def _postflop(directory: Path, spots=POSTFLOP):
     prompts = [
-        {"instruction": f"Postflop spot {i} on the {street}.", "output": label}
-        for i, (street, _dec, _moves, label) in enumerate(rows)
+        {"instruction": _prompt("BTN", holding, pot, street), "output": label}
+        for street, holding, _dec, label, _moves, pot in spots
     ]
     games = [
         {
             "preflop_action": "HJ/2.0bb/BB/call",
-            "board_flop": "Ks7h2d",
-            "board_turn": "Jc",
-            "board_river": "7c",
+            "board_flop": BOARD["flop"],
+            "board_turn": BOARD["turn"],
+            "board_river": BOARD["river"],
             "aggressor_position": "OOP",
-            "postflop_action": "OOP_CHECK/IP_CHECK",
+            "postflop_action": "OOP_CHECK",
             "evaluation_at": street,
             "available_moves": moves,
-            "pot_size": 32,
+            "pot_size": pot,
             "hero_position": "IP",
-            "holding": "8h8c",
+            "holding": holding,
             "correct_decision": dec,
         }
-        for street, dec, moves, _label in rows
+        for street, holding, dec, _label, moves, pot in spots
     ]
     return _write(directory, "postflop", prompts, games)
 
@@ -158,34 +185,45 @@ def test_responses_commit_to_one_action(response, action):
     assert extract_action(response) == action
 
 
-def test_split_joins_prompts_with_their_legal_moves(tmp_path):
+def test_split_matches_shuffled_scenarios_by_content(tmp_path):
     tasks = build_split("postflop", *_postflop(tmp_path))
     assert [task.id for task in tasks[:2]] == [
         "PokerBench/postflop/0",
         "PokerBench/postflop/1",
     ]
     turn = tasks[1]
-    assert turn.prompt == "Postflop spot 1 on the Turn."
+    assert "your holding is [Ace of Heart and Queen of Diamond]" in turn.prompt
     assert turn.metadata == {
         "answer": "bet 24",
         "choices": ["check", "bet 10", "bet 24"],
         "street": "Turn",
     }
+    assert [task.metadata["street"] for task in tasks[2:4]] == ["River", "River"]
+    # Identical spots apart from the pot each get their own legal moves.
+    assert tasks[7].metadata["choices"] == ["check", "bet 12"]
+    assert tasks[8].metadata["choices"] == ["check", "bet 6"]
+
     preflop = build_split("preflop", *_preflop(tmp_path))
     assert preflop[1].metadata["answer"] == "raise 13"
     assert preflop[1].metadata["choices"] == ["fold", "raise 13", "all in"]
     assert {task.metadata["street"] for task in preflop} == {"Preflop"}
 
 
-def test_misaligned_files_fail_loudly(tmp_path):
-    swapped = [POSTFLOP[1], POSTFLOP[0]]
-    shifted = [(*row[:3], POSTFLOP[0][3]) for row in swapped]
-    with pytest.raises(ValueError, match="row 0"):
-        build_split("postflop", *_postflop(tmp_path, shifted))
+def test_unjoinable_files_fail_loudly(tmp_path):
+    relabelled = [("Flop", "8h8c", "Check", "bet 24", "['Check', 'Bet 24']", 32)]
+    with pytest.raises(ValueError, match="prompt 0: 0 scenarios match"):
+        build_split("postflop", *_postflop(tmp_path, relabelled))
 
-    illegal = [("Flop", "Bet", "['Check', 'Bet 24']", "bet 30")]
-    with pytest.raises(ValueError, match="legal moves"):
+    illegal = [("Flop", "8h8c", "Bet 30", "bet 30", "['Check', 'Bet 24']", 32)]
+    with pytest.raises(ValueError, match="not a legal move"):
         build_split("postflop", *_postflop(tmp_path, illegal))
+
+    twins = [
+        ("Flop", "8h8c", "Check", "check", "['Check', 'Bet 24']", 32),
+        ("Flop", "8h8c", "Check", "check", "['Check', 'Bet 12']", 32),
+    ]
+    with pytest.raises(ValueError, match="2 scenarios match"):
+        build_split("postflop", *_postflop(tmp_path, twins))
 
 
 def test_counting_never_downloads(monkeypatch):
