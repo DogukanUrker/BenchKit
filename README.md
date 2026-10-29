@@ -124,6 +124,7 @@ uv run benchkit --help
 | CRUXEval-O | `cruxeval-o` | 800 | Predict what a short Python function returns (`-cot` for the step-by-step prompt) |
 | CRUXEval-I | `cruxeval-i` | 800 | Find an input that produces a given output, checked by running it (`-cot` too) |
 | GSM8K | `gsm8k` | 1,319 | Multi-step grade-school math |
+| MATH-500 | `math-500` | 500 | Competition math with LaTeX answers, checked with SymPy and reported by level |
 | IFEval | `ifeval` | 541 | Verifiable instruction following |
 | RULER | `ruler` | 39 × 6 | Practical long-context retrieval from 4K to 128K |
 | RULER Full | `ruler-full` | 6,500 × 6 | Research-scale RULER (explicit opt-in) |

@@ -111,6 +111,22 @@ direct and chain-of-thought prompts.
   and Execution" (2024), <https://arxiv.org/abs/2401.03065>
 - Dataset license: MIT
 
+## MATH-500
+
+`math500.jsonl` is the 500-problem MATH test subset published with "Let's
+Verify Step by Step", the same set as Hugging Face's `HuggingFaceH4/MATH-500`.
+Only the schema changed - rows get a namespaced `task_id` in upstream order
+and the worked `solution` is dropped. Regenerate it with `uv run python
+scripts/build_math500.py`, which pins the upstream commit and checks the
+file's sha256.
+
+- Source: <https://github.com/openai/prm800k> (`prm800k/math_splits/test.jsonl`)
+- Original dataset: <https://github.com/hendrycks/math>
+- Papers: Hendrycks et al., "Measuring Mathematical Problem Solving With the
+  MATH Dataset" (2021), <https://arxiv.org/abs/2103.03874>; Lightman et al.,
+  "Let's Verify Step by Step" (2023), <https://arxiv.org/abs/2305.20050>
+- Dataset license: MIT
+
 ## PokerBench
 
 `pokerbench` reads the PokerBench test splits - 1,000 pre-flop and 10,000
