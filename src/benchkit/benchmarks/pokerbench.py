@@ -135,6 +135,9 @@ _CARD = re.compile(r"(\w+) of (\w+)", re.IGNORECASE)
 _HOLDING = re.compile(r"your holding is \[([^\]]+)\]")
 _POSITION = re.compile(r"your position is (\w+)")
 _POT = re.compile(r"current pot size is ([\d.]+) chips")
+_SEAT_ACTION = re.compile(
+    r"\b(?:UTG|HJ|CO|BTN|SB|BB) (fold|check|call|bet|raise|all in)(?: ([\d.]+))?"
+)
 
 
 def _cards(text: str) -> frozenset[str]:
@@ -165,6 +168,31 @@ def _prompt_spot(split: str, row: dict) -> tuple[tuple, float]:
     return (street, board, holding, label), pot
 
 
+def _prompt_history(text: str) -> tuple:
+    """Every action in a prompt's hand history, without who took it."""
+    story = text[text.find("Before the flop") : text.find("Now it is your turn")]
+    return tuple(
+        _canonical(verb, size or None) for verb, size in _SEAT_ACTION.findall(story)
+    )
+
+
+def _scenario_history(split: str, game: dict) -> tuple:
+    """A scenario row's actions in ``_prompt_history``'s shape.
+
+    Pre-flop lines alternate seat and action (``HJ/2.0bb/BB/call``); post-flop
+    ones name the player by ``OOP``/``IP`` and interleave dealt cards
+    (``OOP_CHECK/IP_BET_10/dealcards/Jc``).
+    """
+    line = game["prev_line"] if split == "preflop" else game["preflop_action"]
+    actions = line.split("/")[1::2]
+    if split == "postflop":
+        steps = game["postflop_action"].split("/")
+        actions += [
+            step.split("_", 1)[1].replace("_", " ") for step in steps if "_" in step
+        ]
+    return tuple(parse_action(action) for action in actions)
+
+
 def _scenario_spot(split: str, game: dict) -> tuple[tuple, float]:
     """Join key and pot for one scenario row, in ``_prompt_spot``'s shape."""
     label = parse_action(game["correct_decision"])
@@ -184,9 +212,10 @@ def build_split(split: str, prompts: Path, scenarios: Path) -> list[Task]:
 
     Upstream shuffled the two files independently, so rows are matched on
     content: street, hole cards, the board (post-flop) or hero position
-    (pre-flop) and the solver's action, with the pot breaking ties. Every
-    scenario is used once, and a prompt with no match, or with candidates
-    whose legal moves disagree, raises.
+    (pre-flop) and the solver's action. When candidates' legal moves disagree,
+    the pot and then the betting history break the tie. Every scenario is used
+    once, and a prompt with no match, or with candidates that still disagree,
+    raises with the candidates in the message.
     """
     rows = json.loads(prompts.read_text(encoding="utf-8"))
     with open(scenarios, encoding="utf-8", newline="") as f:
@@ -195,25 +224,29 @@ def build_split(split: str, prompts: Path, scenarios: Path) -> list[Task]:
         raise ValueError(
             f"PokerBench {split}: {len(rows)} prompts but {len(games)} scenarios"
         )
-    index: dict[tuple, list[tuple[float, list]]] = {}
+    index: dict[tuple, list[tuple[float, list, tuple]]] = {}
     for game in games:
         key, pot = _scenario_spot(split, game)
         moves = [
             parse_action(str(m)) for m in ast.literal_eval(game["available_moves"])
         ]
-        index.setdefault(key, []).append((pot, moves))
+        history = _scenario_history(split, game)
+        index.setdefault(key, []).append((round(pot, 1), moves, history))
 
     tasks = []
     for number, row in enumerate(rows):
         where = f"PokerBench {split} prompt {number}"
         key, pot = _prompt_spot(split, row)
+        history = _prompt_history(row["instruction"])
         candidates = index.get(key, [])
-        if len({tuple(moves) for _, moves in candidates}) > 1:
-            candidates = [c for c in candidates if abs(c[0] - pot) < 0.05]
-        if not candidates or len({tuple(moves) for _, moves in candidates}) > 1:
+        for field, wanted in ((0, round(pot, 1)), (2, history)):
+            if len({tuple(c[1]) for c in candidates}) > 1:
+                candidates = [c for c in candidates if c[field] == wanted]
+        if not candidates or len({tuple(c[1]) for c in candidates}) > 1:
             raise ValueError(
                 f"{where}: {len(candidates)} scenarios match {row['output']!r} "
-                "with this hand and board"
+                f"with this hand and board (prompt pot {pot}, history {history}; "
+                f"candidates {index.get(key, [])[:4]})"
             )
         match = candidates[0]
         index[key].remove(match)

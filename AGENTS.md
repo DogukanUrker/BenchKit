@@ -199,7 +199,7 @@ tables in the README.
   JSON and the scenario CSV (which supplies the legal moves) were shuffled
   independently upstream, so `build_split` matches them on content: street,
   hole cards, board or hero position, and the solver's action, with the pot
-  breaking ties. Each scenario is used once; a prompt with no match, ambiguous
+  and then the betting history (actions and sizes, not seats) breaking ties. Each scenario is used once; a prompt with no match, ambiguous
   matches, or a label that is not a legal move raises rather than scoring.
 - Legal moves sit in `metadata["choices"]`, so decision models choose among
   them, two-move spots are never repaired, and with repairs the headline is

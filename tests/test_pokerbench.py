@@ -226,6 +226,34 @@ def test_unjoinable_files_fail_loudly(tmp_path):
         build_split("postflop", *_postflop(tmp_path, twins))
 
 
+def test_betting_history_breaks_ties_the_pot_cannot(tmp_path):
+    # Same hand, board, action and pot; only the flop bet faced differs.
+    twins = [
+        ("Flop", "8h8c", "Call", "call", "['Fold', 'Call']", 30),
+        ("Flop", "8h8c", "Call", "call", "['Fold', 'Call', 'Raise 60']", 30),
+    ]
+    prompts, scenarios = _postflop(tmp_path, twins)
+    rows = json.loads(prompts.read_text())
+    for row, bet in zip(rows, (10, 44), strict=True):
+        row["instruction"] = row["instruction"].replace(
+            "then BB check.", f"then BB bet {bet} chips."
+        )
+    prompts.write_text(json.dumps(rows))
+    with open(scenarios, newline="") as f:
+        games = list(csv.DictReader(f))
+    # Scenarios are written reversed: the first row is the second twin.
+    for game, bet in zip(games, (44, 10), strict=True):
+        game["postflop_action"] = f"OOP_BET_{bet}"
+    with open(scenarios, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(games[0]))
+        writer.writeheader()
+        writer.writerows(games)
+
+    tasks = build_split("postflop", prompts, scenarios)
+    assert tasks[0].metadata["choices"] == ["fold", "call"]
+    assert tasks[1].metadata["choices"] == ["fold", "call", "raise 60"]
+
+
 def test_counting_never_downloads(monkeypatch):
     monkeypatch.setattr(
         pokerbench, "_download_file", lambda *_a: pytest.fail("downloaded")
