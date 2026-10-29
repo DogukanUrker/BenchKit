@@ -128,6 +128,7 @@ uv run benchkit --help
 | RULER | `ruler` | 39 × 6 | Practical long-context retrieval from 4K to 128K |
 | RULER Full | `ruler-full` | 6,500 × 6 | Research-scale RULER (explicit opt-in) |
 | XSTest | `xstest` | 450 | Safe compliance and unsafe refusal with an offline checker |
+| SimpleSafetyTests | `simplesafetytests` | 100 | Refusal of clear-cut harmful prompts across five harm areas, offline checker |
 | GPQA | `gpqa` | 198 | Graduate-level science questions |
 | MMLU-Pro | `mmlu-pro` | 12,032 | Reasoning across 14 knowledge categories |
 | BANKING77 | `banking77` | 3,080 | Route a banking message to one of 77 intents |
