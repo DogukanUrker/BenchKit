@@ -134,9 +134,9 @@ _RANKS = {
 _CARD = re.compile(r"(\w+) of (\w+)", re.IGNORECASE)
 _HOLDING = re.compile(r"your holding is \[([^\]]+)\]")
 _POSITION = re.compile(r"your position is (\w+)")
-_POT = re.compile(r"current pot size is ([\d.]+) chips")
+_POT = re.compile(r"current pot size is (\d+(?:\.\d+)?) chips")
 _SEAT_ACTION = re.compile(
-    r"\b(?:UTG|HJ|CO|BTN|SB|BB) (fold|check|call|bet|raise|all in)(?: ([\d.]+))?"
+    r"\b(?:UTG|HJ|CO|BTN|SB|BB) (fold|check|call|bet|raise|all in)(?: (\d+(?:\.\d+)?))?"
 )
 
 
@@ -225,19 +225,27 @@ def build_split(split: str, prompts: Path, scenarios: Path) -> list[Task]:
             f"PokerBench {split}: {len(rows)} prompts but {len(games)} scenarios"
         )
     index: dict[tuple, list[tuple[float, list, tuple]]] = {}
-    for game in games:
-        key, pot = _scenario_spot(split, game)
-        moves = [
-            parse_action(str(m)) for m in ast.literal_eval(game["available_moves"])
-        ]
-        history = _scenario_history(split, game)
+    for line, game in enumerate(games):
+        try:
+            key, pot = _scenario_spot(split, game)
+            moves = [
+                parse_action(str(m)) for m in ast.literal_eval(game["available_moves"])
+            ]
+            history = _scenario_history(split, game)
+        except (AttributeError, KeyError, ValueError, SyntaxError) as exc:
+            raise ValueError(
+                f"PokerBench {split} scenario {line}: unreadable ({exc!r}): {game}"
+            ) from exc
         index.setdefault(key, []).append((round(pot, 1), moves, history))
 
     tasks = []
     for number, row in enumerate(rows):
         where = f"PokerBench {split} prompt {number}"
-        key, pot = _prompt_spot(split, row)
-        history = _prompt_history(row["instruction"])
+        try:
+            key, pot = _prompt_spot(split, row)
+            history = _prompt_history(row["instruction"])
+        except (AttributeError, KeyError, ValueError) as exc:
+            raise ValueError(f"{where}: unreadable ({exc!r}): {row}") from exc
         candidates = index.get(key, [])
         for field, wanted in ((0, round(pot, 1)), (2, history)):
             if len({tuple(c[1]) for c in candidates}) > 1:

@@ -254,6 +254,23 @@ def test_betting_history_breaks_ties_the_pot_cannot(tmp_path):
     assert tasks[1].metadata["choices"] == ["fold", "call", "raise 60"]
 
 
+def test_history_sizes_stop_at_the_full_stop():
+    text = (
+        "Before the flop, HJ raise 2.0, CO call, and BB raise 24.0. Assume\n"
+        "The flop comes Ace Of Club, then BB bet 10 chips.\nNow it is your turn"
+    )
+    assert pokerbench._prompt_history(text) == ("raise 2", "call", "raise 24", "bet 10")
+
+
+def test_unreadable_rows_are_named(tmp_path):
+    prompts, scenarios = _postflop(tmp_path, POSTFLOP[:1])
+    rows = json.loads(prompts.read_text())
+    rows[0]["instruction"] = rows[0]["instruction"].replace("holding is", "hand is")
+    prompts.write_text(json.dumps(rows))
+    with pytest.raises(ValueError, match="postflop prompt 0: unreadable"):
+        build_split("postflop", prompts, scenarios)
+
+
 def test_counting_never_downloads(monkeypatch):
     monkeypatch.setattr(
         pokerbench, "_download_file", lambda *_a: pytest.fail("downloaded")
