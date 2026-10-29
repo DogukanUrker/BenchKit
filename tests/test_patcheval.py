@@ -20,7 +20,9 @@ import pytest
 from benchkit import catalog
 from benchkit.benchmarks import vision
 from benchkit.benchmarks.patcheval import (
+    _COMPLETE,
     _GENERIC_REPAIR,
+    _HF_REVISION,
     PatchEval,
     _grade_once,
     _trusted_patch,
@@ -139,6 +141,7 @@ class PatchEvalTests(unittest.TestCase):
         self.assertEqual(
             benchmark.result_metadata(None), {"dataset_release": "pilot-20"}
         )
+
         prompt = benchmark.build_prompt(tasks[0])
         self.assertEqual(
             prompt,
@@ -149,6 +152,20 @@ class PatchEvalTests(unittest.TestCase):
         )
         self.assertNotIn("benchmark", prompt.lower())
         self.assertNotIn("hidden", prompt.lower())
+
+    def test_records_the_dataset_revision_when_the_release_has_one(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _dataset(root)
+            release = json.loads((root / "dataset.json").read_text("utf-8"))
+            release["revision"] = 2
+            (root / "dataset.json").write_text(json.dumps(release), "utf-8")
+            benchmark = PatchEval(root)
+            benchmark.load_tasks()
+        self.assertEqual(
+            benchmark.result_metadata(None),
+            {"dataset_release": "pilot-20", "dataset_revision": 2},
+        )
 
     def test_rejects_unvalidated_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -716,7 +733,7 @@ def test_patcheval_fetches_its_release_and_verifies_it(cache, tmp_path, monkeypa
     seen: list[str] = []
 
     def serve(request: httpx.Request) -> httpx.Response:
-        prefix = "/datasets/DogukanUrker/PatchEval/resolve/main/"
+        prefix = f"/datasets/DogukanUrker/PatchEval/resolve/{_HF_REVISION}/"
         name = request.url.path.removeprefix(prefix)
         seen.append(name)
         path = release / name
@@ -743,6 +760,14 @@ def test_patcheval_fetches_its_release_and_verifies_it(cache, tmp_path, monkeypa
 
     catalog.install("patcheval")
     assert len(seen) == 4  # cached
+
+    # A cache from another revision (an older errata) is fetched again.
+    (cache / "patcheval" / "pilot-20" / _COMPLETE).write_text("main\n")
+    assert catalog.status("patcheval").installable
+    catalog.install("patcheval")
+    assert len(seen) == 8
+    marker = (cache / "patcheval" / "pilot-20" / _COMPLETE).read_text()
+    assert marker == _HF_REVISION + "\n"
 
 
 def test_patcheval_rejects_paths_outside_its_cache(cache, monkeypatch):

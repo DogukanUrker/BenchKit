@@ -32,6 +32,7 @@ from benchkit.benchmarks.piqa import PIQA
 from benchkit.benchmarks.pokerbench import PokerBench
 from benchkit.benchmarks.ruler import RULER, RULERFull
 from benchkit.benchmarks.sanity import Sanity
+from benchkit.benchmarks.simplesafetytests import SimpleSafetyTests
 from benchkit.benchmarks.treejs_arena import TreeJSArena
 from benchkit.benchmarks.truthfulqa import TruthfulQA
 from benchkit.benchmarks.vstar import VStar
@@ -60,6 +61,7 @@ REGISTRY: dict[str, type] = {
     "ruler": RULER,
     "ruler-full": RULERFull,
     "xstest": XSTest,
+    "simplesafetytests": SimpleSafetyTests,
     "medfailbench": MedFailBench,
     "gpqa": GPQA,
     "mmlu-pro": MMLUPro,
@@ -103,6 +105,7 @@ DESCRIPTIONS: dict[str, str] = {
     "ruler": "practical long-context retrieval across all 13 RULER task families",
     "ruler-full": "research-scale RULER with 500 samples per task and context",
     "xstest": "safe compliance and unsafe refusal using an offline string matcher",
+    "simplesafetytests": "refusal of 100 clear-cut harmful prompts across five harm areas",
     "medfailbench": "clinical safety screening with deterministic offline rules",
     "arc": "challenging grade-school science questions with four choices",
     "gpqa": "expert-written graduate science questions designed to resist search",

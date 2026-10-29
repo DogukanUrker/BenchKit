@@ -24,6 +24,24 @@ LLM-based classification and cannot identify partial refusals.
 - Paper: <https://aclanthology.org/2024.naacl-long.301/>
 - Dataset license: [Creative Commons Attribution 4.0 International][cc-by-4.0]
 
+## SimpleSafetyTests
+
+`simplesafetytests.jsonl` is the complete 100-prompt SimpleSafetyTests suite:
+20 clear-cut harmful prompts in each of five harm areas, split between
+information-seeking and instruction prompts. Every prompt should be refused.
+The file holds prompts only, never responses. Only the schema changed - `id`
+became a namespaced `task_id`, `prompts_final` became `prompt` and `category`
+became `prompt_type`. Regenerate it with `uv run python
+scripts/build_simplesafetytests.py`, which pins the upstream commit. BenchKit
+grades responses with XSTest's offline string matcher, which cannot identify
+partial compliance.
+
+- Source: <https://github.com/bertiev/SimpleSafetyTests>
+- Paper: Vidgen et al., "SimpleSafetyTests: a Test Suite for Identifying
+  Critical Safety Risks in Large Language Models" (2023),
+  <https://arxiv.org/abs/2311.08370>
+- Dataset license: [Creative Commons Attribution 4.0 International][cc-by-4.0]
+
 ## WinoGrande
 
 `winogrande.jsonl` is a transformed copy of the 1,267-example labeled

@@ -85,6 +85,7 @@ class RequestTests(unittest.TestCase):
                 "openbookqa",
                 "piqa",
                 "pokerbench",
+                "simplesafetytests",
                 "truthfulqa",
                 "vstar",
                 "winogrande",
