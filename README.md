@@ -133,6 +133,7 @@ uv run benchkit --help
 | MMLU-Pro | `mmlu-pro` | 12,032 | Reasoning across 14 knowledge categories |
 | BANKING77 | `banking77` | 3,080 | Route a banking message to one of 77 intents |
 | Code Verifier | `code-verifier` | 500 | Judge whether a model-written HumanEval+ solution passes its tests |
+| PokerBench | `pokerbench` | 11,000 | Pick the solver's play in a No Limit Hold'em spot, bet size included |
 | OCRBench | `ocrbench` | 1,000 | Text recognition and text-centric VQA over images |
 | ChartQA | `chartqa` | 2,500 | Questions about real charts, 5% relaxed numeric accuracy |
 | MMVP | `mmvp` | 300 | Look-alike image pairs that differ in one detail; also reports pair accuracy |

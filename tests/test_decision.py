@@ -84,6 +84,7 @@ class RequestTests(unittest.TestCase):
                 "mmvp",
                 "openbookqa",
                 "piqa",
+                "pokerbench",
                 "simplesafetytests",
                 "truthfulqa",
                 "vstar",

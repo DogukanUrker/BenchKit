@@ -111,6 +111,20 @@ direct and chain-of-thought prompts.
   and Execution" (2024), <https://arxiv.org/abs/2401.03065>
 - Dataset license: MIT
 
+## PokerBench
+
+`pokerbench` reads the PokerBench test splits - 1,000 pre-flop and 10,000
+post-flop No Limit Texas Hold'em spots with GTO solver decisions - from the
+authors' Hugging Face release at the revision pinned in
+`benchmarks/pokerbench.py`. Nothing is bundled: the four test files are
+downloaded on first use or with `benchkit datasets install pokerbench`.
+
+- Source: <https://huggingface.co/datasets/RZ412/PokerBench>
+- Code: <https://github.com/pokerllm/pokerbench>
+- Paper: Zhuang et al., "PokerBench: Training Large Language Models to Become
+  Professional Poker Players" (AAAI 2025), <https://arxiv.org/abs/2501.08328>
+- Dataset license: Apache 2.0
+
 ## OpenBookQA
 
 `openbookqa.jsonl` is a transformed copy of the 500-question OpenBookQA test
