@@ -39,7 +39,7 @@ from benchkit.evaluation import EvaluationResult
 
 # The authors' Hub release, pinned; a new revision is a deliberate suite update.
 DATASET = "RZ412/PokerBench"
-REVISION = "591f646fcb5d822f1e234fe09ad2526f50635d93"
+REVISION = "7ac61f961c81a50fc0f667820b2fb0e432dfec0d"
 FILES = {
     "preflop": (
         "preflop_1k_test_set_prompt_and_label.json",
