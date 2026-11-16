@@ -361,6 +361,22 @@ class GenerationUpdate:
     attempt: int = 0
 
 
+def temperature_from_env() -> float | None:
+    """Read ``BENCHKIT_TEMPERATURE``; unset means the server decides how to sample."""
+    raw = os.environ.get("BENCHKIT_TEMPERATURE", "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError(
+            f"BENCHKIT_TEMPERATURE must be a number, got {raw!r}"
+        ) from None
+    if not 0 <= value < float("inf"):
+        raise ValueError(f"BENCHKIT_TEMPERATURE must be zero or greater, got {raw!r}")
+    return value
+
+
 @dataclass
 class InferenceClient:
     """Small synchronous client with provider auto-detection."""
@@ -370,6 +386,9 @@ class InferenceClient:
     api_key: str | None = None
     timeout: float = 300.0
     retries: RetryPolicy = field(default_factory=RetryPolicy)
+    # None sends no sampling parameters, so the server's own settings (a model
+    # card's recommended sampler, a provider default) apply. A number pins it.
+    temperature: float | None = None
     provider: Literal["openai", "ollama"] | None = field(default=None, init=False)
     _models_by_name: dict[str, dict] = field(
         default_factory=dict, init=False, repr=False
@@ -393,7 +412,14 @@ class InferenceClient:
         )
         api_key = os.environ.get("BENCHKIT_API_KEY") or os.environ.get("OPENAI_API_KEY")
         timeout = float(os.environ.get("BENCHKIT_TIMEOUT", "300"))
-        return cls(host.rstrip("/"), provider, api_key, timeout, RetryPolicy.from_env())
+        return cls(
+            host.rstrip("/"),
+            provider,
+            api_key,
+            timeout,
+            RetryPolicy.from_env(),
+            temperature_from_env(),
+        )
 
     @property
     def label(self) -> str:
@@ -794,9 +820,10 @@ class InferenceClient:
             "model": model,
             "messages": [{"role": "user", "content": content}],
             "stream": True,
-            "temperature": 0.0,
             "stream_options": {"include_usage": True},
         }
+        if self.temperature is not None:
+            body["temperature"] = self.temperature
         try:
             return self._retry_stream(
                 lambda state: self._stream_openai(
@@ -1028,7 +1055,11 @@ class InferenceClient:
                     "model": model,
                     "prompt": prompt,
                     "stream": True,
-                    "options": {"temperature": 0.0},
+                    **(
+                        {"options": {"temperature": self.temperature}}
+                        if self.temperature is not None
+                        else {}
+                    ),
                     **({"images": images} if images else {}),
                 },
                 timeout=self._generation_timeout(),

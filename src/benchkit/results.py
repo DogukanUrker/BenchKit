@@ -207,6 +207,7 @@ def job_result(
     loop_kill_enabled: bool,
     loop_kill_percent: float,
     loop_kill_seconds: float,
+    request_temperature: float | None = None,
 ) -> dict:
     """Build the result row for a job that finished at least one task."""
     records = [
@@ -448,6 +449,10 @@ def job_result(
         "loop_kill_enabled": loop_kill_enabled,
         "loop_kill_percent": loop_kill_percent,
         "loop_kill_seconds": loop_kill_seconds,
+        # The temperature BenchKit put in each request; None means it sent
+        # none and the server's own sampling ran. Direct-harness results
+        # written before this key existed were generated at temperature 0.
+        "request_temperature": request_temperature,
         "tasks": [
             {
                 "task_id": record.task_id,

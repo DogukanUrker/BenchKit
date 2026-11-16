@@ -64,6 +64,16 @@ tables in the README.
 - Generation streams have no BenchKit token cap. `BENCHKIT_TIMEOUT` is the hard
   per-task deadline; partial traces are retained on timeout, loop kill, stop,
   and other recoverable terminal states.
+- Requests carry no sampling parameters by default, so the server decides how
+  the model samples: a llama-swap entry's `--temp`, an Ollama Modelfile, a
+  hosted API's default. Vendors tune those per model and often warn against
+  greedy decoding for reasoning models, so do not hard-code a temperature.
+  `BENCHKIT_TEMPERATURE` pins one for every request when a repeatable or
+  uniform run matters more. Each job records what was sent as
+  `request_temperature` (`null` = none); direct-harness results without the
+  key predate the setting and ran at temperature 0. The Pi harness sends
+  whatever Pi sends, and `benchkit perf` keeps temperature 0 and a fixed seed,
+  because it measures speed, not answers.
 - Reasoning comes from Ollama `thinking`, OpenAI-compatible
   `reasoning_content`, or inline `<think>` blocks. Providers that hide it must
   be reported as `NO TRACE`, not as producing no reasoning.

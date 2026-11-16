@@ -12,7 +12,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, Label, Select, Static
 
 from benchkit import config
-from benchkit.client import DEFAULT_HOST, InferenceClient
+from benchkit.client import DEFAULT_HOST, InferenceClient, temperature_from_env
 from benchkit.demo import DemoClient
 from benchkit.tui.widgets import Banner
 
@@ -160,7 +160,9 @@ class ConnectScreen(Screen[None]):
         self, host: str, provider: str, api_key: str | None, timeout: float
     ) -> None:
         try:
-            client = InferenceClient(host, provider, api_key, timeout)
+            client = InferenceClient(
+                host, provider, api_key, timeout, temperature=temperature_from_env()
+            )
             models = client.list_models()
         except Exception as exc:
             self.app.call_from_thread(self._failed, f"{type(exc).__name__}: {exc}")

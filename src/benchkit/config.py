@@ -40,6 +40,7 @@ SETTINGS: tuple[tuple[str, str], ...] = (
     ("BENCHKIT_API_KEY",              ""),
     ("OPENAI_API_KEY",                ""),
     ("BENCHKIT_TIMEOUT",              "300"),
+    ("BENCHKIT_TEMPERATURE",          ""),
     ("BENCHKIT_CONCURRENCY",          ""),
     ("BENCHKIT_HARDWARE",             ""),
     ("BENCHKIT_PERF_CONFIG",          ""),

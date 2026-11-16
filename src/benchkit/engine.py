@@ -554,6 +554,11 @@ class Engine:
             loop_kill_enabled=self.loop_kill_enabled,
             loop_kill_percent=self.loop_kill_percent,
             loop_kill_seconds=self.loop_kill_seconds,
+            # Only direct generations go through the client's request body; Pi
+            # and decision jobs never carry a BenchKit temperature.
+            request_temperature=getattr(self.client, "temperature", None)
+            if job.harness == "direct"
+            else None,
         )
         return result, skipped
 
